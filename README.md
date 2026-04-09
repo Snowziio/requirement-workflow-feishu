@@ -32,6 +32,12 @@
 - 服务配置全部收敛到环境变量 / 配置对象
 - 部署路径按 `Docker + GitHub Actions + customer deploy` 标准流组织
 
+注意：
+
+- 仓库内不保存真实飞书凭据
+- `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 必须由部署环境注入有效值
+- `FEISHU_CREATION_GROUP_CHAT_ID` 可在第一条真实群消息联调时自动识别
+
 ## 运行骨架
 
 - 长连接入口：`services/coordinator-service/main.py`
