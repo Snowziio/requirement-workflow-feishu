@@ -1,0 +1,95 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to ACR
+        run: |
+          docker login \
+            --username ${{ secrets.ACR_USERNAME }} \
+            --password ${{ secrets.ACR_PASSWORD }} \
+            ${{ secrets.ACR_REGISTRY }}
+
+      - name: Build and push image
+        id: build
+        run: |
+          IMAGE=${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/${{ github.event.repository.name }}
+          TAG=${{ github.sha }}
+          docker build -f docker/Dockerfile \
+            -t $IMAGE:$TAG \
+            -t $IMAGE:${TAG:0:8} \
+            -t $IMAGE:latest .
+          docker push $IMAGE:$TAG
+          docker push $IMAGE:${TAG:0:8}
+          docker push $IMAGE:latest
+          echo "image_tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Copy staging compose file
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.ECS_HOST }}
+          username: ${{ secrets.ECS_USER }}
+          key: ${{ secrets.ECS_SSH_KEY }}
+          source: docker/docker-compose.staging.yml
+          target: ~/staging/${{ github.event.repository.name }}/
+          strip_components: 1
+
+      - name: Deploy to Staging ECS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.ECS_HOST }}
+          username: ${{ secrets.ECS_USER }}
+          key: ${{ secrets.ECS_SSH_KEY }}
+          script: |
+            set -e
+            APP=${{ github.event.repository.name }}
+            DIR=~/staging/$APP
+            mkdir -p $DIR
+
+            docker login \
+              --username ${{ secrets.ACR_USERNAME }} \
+              --password ${{ secrets.ACR_PASSWORD }} \
+              ${{ secrets.ACR_REGISTRY }}
+
+            cat > $DIR/.env << EOF
+            ACR_REGISTRY=${{ secrets.ACR_REGISTRY }}
+            ACR_NAMESPACE=${{ secrets.ACR_NAMESPACE }}
+            APP_NAME=$APP
+            IMAGE_TAG=${{ steps.build.outputs.image_tag }}
+            STAGING_PORT=8004
+            FEISHU_APP_ID=${{ secrets.FEISHU_APP_ID }}
+            FEISHU_APP_SECRET=${{ secrets.FEISHU_APP_SECRET }}
+            FEISHU_VERIFICATION_TOKEN=${{ secrets.FEISHU_VERIFICATION_TOKEN }}
+            FEISHU_ENCRYPT_KEY=${{ secrets.FEISHU_ENCRYPT_KEY }}
+            FEISHU_LOG_LEVEL=INFO
+            FEISHU_CREATION_GROUP_CHAT_ID=${{ secrets.FEISHU_CREATION_GROUP_CHAT_ID }}
+            FEISHU_BITABLE_APP_TOKEN=${{ secrets.FEISHU_BITABLE_APP_TOKEN }}
+            FEISHU_BITABLE_TABLE_ID=${{ secrets.FEISHU_BITABLE_TABLE_ID }}
+            FEISHU_DOC_FOLDER_TOKEN=${{ secrets.FEISHU_DOC_FOLDER_TOKEN }}
+            FEISHU_BASE_URL=${{ secrets.FEISHU_BASE_URL }}
+            FEISHU_USER_ID_TYPE=${{ secrets.FEISHU_USER_ID_TYPE }}
+            REQUIREMENT_TEMPLATE_URL=${{ secrets.REQUIREMENT_TEMPLATE_URL }}
+            UI_TEMPLATE_URL=${{ secrets.UI_TEMPLATE_URL }}
+            REVIEW_TEMPLATE_URL=${{ secrets.REVIEW_TEMPLATE_URL }}
+            OPENCLAW_AUTHOR_AGENT_NAME=${{ secrets.OPENCLAW_AUTHOR_AGENT_NAME }}
+            OPENCLAW_REVIEWER_AGENT_NAME=${{ secrets.OPENCLAW_REVIEWER_AGENT_NAME }}
+            PROJECT_GROUP_NAME_TEMPLATE={project} 需求群
+            STATE_STORE_PATH=/app/state/coordinator_state.json
+            EOF
+
+            docker pull ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/$APP:${{ steps.build.outputs.image_tag }}
+            cd $DIR
+            docker compose -f ~/staging/$APP/docker-compose.staging.yml --env-file .env up -d --pull always
+
+      - name: Smoke test
+        run: |
+          sleep 15
+          curl --retry 5 --retry-delay 3 --fail \
+            http://${{ secrets.ECS_HOST }}:8004/health

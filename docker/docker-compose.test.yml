@@ -1,0 +1,18 @@
+services:
+  test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    working_dir: /app
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        python -m py_compile \
+          src/requirement_workflow_v12/models.py \
+          src/requirement_workflow_v12/config.py \
+          src/requirement_workflow_v12/store.py \
+          src/requirement_workflow_v12/coordinator_service.py \
+          src/requirement_workflow_v12/feishu_gateway.py \
+          src/requirement_workflow_v12/service_app.py \
+          main.py

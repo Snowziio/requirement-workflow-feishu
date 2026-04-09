@@ -1,0 +1,26 @@
+name: CI Harness
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Harness
+        run: |
+          set -o pipefail
+          mkdir -p reports
+          docker compose -f docker/docker-compose.test.yml up \
+            --abort-on-container-exit \
+            --exit-code-from test 2>&1 | tee reports/test-output.log
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: reports/

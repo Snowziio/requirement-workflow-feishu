@@ -1,0 +1,42 @@
+name: Deploy to Customer
+
+on:
+  workflow_dispatch:
+    inputs:
+      customer_name:
+        description: "客户名称（对应 deploy/customers/ 下的配置文件名）"
+        required: true
+      image_tag:
+        description: "镜像版本（默认 latest）"
+        required: false
+        default: "latest"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy prod compose to customer dir
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.ECS_HOST }}
+          username: ${{ secrets.ECS_USER }}
+          key: ${{ secrets.ECS_SSH_KEY }}
+          source: docker/docker-compose.prod.yml
+          target: ~/customers/${{ github.event.inputs.customer_name }}/${{ github.event.repository.name }}/
+          strip_components: 1
+
+      - name: Deploy to customer environment
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.ECS_HOST }}
+          username: ${{ secrets.ECS_USER }}
+          key: ${{ secrets.ECS_SSH_KEY }}
+          script: |
+            set -e
+            bash ~/deploy/deploy.sh \
+              ${{ github.event.inputs.customer_name }} \
+              ${{ github.event.repository.name }} \
+              ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }} \
+              ${{ github.event.inputs.image_tag }}

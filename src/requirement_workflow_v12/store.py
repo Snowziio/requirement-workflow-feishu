@@ -1,0 +1,103 @@
+from __future__ import annotations
+
+import json
+from dataclasses import asdict
+from datetime import datetime
+from pathlib import Path
+
+from .models import Requirement, RequirementDocument, ReviewFinding, ReviewResult, WorkflowStatus, utc_now
+
+
+class JsonStateStore:
+    """Very small persistence layer for early deployment and local testing."""
+
+    def __init__(self, path: str) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def save_snapshot(self, requirements: dict[str, Requirement], active_req_by_user: dict[str, str], project_groups: dict[str, str]) -> None:
+        payload = {
+            "requirements": {req_id: asdict(req) for req_id, req in requirements.items()},
+            "active_req_by_user": active_req_by_user,
+            "project_groups": project_groups,
+        }
+        self.path.write_text(json.dumps(payload, ensure_ascii=False, default=str, indent=2))
+
+    def load_snapshot(self) -> tuple[dict[str, Requirement], dict[str, str], dict[str, str]]:
+        if not self.path.exists():
+            return {}, {}, {}
+
+        payload = json.loads(self.path.read_text())
+        requirements = {
+            req_id: self._requirement_from_payload(data)
+            for req_id, data in payload.get("requirements", {}).items()
+        }
+        return (
+            requirements,
+            payload.get("active_req_by_user", {}),
+            payload.get("project_groups", {}),
+        )
+
+    def _requirement_from_payload(self, data: dict) -> Requirement:
+        document_payload = data.get("document")
+        review_history_payload = data.get("review_history", [])
+        requirement = Requirement(
+            req_id=data["req_id"],
+            name=data["name"],
+            project=data["project"],
+            summary=data["summary"],
+            creator=data["creator"],
+            status=WorkflowStatus(data.get("status", WorkflowStatus.CREATED.value)),
+            current_phase=data.get("current_phase", "需求构造"),
+            current_round=data.get("current_round", 0),
+            current_discussion_field=data.get("current_discussion_field", ""),
+            completed_fields=data.get("completed_fields", []),
+            pending_fields=data.get("pending_fields", []),
+            current_owner=data.get("current_owner", "coordinator-service"),
+            current_role_label=data.get("current_role_label", "需求协调服务"),
+            latest_review_summary=data.get("latest_review_summary", ""),
+            ai_ready=data.get("ai_ready", False),
+            human_confirmed=data.get("human_confirmed", False),
+            latest_question=data.get("latest_question", ""),
+            creator_user_id=data.get("creator_user_id", ""),
+            creation_chat_id=data.get("creation_chat_id", ""),
+            project_group_id=data.get("project_group_id", ""),
+            author_dm_chat_id=data.get("author_dm_chat_id", ""),
+            bitable_record_id=data.get("bitable_record_id", ""),
+            document_id=data.get("document_id", ""),
+            document_url=data.get("document_url", ""),
+            active_private_binding_confirmed=data.get("active_private_binding_confirmed", False),
+            latest_writeback_at=self._parse_datetime(data.get("latest_writeback_at")),
+            document=self._document_from_payload(document_payload) if document_payload else None,
+            review_history=[self._review_result_from_payload(item) for item in review_history_payload],
+            updated_at=self._parse_datetime(data.get("updated_at")) or utc_now(),
+        )
+        return requirement
+
+    def _document_from_payload(self, data: dict) -> RequirementDocument:
+        return RequirementDocument(
+            title=data.get("title", ""),
+            sections=data.get("sections", {}),
+            updated_at=self._parse_datetime(data.get("updated_at")) or utc_now(),
+        )
+
+    def _review_result_from_payload(self, data: dict) -> ReviewResult:
+        return ReviewResult(
+            ready_for_human_confirmation=data.get("ready_for_human_confirmation", False),
+            summary=data.get("summary", ""),
+            findings=[
+                ReviewFinding(
+                    dimension=item.get("dimension", ""),
+                    summary=item.get("summary", ""),
+                    severity=item.get("severity", ""),
+                )
+                for item in data.get("findings", [])
+            ],
+            next_focus=data.get("next_focus"),
+            reviewed_at=self._parse_datetime(data.get("reviewed_at")) or utc_now(),
+        )
+
+    def _parse_datetime(self, raw: str | None) -> datetime | None:
+        if not raw:
+            return None
+        return datetime.fromisoformat(raw)
