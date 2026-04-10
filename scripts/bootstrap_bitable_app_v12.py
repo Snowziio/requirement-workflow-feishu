@@ -3,12 +3,15 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
+from typing import Optional
 
 import lark_oapi as lark
 from lark_oapi.api.bitable.v1 import (
     AppTableCreateHeader,
+    CreateAppRequest,
     CreateAppTableRequest,
     CreateAppTableRequestBody,
+    ReqApp,
     ReqTable,
 )
 
@@ -85,11 +88,7 @@ def write_output(name: str, value: str) -> None:
         fh.write(f"{name}={value}\n")
 
 
-def main() -> int:
-    client = build_client()
-    app_token = required_env("FEISHU_BITABLE_APP_TOKEN")
-    table_name = optional_env("FEISHU_BITABLE_TABLE_NAME", "Requirements")
-
+def create_table(client: lark.Client, app_token: str, table_name: str) -> str:
     create_table_request = (
         CreateAppTableRequest.builder()
         .app_token(app_token)
@@ -108,12 +107,68 @@ def main() -> int:
     )
     create_table_response = client.bitable.v1.app_table.create(create_table_request)
     ensure_success(create_table_response, "create bitable table")
+    return create_table_response.data.table_id
 
-    table_id = create_table_response.data.table_id
+
+def create_bitable_app(
+    client: lark.Client,
+    app_name: str,
+    time_zone: str,
+    folder_token: str,
+) -> tuple[str, Optional[str]]:
+    req_app_builder = ReqApp.builder().name(app_name).time_zone(time_zone)
+    if folder_token:
+        req_app_builder = req_app_builder.folder_token(folder_token)
+
+    create_app_request = (
+        CreateAppRequest.builder()
+        .request_body(req_app_builder.build())
+        .build()
+    )
+    create_app_response = client.bitable.v1.app.create(create_app_request)
+    ensure_success(create_app_response, "create bitable app")
+    app = create_app_response.data.app
+    return app.app_token, app.url
+
+
+def main() -> int:
+    client = build_client()
+    existing_app_token = optional_env("FEISHU_BITABLE_APP_TOKEN")
+    app_name = optional_env("FEISHU_BITABLE_APP_NAME", "Requirement Workflow v1.2")
+    table_name = optional_env("FEISHU_BITABLE_TABLE_NAME", "Requirements")
+    folder_token = optional_env("FEISHU_BITABLE_FOLDER_TOKEN", optional_env("FEISHU_DOC_FOLDER_TOKEN"))
+    time_zone = optional_env("FEISHU_TIME_ZONE", "Asia/Shanghai")
+
+    app_token = existing_app_token
+    app_url: Optional[str] = None
+    table_id: Optional[str] = None
+
+    if existing_app_token:
+        try:
+            table_id = create_table(client, existing_app_token, table_name)
+            print("[info] created table in existing bitable app")
+        except Exception as exc:
+            print(f"[warn] existing bitable app rejected table creation: {exc}")
+
+    if not table_id:
+        try:
+            app_token, app_url = create_bitable_app(client, app_name, time_zone, folder_token)
+        except Exception as exc:
+            if folder_token and "DriveNodePermNotAllow" in str(exc):
+                print("[warn] target folder rejected new bitable app; retrying without folder token")
+                app_token, app_url = create_bitable_app(client, app_name, time_zone, "")
+            else:
+                raise
+        table_id = create_table(client, app_token, table_name)
+        print("[info] created fresh bitable app and requirements table")
+
     print(f"[created] app_token={app_token}")
     print(f"[created] table_id={table_id}")
+    if app_url:
+        print(f"[created] app_url={app_url}")
     write_output("app_token", app_token)
     write_output("table_id", table_id)
+    write_output("app_url", app_url or "")
     return 0
 
 
