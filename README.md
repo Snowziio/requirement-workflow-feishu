@@ -36,6 +36,7 @@
 
 - 仓库内不保存真实飞书凭据
 - `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 必须由部署环境注入有效值
+- 业务侧 Feishu API 现已优先支持 `FEISHU_USER_ACCESS_TOKEN`（UAT）模式
 - `FEISHU_CREATION_GROUP_CHAT_ID` 可在第一条真实群消息联调时自动识别
 
 ## 运行骨架

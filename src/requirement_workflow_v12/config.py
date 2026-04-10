@@ -10,6 +10,7 @@ class Settings:
     service_port: int = int(os.environ.get("SERVICE_PORT", "8003"))
     feishu_app_id: str = os.environ.get("FEISHU_APP_ID", "")
     feishu_app_secret: str = os.environ.get("FEISHU_APP_SECRET", "")
+    feishu_user_access_token: str = os.environ.get("FEISHU_USER_ACCESS_TOKEN", "")
     feishu_verification_token: str = os.environ.get("FEISHU_VERIFICATION_TOKEN", "")
     feishu_encrypt_key: str = os.environ.get("FEISHU_ENCRYPT_KEY", "")
     feishu_log_level: str = os.environ.get("FEISHU_LOG_LEVEL", "INFO")

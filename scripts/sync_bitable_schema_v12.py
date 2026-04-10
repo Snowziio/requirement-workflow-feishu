@@ -13,6 +13,7 @@ from lark_oapi.api.bitable.v1 import (
     ListAppTableFieldRequest,
     UpdateAppTableFieldRequest,
 )
+from lark_oapi.core.model import RequestOption
 
 
 FIELD_TYPE_TEXT = 1
@@ -57,7 +58,13 @@ def required_env(name: str) -> str:
 def build_client() -> lark.Client:
     app_id = required_env("FEISHU_APP_ID")
     app_secret = required_env("FEISHU_APP_SECRET")
-    return lark.Client.builder().app_id(app_id).app_secret(app_secret).build()
+    return (
+        lark.Client.builder()
+        .app_id(app_id)
+        .app_secret(app_secret)
+        .enable_set_token(True)
+        .build()
+    )
 
 
 def list_fields(client: lark.Client, app_token: str, table_id: str) -> dict[str, object]:
@@ -72,7 +79,7 @@ def list_fields(client: lark.Client, app_token: str, table_id: str) -> dict[str,
             .page_token(page_token)
             .build()
         )
-        response = client.bitable.v1.app_table_field.list(request)
+        response = client.bitable.v1.app_table_field.list(request, option=request_option())
         ensure_success(response, "list bitable fields")
         data = response.data
         for item in data.items or []:
@@ -98,7 +105,7 @@ def create_field(client: lark.Client, app_token: str, table_id: str, spec: Field
         .request_body(build_field_payload(spec))
         .build()
     )
-    response = client.bitable.v1.app_table_field.create(request)
+    response = client.bitable.v1.app_table_field.create(request, option=request_option())
     ensure_success(response, f"create bitable field {spec.name}")
     print(f"[created] {spec.name}")
 
@@ -112,7 +119,7 @@ def update_field(client: lark.Client, app_token: str, table_id: str, field_id: s
         .request_body(build_field_payload(spec, field_id=field_id))
         .build()
     )
-    response = client.bitable.v1.app_table_field.update(request)
+    response = client.bitable.v1.app_table_field.update(request, option=request_option())
     ensure_success(response, f"update bitable field {spec.name}")
     print(f"[updated] {spec.name}")
 
@@ -120,6 +127,13 @@ def update_field(client: lark.Client, app_token: str, table_id: str, field_id: s
 def ensure_success(response, action: str) -> None:
     if not response.success():
         raise RuntimeError(f"Failed to {action}: {response.code} {response.msg}")
+
+
+def request_option() -> RequestOption | None:
+    token = os.environ.get("FEISHU_USER_ACCESS_TOKEN", "").strip()
+    if not token:
+        return None
+    return RequestOption.builder().user_access_token(token).build()
 
 
 def main() -> int:

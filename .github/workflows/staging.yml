@@ -66,6 +66,7 @@ jobs:
             STAGING_PORT=8004
             FEISHU_APP_ID=${{ secrets.FEISHU_APP_ID }}
             FEISHU_APP_SECRET=${{ secrets.FEISHU_APP_SECRET }}
+            FEISHU_USER_ACCESS_TOKEN=${{ secrets.FEISHU_USER_ACCESS_TOKEN }}
             FEISHU_VERIFICATION_TOKEN=${{ secrets.FEISHU_VERIFICATION_TOKEN }}
             FEISHU_ENCRYPT_KEY=${{ secrets.FEISHU_ENCRYPT_KEY }}
             FEISHU_LOG_LEVEL=INFO
