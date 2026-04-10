@@ -17,10 +17,16 @@ from .store import JsonStateStore
 
 try:
     import lark_oapi as lark
+    from lark_oapi.event.callback.model.p2_card_action_trigger import (
+        P2CardActionTrigger,
+        P2CardActionTriggerResponse,
+    )
     from lark_oapi.api.im.v1.model.p2_im_message_receive_v1 import P2ImMessageReceiveV1
 except ImportError:  # pragma: no cover - optional during local editing before deps are installed
     lark = None
     P2ImMessageReceiveV1 = Any
+    P2CardActionTrigger = Any
+    P2CardActionTriggerResponse = Any
 
 
 LOGGER = logging.getLogger(__name__)
@@ -77,7 +83,12 @@ class CoordinatorRuntimeApp:
             self.settings.feishu_verification_token,
             getattr(lark.LogLevel, self.settings.feishu_log_level.upper(), lark.LogLevel.INFO),
         )
-        return builder.register_p2_im_message_receive_v1(self._on_message_receive).build()
+        return (
+            builder
+            .register_p2_im_message_receive_v1(self._on_message_receive)
+            .register_p2_card_action_trigger(self._on_card_action_trigger)
+            .build()
+        )
 
     def build_ws_client(self):
         self._require_lark()
@@ -142,6 +153,13 @@ class CoordinatorRuntimeApp:
                 self.gateway.send_card(outbound.receive_id, outbound.card, receive_id_type=outbound.receive_id_type)
             else:
                 self.gateway.send_text(outbound.receive_id, outbound.text, receive_id_type=outbound.receive_id_type)
+
+    def _on_card_action_trigger(self, data: P2CardActionTrigger):
+        payload = self._card_event_to_payload(data)
+        status, response_payload = self._handle_card_action_payload(payload)
+        if status != 200:
+            LOGGER.warning("Card action handled with status=%s payload=%s", status, payload)
+        return P2CardActionTriggerResponse(response_payload)
 
     def handle_text_message(self, context: MessageContext) -> list[OutboundMessage | OutboundCard]:
         text = context.text.strip()
@@ -381,6 +399,11 @@ class CoordinatorRuntimeApp:
         except json.JSONDecodeError:
             return 400, {"error": "invalid_json"}
 
+        return self._handle_card_action_payload(payload)
+
+    def _handle_card_action_payload(self, payload: dict[str, object]) -> tuple[int, dict[str, object]]:
+        LOGGER.info("Handling card payload: %s", payload)
+
         if "challenge" in payload:
             return 200, {"challenge": payload["challenge"]}
 
@@ -499,6 +522,32 @@ class CoordinatorRuntimeApp:
                     return self._normalize_form_value(value[key])
             return ""
         return str(value).strip()
+
+    def _card_event_to_payload(self, data: P2CardActionTrigger) -> dict[str, object]:
+        event = getattr(data, "event", None)
+        operator = getattr(event, "operator", None)
+        action = getattr(event, "action", None)
+        context = getattr(event, "context", None)
+        return {
+            "operator": {
+                "open_id": getattr(operator, "open_id", "") if operator else "",
+                "user_id": getattr(operator, "user_id", "") if operator else "",
+            },
+            "action": {
+                "value": getattr(action, "value", None) if action else None,
+                "name": getattr(action, "name", None) if action else None,
+                "tag": getattr(action, "tag", None) if action else None,
+                "option": getattr(action, "option", None) if action else None,
+                "input_value": getattr(action, "input_value", None) if action else None,
+                "options": getattr(action, "options", None) if action else None,
+                "checked": getattr(action, "checked", None) if action else None,
+                "form_value": getattr(action, "form_value", None) if action else None,
+            },
+            "context": {
+                "open_message_id": getattr(context, "open_message_id", "") if context else "",
+                "open_chat_id": getattr(context, "open_chat_id", "") if context else "",
+            },
+        }
 
     def _extract_callback_value(self, action: dict[str, object]) -> dict[str, object]:
         direct = action.get("value")
