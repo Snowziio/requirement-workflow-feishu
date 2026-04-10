@@ -385,7 +385,7 @@ class CoordinatorRuntimeApp:
             return 200, {"challenge": payload["challenge"]}
 
         action = payload.get("action", {}) or {}
-        value = action.get("value", {}) or {}
+        value = self._extract_callback_value(action)
         action_name = value.get("action")
         operator = payload.get("operator", {}) or {}
         user_id = operator.get("open_id", "")
@@ -461,7 +461,7 @@ class CoordinatorRuntimeApp:
         user_name: str,
     ) -> CreationFormPayload | None:
         action = payload.get("action", {}) or {}
-        value = action.get("value", {}) or {}
+        value = self._extract_callback_value(action)
         form_value = action.get("form_value") or payload.get("form_value") or {}
         if not isinstance(form_value, dict):
             form_value = {}
@@ -500,71 +500,113 @@ class CoordinatorRuntimeApp:
             return ""
         return str(value).strip()
 
+    def _extract_callback_value(self, action: dict[str, object]) -> dict[str, object]:
+        direct = action.get("value")
+        if isinstance(direct, dict):
+            return direct
+        behaviors = action.get("behaviors")
+        if isinstance(behaviors, list):
+            for item in behaviors:
+                if isinstance(item, dict) and item.get("type") == "callback" and isinstance(item.get("value"), dict):
+                    return item["value"]
+        return {}
+
     def _build_requirement_creation_card(self, context: MessageContext) -> dict[str, object]:
         return {
+            "schema": "2.0",
             "config": {"wide_screen_mode": True},
             "header": {
                 "template": "blue",
                 "title": {"tag": "plain_text", "content": "创建需求"},
             },
-            "elements": [
-                {
-                    "tag": "markdown",
-                    "content": "请补充最小需求信息。提交后，CoordinatorService 会创建 `REQ ID`、多维表格记录、需求文档和项目需求群。",
-                },
-                {
-                    "tag": "input",
-                    "name": "project",
-                    "label": {"tag": "plain_text", "content": "项目代号"},
-                    "placeholder": {"tag": "plain_text", "content": "例如 HARNESS"},
-                },
-                {
-                    "tag": "input",
-                    "name": "name",
-                    "label": {"tag": "plain_text", "content": "需求名称"},
-                    "placeholder": {"tag": "plain_text", "content": "例如 多轮需求构造工作流"},
-                },
-                {
-                    "tag": "input",
-                    "name": "summary",
-                    "label": {"tag": "plain_text", "content": "需求简述"},
-                    "placeholder": {"tag": "plain_text", "content": "说明你要解决的问题和目标结果"},
-                },
-                {
-                    "tag": "input",
-                    "name": "background_links",
-                    "label": {"tag": "plain_text", "content": "背景材料链接"},
-                    "placeholder": {"tag": "plain_text", "content": "可选，多个链接可换行"},
-                },
-                {
-                    "tag": "select_static",
-                    "name": "priority",
-                    "label": {"tag": "plain_text", "content": "优先级"},
-                    "placeholder": {"tag": "plain_text", "content": "可选"},
-                    "options": [
-                        {"text": {"tag": "plain_text", "content": "P0"}, "value": "P0"},
-                        {"text": {"tag": "plain_text", "content": "P1"}, "value": "P1"},
-                        {"text": {"tag": "plain_text", "content": "P2"}, "value": "P2"},
-                    ],
-                },
-                {
-                    "tag": "date_picker",
-                    "name": "expected_due_date",
-                    "label": {"tag": "plain_text", "content": "期望完成时间"},
-                    "placeholder": {"tag": "plain_text", "content": "可选"},
-                },
-                {
-                    "tag": "action",
-                    "actions": [
-                        {
-                            "tag": "button",
-                            "text": {"tag": "plain_text", "content": "提交创建"},
-                            "type": "primary",
-                            "value": {"action": "submit_create_requirement", "creation_chat_id": context.chat_id},
-                        }
-                    ],
-                },
-            ],
+            "body": {
+                "elements": [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": (
+                                "请填写最小需求信息。\n"
+                                "提交后，CoordinatorService 会自动创建 `REQ ID`、多维表格记录、需求文档和项目需求群。"
+                            ),
+                        },
+                    },
+                    {
+                        "tag": "note",
+                        "elements": [
+                            {"tag": "plain_text", "content": "必填：项目代号、需求名称、需求简述"},
+                        ],
+                    },
+                    {
+                        "tag": "form",
+                        "name": "requirement_create_form",
+                        "elements": [
+                            {
+                                "tag": "input",
+                                "name": "project",
+                                "required": True,
+                                "width": "fill",
+                                "placeholder": {"tag": "plain_text", "content": "项目代号，例如 HARNESS"},
+                            },
+                            {
+                                "tag": "input",
+                                "name": "name",
+                                "required": True,
+                                "width": "fill",
+                                "placeholder": {"tag": "plain_text", "content": "需求名称，例如 多轮需求构造工作流"},
+                            },
+                            {
+                                "tag": "input",
+                                "name": "summary",
+                                "required": True,
+                                "width": "fill",
+                                "input_type": "multiline_text",
+                                "max_length": 500,
+                                "placeholder": {"tag": "plain_text", "content": "需求简述：要解决什么问题，期望得到什么结果"},
+                            },
+                            {
+                                "tag": "input",
+                                "name": "background_links",
+                                "width": "fill",
+                                "input_type": "multiline_text",
+                                "max_length": 1000,
+                                "placeholder": {"tag": "plain_text", "content": "背景材料链接，可选；多个链接请换行"},
+                            },
+                            {
+                                "tag": "select_static",
+                                "name": "priority",
+                                "placeholder": {"tag": "plain_text", "content": "优先级，可选"},
+                                "options": [
+                                    {"text": {"tag": "plain_text", "content": "P0"}, "value": "P0"},
+                                    {"text": {"tag": "plain_text", "content": "P1"}, "value": "P1"},
+                                    {"text": {"tag": "plain_text", "content": "P2"}, "value": "P2"},
+                                ],
+                            },
+                            {
+                                "tag": "date_picker",
+                                "name": "expected_due_date",
+                                "placeholder": {"tag": "plain_text", "content": "期望完成时间，可选"},
+                            },
+                            {
+                                "tag": "button",
+                                "name": "submit_create_requirement",
+                                "text": {"tag": "plain_text", "content": "提交创建"},
+                                "type": "primary_filled",
+                                "form_action_type": "submit",
+                                "behaviors": [
+                                    {
+                                        "type": "callback",
+                                        "value": {
+                                            "action": "submit_create_requirement",
+                                            "creation_chat_id": context.chat_id,
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                ]
+            },
         }
 
     def _build_project_group_card(self, requirement) -> dict[str, object]:
