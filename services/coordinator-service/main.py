@@ -5,8 +5,13 @@ import sys
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SRC_ROOT = REPO_ROOT / "src"
+APP_ROOT = Path(__file__).resolve().parent
+SRC_ROOT = APP_ROOT / "src"
+if not SRC_ROOT.exists():
+    candidate = APP_ROOT.parent / "src"
+    if candidate.exists():
+        SRC_ROOT = candidate
+
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
