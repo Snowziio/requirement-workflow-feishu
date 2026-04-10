@@ -1,0 +1,38 @@
+name: Bootstrap Bitable App
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    outputs:
+      app_token: ${{ steps.bootstrap.outputs.app_token }}
+      table_id: ${{ steps.bootstrap.outputs.table_id }}
+      app_url: ${{ steps.bootstrap.outputs.app_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Bootstrap new Bitable app and table
+        id: bootstrap
+        env:
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_DOC_FOLDER_TOKEN: ${{ secrets.FEISHU_DOC_FOLDER_TOKEN }}
+          FEISHU_BITABLE_APP_NAME: Requirement Workflow v1.2
+          FEISHU_BITABLE_TABLE_NAME: Requirements
+        run: python scripts/bootstrap_bitable_app_v12.py
+
+      - name: Show outputs
+        run: |
+          echo "app_token=${{ steps.bootstrap.outputs.app_token }}"
+          echo "table_id=${{ steps.bootstrap.outputs.table_id }}"
+          echo "app_url=${{ steps.bootstrap.outputs.app_url }}"

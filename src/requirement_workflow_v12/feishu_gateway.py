@@ -5,7 +5,6 @@ import uuid
 from dataclasses import dataclass
 
 import lark_oapi as lark
-from lark_oapi.core.model import RequestOption
 from lark_oapi.api.bitable.v1 import AppTableRecord, CreateAppTableRecordRequest, UpdateAppTableRecordRequest
 from lark_oapi.api.docx.v1 import (
     BatchDeleteDocumentBlockChildrenRequest,
@@ -50,13 +49,7 @@ class FeishuGateway:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.client = (
-            lark.Client.builder()
-            .app_id(settings.feishu_app_id)
-            .app_secret(settings.feishu_app_secret)
-            .enable_set_token(True)
-            .build()
-        )
+        self.client = lark.Client.builder().app_id(settings.feishu_app_id).app_secret(settings.feishu_app_secret).build()
 
     def send_text(self, receive_id: str, text: str, receive_id_type: str = "chat_id") -> None:
         request = (
@@ -71,7 +64,7 @@ class FeishuGateway:
             )
             .build()
         )
-        response = self.client.im.v1.message.create(request, option=self._request_option())
+        response = self.client.im.v1.message.create(request)
         self._ensure_success(response, "send text message")
 
     def create_project_group(self, project: str, owner_user_id: str, member_user_ids: list[str] | None = None) -> CreatedChat:
@@ -93,7 +86,7 @@ class FeishuGateway:
             )
             .build()
         )
-        response = self.client.im.v1.chat.create(request, option=self._request_option())
+        response = self.client.im.v1.chat.create(request)
         self._ensure_success(response, "create project group")
         body = response.data
         return CreatedChat(chat_id=body.chat_id, name=body.name or "")
@@ -113,7 +106,7 @@ class FeishuGateway:
             )
             .build()
         )
-        response = self.client.bitable.v1.app_table_record.create(request, option=self._request_option())
+        response = self.client.bitable.v1.app_table_record.create(request)
         self._ensure_success(response, "create bitable record")
         return CreatedRecord(record_id=response.data.record.record_id)
 
@@ -133,7 +126,7 @@ class FeishuGateway:
             )
             .build()
         )
-        response = self.client.bitable.v1.app_table_record.update(request, option=self._request_option())
+        response = self.client.bitable.v1.app_table_record.update(request)
         self._ensure_success(response, "update bitable record")
 
     def create_requirement_document(self, requirement: Requirement) -> CreatedDocument | None:
@@ -149,7 +142,7 @@ class FeishuGateway:
             )
             .build()
         )
-        response = self.client.docx.v1.document.create(request, option=self._request_option())
+        response = self.client.docx.v1.document.create(request)
         self._ensure_success(response, "create requirement document")
         document = response.data.document
         return CreatedDocument(
@@ -176,7 +169,7 @@ class FeishuGateway:
                 )
                 .build()
             )
-            response = self.client.docx.v1.document_block.children.batch_delete(delete_request, option=self._request_option())
+            response = self.client.docx.v1.document_block.children.batch_delete(delete_request)
             self._ensure_success(response, "delete existing document blocks")
 
         blocks = self._build_requirement_blocks(requirement)
@@ -196,7 +189,7 @@ class FeishuGateway:
             )
             .build()
         )
-        response = self.client.docx.v1.document_block.children.create(create_request, option=self._request_option())
+        response = self.client.docx.v1.document_block.children.create(create_request)
         self._ensure_success(response, "create document blocks")
 
     def _record_fields(self, requirement: Requirement) -> dict[str, object]:
@@ -232,7 +225,7 @@ class FeishuGateway:
                 .page_token(page_token)
                 .build()
             )
-            response = self.client.docx.v1.document_block.children.get(request, option=self._request_option())
+            response = self.client.docx.v1.document_block.children.get(request)
             self._ensure_success(response, "list document block children")
             data = response.data
             items.extend(data.items or [])
@@ -272,8 +265,3 @@ class FeishuGateway:
     def _ensure_success(self, response, action: str) -> None:
         if not response.success():
             raise RuntimeError(f"Failed to {action}: {response.code} {response.msg}")
-
-    def _request_option(self) -> RequestOption | None:
-        if not self.settings.feishu_user_access_token:
-            return None
-        return RequestOption.builder().user_access_token(self.settings.feishu_user_access_token).build()

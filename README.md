@@ -36,7 +36,6 @@
 
 - 仓库内不保存真实飞书凭据
 - `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 必须由部署环境注入有效值
-- 业务侧 Feishu API 现已优先支持 `FEISHU_USER_ACCESS_TOKEN`（UAT）模式
 - `FEISHU_CREATION_GROUP_CHAT_ID` 可在第一条真实群消息联调时自动识别
 
 ## 运行骨架
@@ -51,6 +50,7 @@
 - `ci.yml`：PR 校验
 - `staging.yml`：`main` 分支构建镜像并部署到 staging
 - `deploy.yml`：按 customer 配置做正式部署
+- `bootstrap-bitable-app.yml`：创建新的 Bitable app 与 Requirements 表
 - `sync-bitable-schema.yml`：按 v1.2 规范自动补齐当前 Bitable 字段
 
 当前不再把 `coordinator-service` 走单独的旁路部署流，而是回到 `harness-scaffold` 标准 git 驱动发布方式。
