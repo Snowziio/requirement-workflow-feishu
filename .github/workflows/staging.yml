@@ -91,5 +91,33 @@ jobs:
       - name: Smoke test
         run: |
           sleep 15
-          curl --retry 5 --retry-delay 3 --fail \
+          curl --retry 5 --retry-delay 3 --retry-max-time 45 \
+            --connect-timeout 5 --max-time 15 --fail \
             http://${{ secrets.ECS_HOST }}:8004/health
+
+      - name: Diagnose staging on failure
+        if: failure()
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.ECS_HOST }}
+          username: ${{ secrets.ECS_USER }}
+          key: ${{ secrets.ECS_SSH_KEY }}
+          script: |
+            set +e
+            APP=${{ github.event.repository.name }}
+            DIR=~/staging/$APP
+
+            echo "=== docker ps ==="
+            docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+            echo
+
+            echo "=== compose ps ==="
+            cd $DIR && docker compose -f docker-compose.staging.yml --env-file .env ps
+            echo
+
+            echo "=== compose logs (tail 200) ==="
+            cd $DIR && docker compose -f docker-compose.staging.yml --env-file .env logs --tail=200
+            echo
+
+            echo "=== port 8004 ==="
+            ss -ltnp | grep 8004 || true
