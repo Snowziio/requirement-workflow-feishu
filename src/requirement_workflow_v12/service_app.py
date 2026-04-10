@@ -532,10 +532,11 @@ class CoordinatorRuntimeApp:
                         },
                     },
                     {
-                        "tag": "note",
-                        "elements": [
-                            {"tag": "plain_text", "content": "必填：项目代号、需求名称、需求简述"},
-                        ],
+                        "tag": "div",
+                        "text": {
+                            "tag": "plain_text",
+                            "content": "必填：项目代号、需求名称、需求简述",
+                        },
                     },
                     {
                         "tag": "form",
@@ -654,13 +655,11 @@ class CoordinatorRuntimeApp:
         elements.append({"tag": "action", "actions": actions})
         elements.append(
             {
-                "tag": "note",
-                "elements": [
-                    {
-                        "tag": "plain_text",
-                        "content": f"如果需要手动启动，请私聊 {self.settings.openclaw_author_agent_name} 并发送：开始需求构造 {requirement.req_id}",
-                    }
-                ],
+                "tag": "div",
+                "text": {
+                    "tag": "plain_text",
+                    "content": f"如果需要手动启动，请私聊 {self.settings.openclaw_author_agent_name} 并发送：开始需求构造 {requirement.req_id}",
+                },
             }
         )
 
