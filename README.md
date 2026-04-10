@@ -50,6 +50,7 @@
 - `ci.yml`：PR 校验
 - `staging.yml`：`main` 分支构建镜像并部署到 staging
 - `deploy.yml`：按 customer 配置做正式部署
+- `sync-bitable-schema.yml`：按 v1.2 规范自动补齐当前 Bitable 字段
 
 当前不再把 `coordinator-service` 走单独的旁路部署流，而是回到 `harness-scaffold` 标准 git 驱动发布方式。
 
