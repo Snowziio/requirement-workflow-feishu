@@ -7,10 +7,8 @@ from dataclasses import dataclass
 import lark_oapi as lark
 from lark_oapi.api.bitable.v1 import (
     AppTableCreateHeader,
-    CreateAppRequest,
     CreateAppTableRequest,
     CreateAppTableRequestBody,
-    ReqApp,
     ReqTable,
 )
 
@@ -89,27 +87,12 @@ def write_output(name: str, value: str) -> None:
 
 def main() -> int:
     client = build_client()
-    app_name = optional_env("FEISHU_BITABLE_APP_NAME", "Requirement Workflow v1.2")
+    app_token = required_env("FEISHU_BITABLE_APP_TOKEN")
     table_name = optional_env("FEISHU_BITABLE_TABLE_NAME", "Requirements")
-    folder_token = optional_env("FEISHU_BITABLE_FOLDER_TOKEN", optional_env("FEISHU_DOC_FOLDER_TOKEN"))
-    time_zone = optional_env("FEISHU_TIME_ZONE", "Asia/Shanghai")
-
-    req_app_builder = ReqApp.builder().name(app_name).time_zone(time_zone)
-    if folder_token:
-        req_app_builder = req_app_builder.folder_token(folder_token)
-
-    create_app_request = (
-        CreateAppRequest.builder()
-        .request_body(req_app_builder.build())
-        .build()
-    )
-    create_app_response = client.bitable.v1.app.create(create_app_request)
-    ensure_success(create_app_response, "create bitable app")
-    app = create_app_response.data.app
 
     create_table_request = (
         CreateAppTableRequest.builder()
-        .app_token(app.app_token)
+        .app_token(app_token)
         .request_body(
             CreateAppTableRequestBody.builder()
             .table(
@@ -127,12 +110,10 @@ def main() -> int:
     ensure_success(create_table_response, "create bitable table")
 
     table_id = create_table_response.data.table_id
-    print(f"[created] app_token={app.app_token}")
+    print(f"[created] app_token={app_token}")
     print(f"[created] table_id={table_id}")
-    print(f"[created] app_url={app.url}")
-    write_output("app_token", app.app_token)
+    write_output("app_token", app_token)
     write_output("table_id", table_id)
-    write_output("app_url", app.url or "")
     return 0
 
 
