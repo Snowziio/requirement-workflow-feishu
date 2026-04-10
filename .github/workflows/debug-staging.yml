@@ -1,0 +1,34 @@
+name: Debug Staging
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect staging container
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.ECS_HOST }}
+          username: ${{ secrets.ECS_USER }}
+          key: ${{ secrets.ECS_SSH_KEY }}
+          script: |
+            set +e
+            APP=requirement-workflow-feishu
+            DIR=~/staging/$APP
+
+            echo "=== docker ps ==="
+            docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+            echo
+
+            echo "=== compose ps ==="
+            cd $DIR && docker compose -f docker-compose.staging.yml --env-file .env ps
+            echo
+
+            echo "=== env excerpt ==="
+            cd $DIR && grep -E '^(STAGING_PORT|FEISHU_APP_ID|FEISHU_CREATION_GROUP_CHAT_ID|FEISHU_BITABLE_APP_TOKEN|FEISHU_BITABLE_TABLE_ID|FEISHU_DOC_FOLDER_TOKEN|FEISHU_BASE_URL|FEISHU_USER_ID_TYPE)=' .env || true
+            echo
+
+            echo "=== recent logs ==="
+            docker logs --tail 300 ${APP}-staging-1 2>&1 || true
