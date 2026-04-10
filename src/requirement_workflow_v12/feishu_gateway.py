@@ -67,6 +67,22 @@ class FeishuGateway:
         response = self.client.im.v1.message.create(request)
         self._ensure_success(response, "send text message")
 
+    def send_card(self, receive_id: str, card: dict[str, object], receive_id_type: str = "chat_id") -> None:
+        request = (
+            CreateMessageRequest.builder()
+            .receive_id_type(receive_id_type)
+            .request_body(
+                CreateMessageRequestBody.builder()
+                .receive_id(receive_id)
+                .msg_type("interactive")
+                .content(json.dumps(card, ensure_ascii=False))
+                .build()
+            )
+            .build()
+        )
+        response = self.client.im.v1.message.create(request)
+        self._ensure_success(response, "send card message")
+
     def create_project_group(self, project: str, owner_user_id: str, member_user_ids: list[str] | None = None) -> CreatedChat:
         member_user_ids = member_user_ids or []
         request = (
@@ -149,6 +165,14 @@ class FeishuGateway:
             document_id=document.document_id,
             document_url=f"{self.settings.feishu_base_url}/docx/{document.document_id}",
         )
+
+    def bitable_url(self) -> str:
+        if not self.settings.feishu_bitable_app_token:
+            return ""
+        url = f"{self.settings.feishu_base_url}/base/{self.settings.feishu_bitable_app_token}"
+        if self.settings.feishu_bitable_table_id:
+            url += f"?table={self.settings.feishu_bitable_table_id}"
+        return url
 
     def sync_requirement_document(self, requirement: Requirement) -> None:
         if not requirement.document_id or requirement.document is None:

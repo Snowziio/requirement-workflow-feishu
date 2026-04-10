@@ -34,3 +34,16 @@ class AuthorStartResponse:
     accepted: bool
     message: str
     active_req_id: str | None = None
+
+
+@dataclass
+class CreationFormPayload:
+    project: str
+    name: str
+    summary: str
+    creator: str
+    creator_user_id: str
+    creation_chat_id: str
+    background_links: str = ""
+    priority: str = ""
+    expected_due_date: str = ""

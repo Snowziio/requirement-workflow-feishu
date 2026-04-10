@@ -12,7 +12,7 @@ from .config import Settings, load_settings
 from .coordinator_service import AuthorTurnResult, CoordinatorService
 from .feishu_gateway import FeishuGateway
 from .models import ReviewResult, WorkflowStatus
-from .protocols import AuthorStartBinding, CreationRequest
+from .protocols import AuthorStartBinding, CreationFormPayload, CreationRequest
 from .store import JsonStateStore
 
 try:
@@ -41,6 +41,13 @@ class MessageContext:
 class OutboundMessage:
     receive_id: str
     text: str
+    receive_id_type: str = "chat_id"
+
+
+@dataclass
+class OutboundCard:
+    receive_id: str
+    card: dict[str, object]
     receive_id_type: str = "chat_id"
 
 
@@ -88,11 +95,25 @@ class CoordinatorRuntimeApp:
 
     def start_health_server(self) -> None:
         service_name = self.settings.service_name
+        app = self
 
         class HealthHandler(BaseHTTPRequestHandler):
             def do_GET(self):
                 body = json.dumps({"status": "ok", "service": service_name}).encode()
                 self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", "0"))
+                raw_body = self.rfile.read(length) if length else b"{}"
+                if self.path == "/callbacks/card":
+                    status, payload = app.handle_card_callback(raw_body)
+                else:
+                    status, payload = 404, {"error": "not_found"}
+                body = json.dumps(payload, ensure_ascii=False).encode()
+                self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(body)
@@ -116,10 +137,13 @@ class CoordinatorRuntimeApp:
             context.user_id,
             context.text,
         )
-        for message in self.handle_text_message(context):
-            self.gateway.send_text(message.receive_id, message.text, receive_id_type=message.receive_id_type)
+        for outbound in self.handle_text_message(context):
+            if isinstance(outbound, OutboundCard):
+                self.gateway.send_card(outbound.receive_id, outbound.card, receive_id_type=outbound.receive_id_type)
+            else:
+                self.gateway.send_text(outbound.receive_id, outbound.text, receive_id_type=outbound.receive_id_type)
 
-    def handle_text_message(self, context: MessageContext) -> list[OutboundMessage]:
+    def handle_text_message(self, context: MessageContext) -> list[OutboundMessage | OutboundCard]:
         text = context.text.strip()
         if not text:
             return []
@@ -132,34 +156,29 @@ class CoordinatorRuntimeApp:
 
         return []
 
-    def _handle_creation_group_message(self, context: MessageContext) -> list[OutboundMessage]:
+    def _handle_creation_group_message(self, context: MessageContext) -> list[OutboundMessage | OutboundCard]:
         if "创建需求" not in context.text:
             return []
         self._observed_creation_group_chat_id = context.chat_id
-        fields = self._parse_creation_command(context.text)
-        if fields is None:
-            LOGGER.info("Creation command parse failed for text=%r", context.text)
-            return [
-                OutboundMessage(
-                    receive_id=context.chat_id,
-                    text=(
-                        "创建需求消息格式不完整，请按下面格式发送：\n"
-                        "创建需求\n"
-                        "项目：HARNESS\n"
-                        "名称：多轮需求构造工作流\n"
-                        "简述：把一次性讨论升级成多轮需求构造与 review 闭环"
-                    ),
-                )
-            ]
+        return [
+            OutboundCard(
+                receive_id=context.chat_id,
+                card=self._build_requirement_creation_card(context),
+            )
+        ]
 
+    def _create_requirement_from_form(
+        self,
+        payload: CreationFormPayload,
+    ) -> list[OutboundMessage | OutboundCard]:
         response = self.service.create_requirement_from_group(
             CreationRequest(
-                project=fields["project"],
-                name=fields["name"],
-                summary=fields["summary"],
-                creator=context.sender_name or context.user_id,
-                creator_user_id=context.user_id,
-                creation_chat_id=context.chat_id,
+                project=payload.project,
+                name=payload.name,
+                summary=payload.summary,
+                creator=payload.creator,
+                creator_user_id=payload.creator_user_id,
+                creation_chat_id=payload.creation_chat_id,
             )
         )
         requirement = self.service.get_requirement(response.req_id)
@@ -168,8 +187,8 @@ class CoordinatorRuntimeApp:
                 try:
                     project_group = self.gateway.create_project_group(
                         project=requirement.project,
-                        owner_user_id=context.user_id,
-                        member_user_ids=[context.user_id],
+                        owner_user_id=payload.creator_user_id,
+                        member_user_ids=[payload.creator_user_id],
                     )
                     self.service.assign_project_group(requirement.req_id, project_group.chat_id)
                     response.project_group_id = project_group.chat_id
@@ -212,12 +231,19 @@ class CoordinatorRuntimeApp:
         creation_text = response.message_to_creation_group
         if requirement and requirement.document_url:
             creation_text += f"\n需求文档：{requirement.document_url}"
-        messages = [OutboundMessage(receive_id=context.chat_id, text=creation_text)]
+        bitable_url = self.gateway.bitable_url()
+        if bitable_url:
+            creation_text += f"\n多维表格：{bitable_url}"
+        messages: list[OutboundMessage | OutboundCard] = [
+            OutboundMessage(receive_id=payload.creation_chat_id, text=creation_text)
+        ]
         if self._is_feishu_chat_id(response.project_group_id):
-            project_text = response.message_to_project_group
-            if requirement and requirement.document_url:
-                project_text += f"\n需求文档：{requirement.document_url}"
-            messages.append(OutboundMessage(receive_id=response.project_group_id, text=project_text))
+            messages.append(
+                OutboundCard(
+                    receive_id=response.project_group_id,
+                    card=self._build_project_group_card(requirement),
+                )
+            )
         return messages
 
     def _handle_author_private_message(self, context: MessageContext) -> list[OutboundMessage]:
@@ -349,6 +375,49 @@ class CoordinatorRuntimeApp:
             )
         return [OutboundMessage(receive_id=context.chat_id, text=response_text)]
 
+    def handle_card_callback(self, raw_body: bytes) -> tuple[int, dict[str, object]]:
+        try:
+            payload = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return 400, {"error": "invalid_json"}
+
+        if "challenge" in payload:
+            return 200, {"challenge": payload["challenge"]}
+
+        action = payload.get("action", {}) or {}
+        value = action.get("value", {}) or {}
+        action_name = value.get("action")
+        operator = payload.get("operator", {}) or {}
+        user_id = operator.get("open_id", "")
+        user_name = operator.get("name", "")
+
+        if action_name == "submit_create_requirement":
+            form_payload = self._extract_creation_form_payload(payload, user_id=user_id, user_name=user_name)
+            if form_payload is None:
+                return 200, {"toast": {"type": "error", "content": "创建表单字段不完整，请补充项目、名称和简述。"}}
+            messages = self._create_requirement_from_form(form_payload)
+            for outbound in messages:
+                if isinstance(outbound, OutboundCard):
+                    self.gateway.send_card(outbound.receive_id, outbound.card, receive_id_type=outbound.receive_id_type)
+                else:
+                    self.gateway.send_text(outbound.receive_id, outbound.text, receive_id_type=outbound.receive_id_type)
+            return 200, {"toast": {"type": "success", "content": "需求已创建，项目群同步已开始。"}}
+
+        if action_name == "send_author_start":
+            req_id = value.get("req_id", "")
+            if not req_id:
+                return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            agent_name = self.settings.openclaw_author_agent_name
+            start_command = f"开始需求构造 {req_id}"
+            self.gateway.send_text(
+                user_id,
+                f"请私聊 {agent_name}，并发送：\n{start_command}",
+                receive_id_type=self.settings.feishu_user_id_type,
+            )
+            return 200, {"toast": {"type": "success", "content": "已将启动指令私发给你。"}}
+
+        return 200, {"toast": {"type": "info", "content": "未识别的卡片动作，已忽略。"}}
+
     def _parse_creation_command(self, text: str) -> dict[str, str] | None:
         fields: dict[str, str] = {}
         aliases = {"项目": "project", "名称": "name", "简述": "summary", "背景": "summary"}
@@ -383,6 +452,184 @@ class CoordinatorRuntimeApp:
         if not required.issubset(fields):
             return None
         return fields
+
+    def _extract_creation_form_payload(
+        self,
+        payload: dict[str, object],
+        *,
+        user_id: str,
+        user_name: str,
+    ) -> CreationFormPayload | None:
+        action = payload.get("action", {}) or {}
+        value = action.get("value", {}) or {}
+        form_value = action.get("form_value") or payload.get("form_value") or {}
+        if not isinstance(form_value, dict):
+            form_value = {}
+
+        project = self._normalize_form_value(form_value.get("project"))
+        name = self._normalize_form_value(form_value.get("name"))
+        summary = self._normalize_form_value(form_value.get("summary"))
+        if not project or not name or not summary:
+            return None
+
+        creation_chat_id = self._normalize_form_value(value.get("creation_chat_id")) or self._observed_creation_group_chat_id
+        return CreationFormPayload(
+            project=project,
+            name=name,
+            summary=summary,
+            creator=user_name or user_id,
+            creator_user_id=user_id,
+            creation_chat_id=creation_chat_id,
+            background_links=self._normalize_form_value(form_value.get("background_links")),
+            priority=self._normalize_form_value(form_value.get("priority")),
+            expected_due_date=self._normalize_form_value(form_value.get("expected_due_date")),
+        )
+
+    def _normalize_form_value(self, value: object) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, list):
+            normalized = [self._normalize_form_value(item) for item in value]
+            return ", ".join(item for item in normalized if item)
+        if isinstance(value, dict):
+            for key in ("value", "text", "name", "content"):
+                if key in value:
+                    return self._normalize_form_value(value[key])
+            return ""
+        return str(value).strip()
+
+    def _build_requirement_creation_card(self, context: MessageContext) -> dict[str, object]:
+        return {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": "blue",
+                "title": {"tag": "plain_text", "content": "创建需求"},
+            },
+            "elements": [
+                {
+                    "tag": "markdown",
+                    "content": "请补充最小需求信息。提交后，CoordinatorService 会创建 `REQ ID`、多维表格记录、需求文档和项目需求群。",
+                },
+                {
+                    "tag": "input",
+                    "name": "project",
+                    "label": {"tag": "plain_text", "content": "项目代号"},
+                    "placeholder": {"tag": "plain_text", "content": "例如 HARNESS"},
+                },
+                {
+                    "tag": "input",
+                    "name": "name",
+                    "label": {"tag": "plain_text", "content": "需求名称"},
+                    "placeholder": {"tag": "plain_text", "content": "例如 多轮需求构造工作流"},
+                },
+                {
+                    "tag": "textarea",
+                    "name": "summary",
+                    "label": {"tag": "plain_text", "content": "需求简述"},
+                    "placeholder": {"tag": "plain_text", "content": "说明你要解决的问题和目标结果"},
+                },
+                {
+                    "tag": "textarea",
+                    "name": "background_links",
+                    "label": {"tag": "plain_text", "content": "背景材料链接"},
+                    "placeholder": {"tag": "plain_text", "content": "可选，多个链接可换行"},
+                },
+                {
+                    "tag": "select_static",
+                    "name": "priority",
+                    "label": {"tag": "plain_text", "content": "优先级"},
+                    "placeholder": {"tag": "plain_text", "content": "可选"},
+                    "options": [
+                        {"text": {"tag": "plain_text", "content": "P0"}, "value": "P0"},
+                        {"text": {"tag": "plain_text", "content": "P1"}, "value": "P1"},
+                        {"text": {"tag": "plain_text", "content": "P2"}, "value": "P2"},
+                    ],
+                },
+                {
+                    "tag": "date_picker",
+                    "name": "expected_due_date",
+                    "label": {"tag": "plain_text", "content": "期望完成时间"},
+                    "placeholder": {"tag": "plain_text", "content": "可选"},
+                },
+                {
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "text": {"tag": "plain_text", "content": "提交创建"},
+                            "type": "primary",
+                            "value": {"action": "submit_create_requirement", "creation_chat_id": context.chat_id},
+                        }
+                    ],
+                },
+            ],
+        }
+
+    def _build_project_group_card(self, requirement) -> dict[str, object]:
+        elements: list[dict[str, object]] = [
+            {
+                "tag": "markdown",
+                "content": (
+                    f"已创建需求 **{requirement.req_id}**\n"
+                    f"- 名称：{requirement.name}\n"
+                    f"- 当前状态：{requirement.status.value}\n"
+                    f"- 当前角色：{requirement.current_role_label}"
+                ),
+            }
+        ]
+
+        links: list[str] = []
+        if requirement.document_url:
+            links.append(f"[查看需求文档]({requirement.document_url})")
+        bitable_url = self.gateway.bitable_url()
+        if bitable_url:
+            links.append(f"[查看多维表格]({bitable_url})")
+        if links:
+            elements.append({"tag": "markdown", "content": " | ".join(links)})
+
+        actions: list[dict[str, object]] = [
+            {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": "私发启动指令"},
+                "type": "primary",
+                "value": {"action": "send_author_start", "req_id": requirement.req_id},
+            }
+        ]
+        if self.settings.author_agent_chat_url_template:
+            actions.insert(
+                0,
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "打开需求构造助手"},
+                    "type": "default",
+                    "multi_url": {
+                        "url": self.settings.author_agent_chat_url_template.format(req_id=requirement.req_id),
+                    },
+                },
+            )
+        elements.append({"tag": "action", "actions": actions})
+        elements.append(
+            {
+                "tag": "note",
+                "elements": [
+                    {
+                        "tag": "plain_text",
+                        "content": f"如果需要手动启动，请私聊 {self.settings.openclaw_author_agent_name} 并发送：开始需求构造 {requirement.req_id}",
+                    }
+                ],
+            }
+        )
+
+        return {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": "green",
+                "title": {"tag": "plain_text", "content": f"{requirement.req_id} 已创建"},
+            },
+            "elements": elements,
+        }
 
     def _extract_message_context(self, data: P2ImMessageReceiveV1) -> MessageContext | None:
         event = getattr(data, "event", None)

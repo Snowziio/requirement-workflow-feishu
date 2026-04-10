@@ -25,6 +25,7 @@ class Settings:
     review_template_url: str = os.environ.get("REVIEW_TEMPLATE_URL", "")
     openclaw_author_agent_name: str = os.environ.get("OPENCLAW_AUTHOR_AGENT_NAME", "需求构造助手")
     openclaw_reviewer_agent_name: str = os.environ.get("OPENCLAW_REVIEWER_AGENT_NAME", "需求审查助手")
+    author_agent_chat_url_template: str = os.environ.get("AUTHOR_AGENT_CHAT_URL_TEMPLATE", "")
     state_store_path: str = os.environ.get("STATE_STORE_PATH", "state/coordinator_state.json")
 
     def validate_runtime(self) -> None:
