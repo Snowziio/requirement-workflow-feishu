@@ -60,16 +60,21 @@
 - 在配置齐全时尝试自动创建项目需求群
 - 在配置齐全时尝试创建 Bitable 记录
 - 在配置齐全时尝试创建正式需求文档
+- 在配置齐全时按稳定 section 结构重写正式需求文档
 - 生成 `REQ-{PROJECT}-{NNN}` 并建立私聊启动指令
 - 若未预置 `FEISHU_CREATION_GROUP_CHAT_ID`，可从第一条创建需求群消息自动识别创建群
 - 在 author 私聊中处理：
   - `开始需求构造 REQ-ID`
   - `确认开始`
   - `切换需求 REQ-ID`
+- 在 author 私聊中按当前讨论字段推进多轮需求构造
+- 每轮补充后自动执行规则化 review，并决定继续讨论还是进入人工确认
+- 在人工确认阶段处理：
+  - `确认需求`
+  - `继续修改`
 - 通过本地 JSON 快照恢复运行状态
 
 下一步将继续补齐：
 
-- Bitable 字段级更新与正式文档 section rewrite 写回
-- author / reviewer 的结构化多轮闭环
+- OpenClaw author / reviewer 的真实结构化调用接入
 - 基于新仓库的正式 CI/CD 部署

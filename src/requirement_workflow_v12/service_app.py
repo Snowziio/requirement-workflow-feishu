@@ -8,8 +8,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
 from .config import Settings, load_settings
-from .coordinator_service import CoordinatorService
+from .coordinator_service import AuthorTurnResult, CoordinatorService
 from .feishu_gateway import FeishuGateway
+from .models import ReviewResult, WorkflowStatus
 from .protocols import AuthorStartBinding, CreationRequest
 from .store import JsonStateStore
 
@@ -185,6 +186,12 @@ class CoordinatorRuntimeApp:
                 LOGGER.warning("Failed to create document for %s: %s", requirement.req_id, exc)
 
             requirement = self.service.get_requirement(requirement.req_id)
+            if requirement and requirement.document_id:
+                try:
+                    self.gateway.sync_requirement_document(requirement)
+                except Exception as exc:
+                    LOGGER.warning("Failed to sync requirement document for %s: %s", requirement.req_id, exc)
+
             if requirement and requirement.bitable_record_id:
                 try:
                     self.gateway.update_requirement_record(requirement)
@@ -224,6 +231,12 @@ class CoordinatorRuntimeApp:
             self._save_state()
             return [OutboundMessage(receive_id=context.chat_id, text=response.message)]
 
+        if text == "确认需求":
+            return self._handle_human_confirmation(context, approved=True)
+
+        if text == "继续修改":
+            return self._handle_human_confirmation(context, approved=False)
+
         response = self.service.confirm_author_private_binding(context.user_id, text)
         if response.accepted:
             self._save_state()
@@ -231,17 +244,101 @@ class CoordinatorRuntimeApp:
 
         active_req_id = self.service.active_req_by_user.get(context.user_id)
         if active_req_id:
-            return [
-                OutboundMessage(
-                    receive_id=context.chat_id,
-                    text=(
-                        f"已收到你对 {active_req_id} 的补充。\n"
-                        "当前长连接入口和私聊绑定已打通；下一步会继续接 author/reviewer 的结构化多轮写作闭环。"
-                    ),
-                )
-            ]
+            requirement = self.service.get_requirement(active_req_id)
+            if requirement is not None and requirement.active_private_binding_confirmed:
+                if requirement.status == WorkflowStatus.DISCUSSING:
+                    return self._handle_author_turn(context, requirement)
+                if requirement.status == WorkflowStatus.HUMAN_CONFIRMING:
+                    return [
+                        OutboundMessage(
+                            receive_id=context.chat_id,
+                            text="当前处于人工确认阶段，请回复“确认需求”或“继续修改”。",
+                        )
+                    ]
+                if requirement.status == WorkflowStatus.REQ_APPROVED:
+                    return [
+                        OutboundMessage(
+                            receive_id=context.chat_id,
+                            text=f"{requirement.req_id} 已完成当前阶段，如需新需求请回创建群重新发起。",
+                        )
+                    ]
 
         return [OutboundMessage(receive_id=context.chat_id, text=response.message)]
+
+    def _handle_author_turn(self, context: MessageContext, requirement) -> list[OutboundMessage]:
+        current_field = requirement.current_discussion_field
+        next_field = self._next_discussion_field(requirement)
+        if next_field:
+            next_question = self._question_for_field(next_field)
+        else:
+            next_question = "当前核心字段已补齐，AI review 将进入人工确认。若内容准确，请回复“确认需求”；如需继续打磨，请回复“继续修改”。"
+
+        turn = AuthorTurnResult(
+            updates={current_field: context.text.strip()},
+            next_question=next_question,
+            current_field_completed=True,
+            next_field=next_field,
+        )
+        requirement = self.service.handle_author_turn(requirement, turn)
+
+        review = ReviewResult(
+            ready_for_human_confirmation=not requirement.pending_fields,
+            summary=(
+                "当前核心字段已齐备，可以进入人工确认。"
+                if not requirement.pending_fields
+                else f"当前已补充【{current_field}】，下一轮请继续完善【{requirement.current_discussion_field}】。"
+            ),
+            next_focus=None if not requirement.pending_fields else requirement.latest_question,
+        )
+        requirement = self.service.handle_review_result(requirement, review)
+        self._sync_requirement_outputs(requirement)
+        self._save_state()
+
+        if requirement.status == WorkflowStatus.HUMAN_CONFIRMING:
+            response_text = (
+                f"需求构造 Agent：已更新【{current_field}】。\n\n"
+                f"审查 Agent：{requirement.latest_review_summary}\n\n"
+                f"{requirement.latest_question}\n"
+                "请回复“确认需求”或“继续修改”。"
+            )
+        else:
+            response_text = (
+                f"需求构造 Agent：已更新【{current_field}】。\n\n"
+                f"审查 Agent：{requirement.latest_review_summary}\n\n"
+                f"下一步：{requirement.latest_question}"
+            )
+        return [OutboundMessage(receive_id=context.chat_id, text=response_text)]
+
+    def _handle_human_confirmation(self, context: MessageContext, approved: bool) -> list[OutboundMessage]:
+        active_req_id = self.service.active_req_by_user.get(context.user_id)
+        if not active_req_id:
+            return [OutboundMessage(receive_id=context.chat_id, text="当前没有激活的需求，请先发送“开始需求构造 REQ-ID”。")]
+
+        requirement = self.service.get_requirement(active_req_id)
+        if requirement is None:
+            return [OutboundMessage(receive_id=context.chat_id, text=f"未知需求：{active_req_id}")]
+        if requirement.status != WorkflowStatus.HUMAN_CONFIRMING:
+            return [OutboundMessage(receive_id=context.chat_id, text="当前还没到人工确认阶段，请先继续完成需求构造。")]
+
+        requirement = self.service.handle_human_confirmation(requirement, approved=approved)
+        if approved:
+            requirement = self.service.approve_requirement(requirement)
+
+        self._sync_requirement_outputs(requirement)
+        self._save_state()
+
+        if approved:
+            response_text = (
+                f"{requirement.req_id} 已完成需求构造并进入通过状态。\n\n"
+                f"当前状态：{requirement.status.value}\n"
+                f"需求文档：{requirement.document_url or '待同步'}"
+            )
+        else:
+            response_text = (
+                f"{requirement.req_id} 已退回继续打磨。\n\n"
+                f"下一步：{requirement.latest_question}"
+            )
+        return [OutboundMessage(receive_id=context.chat_id, text=response_text)]
 
     def _parse_creation_command(self, text: str) -> dict[str, str] | None:
         fields: dict[str, str] = {}
@@ -281,6 +378,37 @@ class CoordinatorRuntimeApp:
             message_id=message.message_id or "",
             thread_id=message.thread_id or "",
         )
+
+    def _next_discussion_field(self, requirement) -> str | None:
+        for field in requirement.pending_fields:
+            if field != requirement.current_discussion_field:
+                return field
+        return None
+
+    def _question_for_field(self, field: str) -> str:
+        prompts = {
+            "问题描述": "请说明这个需求当前要解决的核心问题，以及不解决会造成什么影响。",
+            "使用场景": "请补充谁会在什么情况下使用它，以及期望完成什么结果。",
+            "输入": "请说明这个需求依赖哪些输入，来源、格式和约束分别是什么。",
+            "输出": "请说明最终输出是什么，输出方式、格式和接收方分别是什么。",
+            "边界": "请明确这次需求不包含什么，哪些事项仍然留在边界之外。",
+            "验收标准": "请给出可以验证的验收标准，尽量使用阈值、布尔条件或明确结果。",
+            "非功能要求": "请补充性能、稳定性、权限、安全或可观测性等非功能要求。",
+        }
+        return prompts.get(field, "请继续补充当前需求。")
+
+    def _sync_requirement_outputs(self, requirement) -> None:
+        if requirement.document_id:
+            try:
+                self.gateway.sync_requirement_document(requirement)
+            except Exception as exc:
+                LOGGER.warning("Failed to sync requirement document for %s: %s", requirement.req_id, exc)
+
+        if requirement.bitable_record_id:
+            try:
+                self.gateway.update_requirement_record(requirement)
+            except Exception as exc:
+                LOGGER.warning("Failed to update bitable record for %s: %s", requirement.req_id, exc)
 
     def _save_state(self) -> None:
         self.store.save_snapshot(
