@@ -89,11 +89,16 @@ jobs:
             docker compose -f ~/staging/$APP/docker-compose.staging.yml --env-file .env up -d --pull always
 
       - name: Smoke test
-        run: |
-          sleep 15
-          curl --retry 5 --retry-delay 3 --retry-max-time 45 \
-            --connect-timeout 5 --max-time 15 --fail \
-            http://${{ secrets.ECS_HOST }}:8004/health
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.ECS_HOST }}
+          username: ${{ secrets.ECS_USER }}
+          key: ${{ secrets.ECS_SSH_KEY }}
+          script: |
+            sleep 15
+            curl --retry 5 --retry-delay 3 --retry-max-time 45 \
+              --connect-timeout 5 --max-time 15 --fail \
+              http://127.0.0.1:8004/health
 
       - name: Diagnose staging on failure
         if: failure()
