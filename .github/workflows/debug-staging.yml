@@ -31,4 +31,4 @@ jobs:
             echo
 
             echo "=== recent logs ==="
-            docker logs --tail 300 ${APP}-staging-1 2>&1 || true
+            cd $DIR && docker compose -f docker-compose.staging.yml --env-file .env logs --tail=300
