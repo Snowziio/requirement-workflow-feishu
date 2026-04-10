@@ -525,13 +525,13 @@ class CoordinatorRuntimeApp:
                     "placeholder": {"tag": "plain_text", "content": "例如 多轮需求构造工作流"},
                 },
                 {
-                    "tag": "textarea",
+                    "tag": "input",
                     "name": "summary",
                     "label": {"tag": "plain_text", "content": "需求简述"},
                     "placeholder": {"tag": "plain_text", "content": "说明你要解决的问题和目标结果"},
                 },
                 {
-                    "tag": "textarea",
+                    "tag": "input",
                     "name": "background_links",
                     "label": {"tag": "plain_text", "content": "背景材料链接"},
                     "placeholder": {"tag": "plain_text", "content": "可选，多个链接可换行"},
