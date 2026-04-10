@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -108,6 +109,13 @@ class CoordinatorRuntimeApp:
         context = self._extract_message_context(data)
         if context is None:
             return
+        LOGGER.info(
+            "Received message chat_id=%s chat_type=%s user_id=%s text=%r",
+            context.chat_id,
+            context.chat_type,
+            context.user_id,
+            context.text,
+        )
         for message in self.handle_text_message(context):
             self.gateway.send_text(message.receive_id, message.text, receive_id_type=message.receive_id_type)
 
@@ -130,6 +138,7 @@ class CoordinatorRuntimeApp:
         self._observed_creation_group_chat_id = context.chat_id
         fields = self._parse_creation_command(context.text)
         if fields is None:
+            LOGGER.info("Creation command parse failed for text=%r", context.text)
             return [
                 OutboundMessage(
                     receive_id=context.chat_id,
@@ -345,12 +354,30 @@ class CoordinatorRuntimeApp:
         aliases = {"项目": "project", "名称": "name", "简述": "summary", "背景": "summary"}
         for raw_line in text.splitlines():
             line = raw_line.strip()
-            if "：" not in line:
+            if "：" in line:
+                key, value = line.split("：", 1)
+            elif ":" in line:
+                key, value = line.split(":", 1)
+            else:
                 continue
-            key, value = line.split("：", 1)
             normalized = aliases.get(key.strip())
             if normalized and value.strip():
                 fields[normalized] = value.strip()
+
+        # Allow one-line freeform messages like:
+        # 创建需求 项目: HARNESS 名称: xxx 简述: yyy
+        if "project" not in fields:
+            matched = re.search(r"项目\s*[:：]\s*([^\n]+?)(?=\s+名称\s*[:：]|$)", text)
+            if matched:
+                fields["project"] = matched.group(1).strip()
+        if "name" not in fields:
+            matched = re.search(r"名称\s*[:：]\s*([^\n]+?)(?=\s+简述\s*[:：]|\s+背景\s*[:：]|$)", text)
+            if matched:
+                fields["name"] = matched.group(1).strip()
+        if "summary" not in fields:
+            matched = re.search(r"(?:简述|背景)\s*[:：]\s*([^\n]+)", text)
+            if matched:
+                fields["summary"] = matched.group(1).strip()
 
         required = {"project", "name", "summary"}
         if not required.issubset(fields):
