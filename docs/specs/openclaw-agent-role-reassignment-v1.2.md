@@ -1,5 +1,8 @@
 # OpenClaw Agent 角色重构方案 v1.2
 
+> **已并入上游方法论**：本文档的核心结论（三层分离、Coordinator Service 主编排、OpenClaw 收敛为 Agent 能力层）已正式写入 Harness Engineering 方法论 v1.3 §2.1.0 和 §3.1 ⓪。
+> 本文保留为决策来源记录，具体 Agent 映射（`ai-founder-brief` / `ai-meeting-closeout` / `ai-ops-router`）仍为本仓库专属配置。
+
 ## 1. 目标
 
 本文档用于基于当前线上 OpenClaw 实例，给出现有 agent 的复用与重构方案。

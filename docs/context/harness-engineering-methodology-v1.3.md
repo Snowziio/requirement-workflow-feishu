@@ -1,14 +1,21 @@
 # Harness Engineering 全自动开发工作流：完整方法论
-## v1.2 | 2026-04-08
-
-> ⚠️ **已过期**：当前方法论版本为 v1.3（2026-04-10）。
-> 本文件仅作历史参考，请使用 `harness-engineering-methodology-v1.3.md`。
+## v1.3 | 2026-04-10
 
 > **贯穿本文的参考案例**
 > 客户需求：在租赁业务平台中，使用大模型自动解读申请人的营业执照与征信信息，生成面向租赁场景的格式化风控报告。
 > 本文所有流程设计均以此案例为锚点进行说明。
 
-> **v1.2 变更摘要**
+> **v1.3 变更摘要**
+> - 新增 §1.3 **层间工作流服务模式**：纵向每层通过 "Workflow Service + Hook 实现 + 能力层" 三层分离的方式落地，作为贯穿全文的顶级架构原则
+> - 需求层架构反转：**Coordinator Service** 取代 OpenClaw 成为真相源与状态机；OpenClaw 降级为 Author/Reviewer Agent
+> - 需求层状态机从 5 态扩展为 **7 态**，AI 审查与人工确认解耦为独立阶段
+> - **双闸门**：AI Ready + Human Confirmed 独立记录、独立失败、独立追溯，状态机层面强制
+> - **三方交互模型**：创建群 / Author 私聊 / 项目群严格区分，各司其职
+> - **正式文档 section-level 幂等重写规则**：禁止追加和全删重建
+> - **UI 设计**由独立状态降为 `onEnter(HUMAN_CONFIRMING)` Hook 层内容，状态机保持 7 态不变
+> - 首个参考实现：`Snowziio/requirement-workflow-feishu`（方法论正文保持与参考实现解耦，两边以定期人工对齐的方式维持一致）
+>
+> **v1.2 变更摘要**（⚠️ 需求层主编排部分已在 v1.3 被反转，保留此处仅作历史记录）
 > - 需求层重设计：引入 OpenClaw Agent 作为飞书生态内的工作流编排器
 > - 需求层内部四阶段子流程：需求创建 → 需求讨论 → UI 设计（可选）→ 需求审查
 > - REQ ID（`REQ-{PROJECT}-{NNN}`）作为跨层级唯一索引，穿透飞书→GitHub 全链路
@@ -34,8 +41,8 @@
 │  人工协同轨（飞书+OpenClaw）  ║    工程自动化轨（GitHub+CI）       │
 ├───────────╥─────────────╥─────╥──────╥──────╥────────────────────┤
 │  需求层    ║规格层A║规格层B║生成层║验证层║集成层║交付层 ← 纵向流程  │
-│ OpenClaw  ║Spec  ║Harness║      ║      ║      ║                  │
-│  驱动     ║      ║       ║      ║      ║      ║                  │
+│Coordinator║Spec  ║Harness║      ║      ║      ║                  │
+│  Service  ║      ║       ║      ║      ║      ║                  │
 ├───────────╨─────────────╨─────╨──────╨──────╨────────────────────┤
 │                  层内子流程（AI自主处理）                           │
 └──────────────────────────────────────────────────────────────────┘
@@ -48,101 +55,217 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：飞书文档 → Bitable → Gi
   ⚡2  质量门（CI通过，合并确认）
   ⚡3  发布门（Staging验收）
 
-需求层内部四阶段（OpenClaw 驱动，飞书内闭环）：
-  创建 → 讨论 → UI设计(可选) → 审查
+需求层状态机（Coordinator Service 驱动，7 状态）：
+  CREATED → DISCUSSING → AI_REVIEWING → HUMAN_CONFIRMING → REVIEWING → REQ_APPROVED
 ```
 
 **纵向流程**：从需求到交付的七层流水线（规格层拆分为A/B两个子层），定义"做什么"。
 **横向基础设施**：贯穿所有层的共用基础设施，分为人工协同和工程自动化两轨。
 **层内子流程**：每层内部的AI自主循环，人不感知，由CLAUDE.md约束。
-**工作流编排器**：OpenClaw Agent 驻扎在飞书群，驱动需求层全流程，跨层状态同步。
+**层间工作流服务**：各层由规则化工作流服务驱动（需求层：Coordinator Service；规格→交付层：checkpoint-handler），OpenClaw 作为 Hook 实现层的 AI Agent 能力提供者。
 
 **核心原则**：人只在四个卡点做判断，其余全部由AI或自动化完成。
+
+### 1.3 层间工作流服务模式
+
+v1.3 新增的顶级架构原则，贯穿 §2 所有纵向层的实现。
+
+#### 1.3.1 背景
+
+纵向流程的每一层（以及层与层之间的衔接点）都对应一套工作方法。这些工作方法有一个共同特征：**高度规则化、基本不以具体项目特性为转移**。例如：
+
+- 需求层的方法："创建 → 多轮讨论 → AI 审查 → 人工确认 → 正式审查"，对任何项目都一样。
+- 规格层→生成层的方法："规格确认 → Harness 生成 → 卡点 → 失败分析 → 重试 → 实现触发"，对任何项目都一样。
+- 生成层→验证层的方法："代码生成 → CI → 失败回灌 → 重试"，同样与项目无关。
+
+既然工作方法是固定的，就应该抽成**可复用的服务**，让每个项目不用重新设计流程。这就是"层间工作流服务"：每一层（或层间衔接点）都有一个属于自己的、规则化的工作流服务。
+
+#### 1.3.2 三层分离
+
+每个层间工作流服务遵循严格的三层架构：
+
+| 层 | 职责 | 特性 |
+|---|---|---|
+| **Workflow Service 层** | 状态机定义、状态转移、hook 派发、真相源持久化、工作流启动与恢复 | 纯规则、无 AI、无具体业务动作、项目无关 |
+| **Hook 实现层** | 状态转移动作的具体实现：onEnter / onExit / onTransition 等回调 | 业务逻辑所在地、调用能力层、可独立单测 |
+| **能力提供层** | AI Agent、人工、外部 API 等可插拔能力 | 可替换、契约化、不持有状态 |
+
+**核心性质**：
+
+1. **Workflow Service 不 import 任何能力层 SDK**。它只知道"状态 X → Y 时触发 hook Z"，不知道 hook Z 内部是调 OpenClaw 还是调 Claude。
+2. **能力替换零成本**。把 OpenClaw 换成 Claude 直连只需改 Hook 实现层，Workflow Service 一行不动。
+3. **状态机可以独立测试**。用 mock hook 注入 Workflow Service，就能单测全部状态转移逻辑，不依赖任何外部服务。
+4. **Hook 实现可以独立测试**。用 mock state 调用 Hook，就能单测外部调用，不依赖状态机。
+5. **每一层的 Workflow Service 都是可独立部署的自研工具**。它们在 §五 自研工具清单中单列一类。
+
+#### 1.3.3 应用示例（前向引用）
+
+| 纵向层 / 层间 | Workflow Service 实现 | 主要 Hook 类型 | 主要能力层 |
+|---|---|---|---|
+| 需求层（§2.1） | Coordinator Service | author/reviewer 触发、Bitable 同步、正式文档 section rewrite、UI 原型生成 | OpenClaw Author/Reviewer Agent、Feishu IM / Bitable / Docx API |
+| 规格层→生成层（§2.2 / §2.3） | checkpoint-handler | 卡点卡片发送、CI 触发、失败分析、PR 创建 | Claude API、GitHub API、Feishu 卡片 |
+| 生成层→验证层（§2.4 / §2.5） | *待建* | CI 执行调度、测试聚合、失败回灌 | GitHub Actions、测试框架 |
+| 验证层→集成层（§2.5 / §2.6） | *待建* | 合并确认、发布准备 | GitHub API、部署脚本 |
+| 集成层→交付层（§2.6 / §2.7） | *待建* | 客户环境部署、验收触达 | deploy.sh、Staging 监控 |
+
+#### 1.3.4 为什么这条原则重要
+
+v1.2 曾把需求层的主编排交给 OpenClaw。首次部署过程中发现 OpenClaw 作为第三方 Agent 平台无法承载"真相源"的职责——session 绑群、长连接不稳定、无法持久化跨进程状态。问题不在 OpenClaw 本身，而在于**把"能力层"错当成了"Workflow Service 层"来用**。
+
+三层分离原则直接杜绝此类错误：
+- 能力层只负责"做什么"，不持有状态、不掌控流程。
+- Workflow Service 层独占流程和状态，实现上可以用最稳定的语言和框架写（不需要追 AI 平台的版本迭代）。
+- Hook 实现层作为两者的粘合层，让整套系统既稳定又灵活。
+
+同时这条原则给后续未建成的纵向层提供了**统一模板**：每加一层只需写一个新的 Workflow Service + 一组新的 Hook，不用重新设计工作流架构。规格层→生成层的 checkpoint-handler 就是按这个模板先落地的第一个实例，需求层的 Coordinator Service 是第二个。
+
+#### 1.3.5 与"层内子流程"的关系
+
+本方法论在前文提到过"层内子流程：AI 自主处理，规则写入各项目的 CLAUDE.md"。层间工作流服务和层内子流程的区别是：
+
+| 维度 | 层间工作流服务 | 层内子流程 |
+|---|---|---|
+| 控制者 | Workflow Service（外部服务） | AI Agent（项目内 CLAUDE.md） |
+| 规则存储 | Workflow Service 代码 | 项目的 CLAUDE.md |
+| 可替换性 | 能力层可换，服务本身稳定 | 整个子流程由项目 CLAUDE.md 定义 |
+| 跨项目性 | 项目无关，一套服务服务所有项目 | 可能因项目定制 |
+| 典型示例 | "需求创建 → 讨论 → 审查 → 确认" | "AI 生成代码 → CI 失败 → 自修复 → 重试" |
+
+两者不冲突：层间工作流服务负责**层之间的衔接**和**层内的结构化阶段**；层内子流程负责**层内部 AI 自主循环**的具体技术细节。举例：规格层→生成层的卡点触发是 checkpoint-handler 的事（层间工作流服务），而生成层内部"AI 写代码 → 失败 → 读 CI → 修 → 重试"是 Coding Agent 按 CLAUDE.md 自主完成的（层内子流程）。
 
 ---
 
 ## 二、纵向流程详解
 
-### 2.1 需求层（OpenClaw 驱动，飞书内闭环）
+### 2.1 需求层（Coordinator Service 驱动，OpenClaw 作为 Author/Reviewer Agent）
 
-**目标**：将模糊的客户需求转化为经过审查的结构化需求文档 + UI 设计稿。
+**目标**：将模糊的客户需求转化为经过双闸门确认的结构化需求文档。
 
 | 项目 | 内容 |
 |---|---|
 | 输入 | 客户描述（口头/文字/会议记录） |
-| 输出 | 经审查的需求文档 + UI 设计稿（可选），存于飞书文档 |
-| 人的工作 | 与 OpenClaw 交互完善需求，审查确认 |
-| AI 的工作 | 引导式需求编写、UI 设计生成、需求审查 |
-| 自动化 | OpenClaw 全流程驱动，Bitable 状态机自动流转 |
+| 输出 | 经 AI 审查 + 人工确认 + 正式审查三道关的需求文档 |
+| 人的工作 | 创建群发起、author 私聊补全字段、项目群确认审查结论 |
+| AI 的工作 | 引导式字段补全（Author Agent）、多轮质量审查（Reviewer Agent）、HUMAN_CONFIRMING 阶段的 UI 原型生成（Hook 内可选） |
+| 自动化 | Coordinator Service 驱动状态机、Hook 层执行 Bitable 写回和正式文档 section rewrite |
 | 索引 | REQ ID（`REQ-{PROJECT}-{NNN}`），跨层唯一标识 |
 
-**需求层在飞书内完全闭环**，不接触 GitHub。输出的需求文档是规格层-A 的输入。
+**需求层在飞书内完全闭环**，不接触 GitHub。输出的需求文档是规格层-A 的输入。本节遵从 §1.3 层间工作流服务模式，Coordinator Service 是该模式在需求层的首个参考实现。
 
-#### 参考基线：OpenClaw 多 Agent 架构
+#### 2.1.0 v1.3 重要变更：从"OpenClaw 主编排"反转为"Coordinator Service 主编排"
 
-> 说明：以下内容是方法论 v1.2 的原始基线表达。
-> 在本仓库对应的当前实现方向中，主协调能力已进一步下沉为独立的 `Coordinator Service`，
-> OpenClaw 只承接需求撰写、UI 设计、需求审查等智能角色。
+v1.2 曾把 OpenClaw 定位为需求层的**主编排器**。在首次部署过程中我们发现这个假设不成立：
 
-```
-Coordinator Service（独立飞书应用后台）
-  ├── 监听飞书事件 / 卡片回调 / Workflow 触发
-  ├── 维护 Bitable 状态机与正式文档
-  └── 调用 OpenClaw 智能角色
-        ├── 需求撰写 Agent ── 引导式需求文档填写，完整度检查
-        ├── UI 设计 Agent ─── 调用 design.md/UIUX ProMax 生成可还原设计稿
-        └── 需求审查 Agent ── 完整性/一致性/可测试性/历史冲突检查
-```
+- **根因**：OpenClaw 的 session 是**按群绑定**的，同一个需求在"创建群"和"author 私聊"两个上下文之间无法共享状态。
+- **次因**：OpenClaw 作为第三方 Agent 平台，没有稳定的事件订阅和长连接保活机制，不能作为需求状态的唯一真相源。
+- **结论**：需求层必须有一个**我们自己掌控**的后端作为真相源，OpenClaw 被降级为纯粹的"字段补全 Agent"和"质量审查 Agent"——即 **Author Agent** 和 **Reviewer Agent**。
 
-#### 需求层内部四阶段子流程
-
-##### 2.1.1 需求创建
+架构反转后的三层分离（符合 §1.3 层间工作流服务模式）：
 
 ```
-人: @OpenClaw 创建需求 "需求名称" "需求简述"
-
-OpenClaw 执行:
-  1. 生成 REQ ID: REQ-{PROJECT}-{NNN}（Bitable 自增）
-  2. Bitable: 新增行（状态=CREATED, 创建人, 时间戳）
-  3. 飞书文档: 从需求模板创建文档
-     → 路径: 项目空间/{项目名}/REQ-{PROJECT}-{NNN}/需求文档
-     → 模板预填: 需求名称、简述、创建人、日期
-     → 注入历史约束摘要（只读参考区，从 GitHub 历史 ACM 拉取）
-  4. 回复群消息:
-     "需求 REQ-XXX-001 已创建
-      📄 需求文档: [链接]
-      📊 追踪状态: [Bitable 链接]
-      @OpenClaw 开始讨论 进入需求细化"
-  5. Bitable 状态: CREATED → DISCUSSING
+Coordinator Service（Workflow Service 层）
+  - 7 态状态机 + 转移表
+  - Bitable / JSON snapshot 持久化
+  - 工作流启动与恢复
+  - 完全不 import OpenClaw / Feishu SDK
+         │ 触发 transition hooks
+         ▼
+状态转移 Hook 实现层
+  - onEnter(DISCUSSING) → 调 Author Agent 补全字段
+  - onEnter(AI_REVIEWING) → 调 Reviewer Agent 判 AI Ready
+  - onEnter(HUMAN_CONFIRMING) → 组装结论 + 生成 UI 原型（如需）→ 推送 author 私聊
+  - onExit(DISCUSSING) → 同步 Bitable + section rewrite 正式文档
+  - onEnter(REVIEWING) → 发送审查卡片到项目群
+         │ 调用
+         ▼
+能力提供层（可替换）
+  - OpenClaw Author Agent / Reviewer Agent（当前实现）
+  - UI 设计 Agent（design.md / UIUX ProMax 或其它）
+  - Feishu IM / Bitable / Docx API
 ```
 
-##### 2.1.2 需求讨论（需求撰写 Agent）
+**Coordinator Service** 是需求层的核心自研组件，地位等同于规格→生成层的 `checkpoint-handler`。首个参考实现见本节末尾的参考实现引用。
+
+#### 2.1.1 三方交互模型
+
+需求层的交互**严格区分三个上下文**，不能混用：
+
+| 上下文 | 人员 | Hook 层职责 | 消息性质 |
+|---|---|---|---|
+| **创建群** | 需求发起人 + 项目相关人 | 接收"创建需求"命令，回复 REQ ID 和入口链接 | 群消息，公开可见 |
+| **Author 私聊** | 仅需求发起人（author） | 逐字段引导补全、接收多轮讨论输入、推送 HUMAN_CONFIRMING 阶段的 AI 结论 + UI 原型 | 1:1 私聊，避免群噪声 |
+| **项目群** | 项目所有干系人 | 发送正式审查结论卡片、接收"通过/打回"的确认 | 群消息，REVIEWING 阶段在这里 |
+
+上下文切换的约束：
+- 同一个需求的状态由 Coordinator Service 唯一持有，三个上下文共享同一个真相源。
+- Hook 层根据当前状态决定向哪个上下文发送消息，不依赖 Agent 平台的 session。
+
+#### 2.1.2 状态机（7 态）
+
+v1.2 的 5 态模型把"AI 审查"和"人工确认"合并成一件事，导致两者无法独立失败独立重试。v1.3 扩展为 7 态：
 
 ```
-人: @OpenClaw 开始讨论
-
-OpenClaw → 调用需求撰写 Agent:
-  → 按需求模板逐项引导（群聊对话式）:
-    1. 问题描述 → 2. 使用场景 → 3. 输入数据 → 4. 输出定义
-    → 5. 边界排除 → 6. 验收标准 → 7. 非功能要求
-  → 每项确认后自动写入飞书文档
-  → 持续检查完整度，提示缺失项和歧义点
-
-完成后回复:
-  "需求文档完整度检查:
-   ✅ 问题描述
-   ✅ 使用场景
-   ✅ 输入（N项）
-   ✅ 输出（N项）
-   ✅ 边界
-   ⚠️ 验收标准: 第2条量化指标不明确
-   ✅ 非功能要求
-   📄 查看完整文档: [链接]
-   @OpenClaw UI设计 → 进入 UI 设计
-   @OpenClaw 进入审查 → 跳过 UI，直接审查"
+CREATED                    ─ 需求刚在创建群里发起
+  ↓  create_requirement
+DISCUSSION_ROUTING         ─ 等待 author 发起私聊建立绑定
+  ↓  handoff_to_author
+DISCUSSING                 ─ author 私聊多轮字段补全
+  ↓  submit_author_round
+AI_REVIEWING               ─ Reviewer Agent 判定 AI Ready
+  ├─ finish_ai_review_not_ready ──→ DISCUSSING（回炉）
+  └─ finish_ai_review_ready     ──↓
+HUMAN_CONFIRMING           ─ author 人工确认 AI 结论（含 UI 原型，如需）
+  ├─ human_confirm_no ──→ DISCUSSING（回炉）
+  └─ human_confirm_yes ──↓
+REVIEWING                  ─ 正式审查（项目群内）
+  ├─ approve_requirement ──→ REQ_APPROVED
+  └─ request_changes    ──→ DISCUSSING（回炉）
+REQ_APPROVED               ─ 终态，进入规格层-A
 ```
 
-**需求文档模板结构**（飞书文档模板）：
+**关键原则**：REVIEWING 是一个**独立阶段**，不能被"穿透"。即使 Human Confirmed = true，也要在项目群里显式发送审查卡片，由人点击"通过"才能进 REQ_APPROVED。这一条是首个参考实现的踩坑修复。
+
+#### 2.1.3 双闸门（AI Ready + Human Confirmed）
+
+v1.2 只有一道"人工确认"门。v1.3 引入**两道独立的门**：
+
+| 闸门 | 判定者 | 判定依据 | 存储字段 | 进入条件 |
+|---|---|---|---|---|
+| **AI Ready** | Reviewer Agent | 7 个讨论字段全部有实质内容 + 一致性/可测试性通过 | Bitable `AI Ready` (bool) | `AI_REVIEWING → HUMAN_CONFIRMING` |
+| **Human Confirmed** | Author（需求发起人） | 私聊里看到 AI 结论 + UI 原型（如需）后主动确认 | Bitable `Human Confirmed` (bool) | `HUMAN_CONFIRMING → REVIEWING` |
+
+**两道门必须都为 true** 才能进入 REVIEWING 阶段。状态机层面强制以下约束（伪代码）：
+
+```
+约束 1（AI Ready 前置）：
+  若 event = HUMAN_CONFIRM_YES 且 ai_ready = false：
+    → 拒绝转移，保持当前状态，原因「AI Ready 未满足，不能进入正式审查」
+
+约束 2（Human Confirmed 前置）：
+  若 event = APPROVE_REQUIREMENT 且 human_confirmed = false：
+    → 拒绝转移，保持当前状态，原因「Human Confirmed 未满足，不能批准需求」
+```
+
+双闸门的意义：AI 和人的判断**独立记录、独立失败、独立追溯**。任何一方觉得不 ready 都能单独回炉，不会互相污染。这两条约束属于 Workflow Service 层的职责，必须在状态机里硬编码，不能下沉到 Hook 层。
+
+#### 2.1.4 状态转移 Hook ↔ Agent 能力契约
+
+Hook 实现层调用能力层时遵循契约化接口，契约与具体 Agent 平台解耦。当前需求层的三类主要 Agent 契约如下：
+
+| 角色 | Hook 调用时机 | 契约输入 | 契约输出 |
+|---|---|---|---|
+| **Author Agent** | `onEnter(DISCUSSING)`、每一轮 author 私聊消息到达时 | 当前需求快照 + 讨论字段进度 + 本轮 author 发言 | 下一个要问的字段 / 下一句话 / 是否等待用户 |
+| **Reviewer Agent** | `onEnter(AI_REVIEWING)` | 完整需求快照（所有讨论字段 + 最近一轮变更） | `ai_ready: bool` + 结论摘要 + 维度打分（完整性/一致性/可测试性/历史冲突） |
+| **UI 设计 Agent**（可选，见 2.1.10） | `onEnter(HUMAN_CONFIRMING)` 且 `需要UI = true` | 完整需求快照 | UI 原型（组件树 + 样式 + 交互逻辑 + 线框图链接） |
+
+**关键原则**：
+- Workflow Service 对 Agent 平台**无感知**。今天 Agent 能力由 OpenClaw 提供，明天可以换成 Claude 直连或任何其他实现，Workflow Service 一行代码不动。
+- 每个契约必须定义**失败语义**：Agent 调用失败时，Hook 层负责重试、回退或记录到 Bitable 追溯字段，状态机不感知失败细节。
+- 契约的具体字段定义以首个参考实现为准。
+
+#### 2.1.5 需求文档模板结构（保留自 v1.2）
+
+需求文档使用固定的 section 结构，7 个 section 与 §2.1.2 状态机中的 7 个讨论字段一一对应，是 §2.1.6 section-level 幂等重写的目标对象。
 
 ```markdown
 # REQ-{ID} {需求名称}
@@ -174,82 +297,32 @@ OpenClaw → 调用需求撰写 Agent:
 性能、安全、合规等约束。
 ```
 
-##### 2.1.3 UI 设计（可选，UI 设计 Agent）
+#### 2.1.6 正式文档 section-rewrite 规则
 
-```
-人: @OpenClaw UI设计
+需求的正式文档（飞书文档）在每一轮 author 提交后都会被**文档同步 Hook** 同步（属于 `onExit(DISCUSSING)` Hook 的职责，不是 Workflow Service 的职责）。v1.3 强制 **section 级幂等重写**规则：
 
-OpenClaw → 调用 UI 设计 Agent:
-  → Bitable 状态: → UI_DESIGNING
-  → 读取需求文档内容（飞书 API）
-  → 使用 design.md / UIUX ProMax 生成 UI 设计稿
-  → 产物格式: 可被 Coding Agent 直接代码还原的结构化描述
-    （组件树 + 样式规范 + 交互逻辑 + 线框图/截图）
-  → 写入飞书文档: 项目空间/{项目名}/REQ-{ID}/UI设计稿
-  → 通知:
-    "UI 设计稿已生成: [链接]
-     包含: N 个页面, M 个组件
-     @OpenClaw 确认UI → 进入审查
-     @OpenClaw 修改UI [修改意见] → 迭代修改"
+1. 文档的每个 section（问题描述 / 使用场景 / 输入 / 输出 / 边界 / 验收标准 / 非功能要求）有**稳定的标题锚点**。
+2. 每次写回**只替换对应 section 的内容**，不追加、不全删重建。
+3. 如果 section 不存在则新建在固定位置；如果存在则原地覆盖。
+4. 写回操作必须**幂等**：同一内容写多次结果一致，不产生重复段落。
 
-人: @OpenClaw 修改UI "报告页面增加导出PDF按钮"
-  → Agent 迭代修改 → 更新飞书文档 → 再次请求确认
+**为什么这么严**：v1.2 方法论没有规定这条，首个参考实现的初版用了"全删重建"的偷懒方式，导致任何人工在文档里加的注解都会被下一轮 AI 写回抹掉。这是严重的信任破坏。section-rewrite 规则把"对正式文档的可预测性"作为一条硬约束。
 
-人: @OpenClaw 确认UI
-  → Bitable: 更新 UI 设计稿链接
-```
+#### 2.1.7 Bitable 需求追踪表（扩展为状态机 + 会话状态）
 
-##### 2.1.4 需求审查（需求审查 Agent）
+v1.2 的 Bitable 只记录**生命周期状态**。v1.3 的 Bitable 同时承担**会话状态存储**。原因：Coordinator Service 需要一份跨重启可恢复的"当前讨论进度"，而 Bitable 本身也是 Feishu Automation 的条件源，两用合一最省事。
 
-```
-人: @OpenClaw 进入审查
-
-OpenClaw → 调用需求审查 Agent:
-  → Bitable 状态: → REVIEWING
-  → 读取: 需求文档 + UI 设计稿（如有）
-  → 审查维度:
-    1. 完整性: 模板字段是否全部填写
-    2. 一致性: 输入/输出/验收标准之间是否矛盾
-    3. 可测试性: 每条验收标准是否可量化验证（为 ACM 转化做准备）
-    4. 历史冲突: 与 Bitable 中其他需求的边界是否重叠
-    5. UI-需求对齐: UI 设计稿是否覆盖了所有使用场景（如有 UI）
-  → 生成审查报告 → 写入飞书文档
-  → 飞书卡片:
-    "[需求审查] REQ-XXX-001 {需求名称}
-
-     ✅ 完整性: 通过
-     ✅ 一致性: 通过
-     ⚠️ 可测试性: 建议明确 AC-002 的测量起止点
-     ✅ 历史冲突: 无冲突
-     ✅ UI对齐: 通过（或 N/A）
-
-     📄 审查报告: [链接]
-
-     [通过，进入规格层] [需要修改]"
-
-人: 点击 [通过，进入规格层]
-  → Bitable 状态: → REQ_APPROVED
-  → 飞书文档: 追加版本标记 "v1 — 需求审查通过 {日期}"
-  → 飞书群消息:
-    "REQ-XXX-001 已通过需求审查 ✅
-     下一步: 创建 Spec 分支，进入规格层-A
-     建议分支名: spec/REQ-XXX-001
-     📄 需求文档: [链接]
-     📄 UI设计稿: [链接]（如有）"
-```
-
-#### Bitable 需求追踪表（全生命周期状态机）
+**生命周期字段**（保留自 v1.2，状态枚举在 v1.3 替换为 7 态需求状态 + 后续层的状态）：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | req_id | 文本（主键） | REQ-RISK-001 |
 | 名称 | 文本 | 需求名称 |
 | 项目 | 单选 | 项目代号 |
-| 状态 | 单选 | CREATED / DISCUSSING / UI_DESIGNING / REVIEWING / REQ_APPROVED / SPEC_DRAFTING / SPEC_LOCKED / HARNESS_GENERATING / HARNESS_READY / IMPLEMENTING / CI_PENDING / STAGING / DEPLOYED |
+| 状态 | 单选 | CREATED / DISCUSSION_ROUTING / DISCUSSING / AI_REVIEWING / HUMAN_CONFIRMING / REVIEWING / REQ_APPROVED / SPEC_DRAFTING / SPEC_LOCKED / HARNESS_GENERATING / HARNESS_READY / IMPLEMENTING / CI_PENDING / STAGING / DEPLOYED |
 | 创建人 | 人员 | |
 | 创建时间 | 日期 | |
 | 需求文档 | 链接 | 飞书文档 URL |
-| UI 设计稿 | 链接 | 飞书文档 URL（可选） |
 | 审查报告 | 链接 | 飞书文档 URL |
 | Spec 版本 | 数字 | 1 |
 | Spec PR | 链接 | GitHub PR URL |
@@ -262,7 +335,17 @@ OpenClaw → 调用需求审查 Agent:
 | 卡点3 时间 | 日期 | 发布确认时间 |
 | 备注 | 文本 | 打回原因/阻塞说明 |
 
-#### REQ ID 跨层穿透映射
+**v1.3 新增的五类会话状态字段**（概念层，不列完整 schema，实际字段名以参考实现为准）：
+
+- **进度类**：`当前阶段` / `当前轮次` / `当前讨论字段` / `已完成字段` / `待补字段`
+- **归属类**：`当前 Owner` / `当前接手角色`
+- **闸门类**：`AI Ready` / `Human Confirmed`
+- **追溯类**：`最近一次 review 结论` / `最近一次提问` / `最近一次写回时间`
+- **UI 类**：`需要UI`（bool） / `UI设计稿链接`（text）
+
+**命名一致性**：Bitable 实际字段名（含大小写）以参考实现为准；方法论正文不再单独描述字段名，避免命名漂移。
+
+#### 2.1.8 REQ ID 跨层穿透映射（保留自 v1.2，无变更）
 
 | 层 | 载体 | REQ ID 出现位置 |
 |---|---|---|
@@ -274,15 +357,15 @@ OpenClaw → 调用需求审查 Agent:
 | 生成层 | GitHub branch | `impl/REQ-{PROJECT}-{NNN}` |
 | 所有卡点 | 飞书卡片 | 卡片标题包含 REQ ID |
 
-#### 飞书文档目录结构（项目→需求映射）
+#### 2.1.9 飞书文档目录结构（项目→需求映射）
 
 ```
 飞书文档空间/
 ├── {项目名-A}/
 │   ├── REQ-PRJA-001 {需求名称}/
-│   │   ├── 需求文档              ← OpenClaw 创建+引导填写
-│   │   ├── UI设计稿（可选）       ← UI 设计 Agent 生成
-│   │   └── 审查报告              ← 需求审查 Agent 生成
+│   │   ├── 需求文档              ← 文档同步 Hook 按 section 规则同步
+│   │   ├── UI设计稿（可选）       ← UI 设计 Agent 生成（需要UI = true 时）
+│   │   └── 审查报告              ← Reviewer Agent 生成，Hook 写入
 │   ├── REQ-PRJA-002 {需求名称}/
 │   │   └── ...
 │   └── ...
@@ -293,14 +376,46 @@ OpenClaw → 调用需求审查 Agent:
     └── UI设计简报模板
 ```
 
-#### 需求版本管理
+#### 2.1.10 需求版本管理
 
 | 操作 | 处理方式 |
 |------|----------|
-| 新需求 | @OpenClaw 创建需求 → 生成新 REQ ID |
-| 需求修改（审查前） | 直接在文档中修改，状态不变 |
-| 需求变更（审查后） | @OpenClaw 变更需求 REQ-XXX-001 → 复制文档为 v2 → 重新走讨论→审查 |
+| 新需求 | 在创建群发起"创建需求"命令 → 生成新 REQ ID |
+| 需求修改（审查前） | 在 author 私聊里继续补全/修改，状态在 DISCUSSING ↔ AI_REVIEWING ↔ HUMAN_CONFIRMING 之间循环 |
+| 需求变更（审查后） | 走"打回"分支（REVIEWING → DISCUSSING），状态回到 DISCUSSING；若是大变更则新开 REQ ID 走 v2 |
 | Bug 修复（已上线） | 不走需求层，直接在 GitHub 开 PR |
+
+#### 2.1.11 UI 设计的嵌入方式
+
+v1.2 曾把 UI 设计建模为独立的 `UI_DESIGNING` 状态。v1.3 改为**挂在 HUMAN_CONFIRMING 阶段的 Hook 实现层**，不独立成状态。
+
+**动机**：UI 设计对"非专业开发者"有不可替代的价值——它让需求发起人用"看得见的原型"而不是"纯逻辑描述"来判断 AI 是否理解对了需求。这是剔除伪需求和推动需求迭代的关键手段。但 UI 设计并不适合独立成状态，因为：
+
+1. 并非所有需求都需要 UI（纯后端 / 数据处理 / API 需求）。
+2. UI 是"呈现给人类的判断材料"，和 AI 审查结论是**同一个判断动作**的两种输入，应该一起呈现给 author。
+3. 独立成状态会让 7 态状态机变复杂，并产生"UI 门"和"Human Confirmed 门"谁先谁后的问题。
+
+**具体机制**：
+
+1. 需求创建或首轮讨论时确定 `需要UI = true/false`（由 author 声明或 Author Agent 判定）。
+2. 当状态从 `AI_REVIEWING` 迁移到 `HUMAN_CONFIRMING` 时，`onEnter(HUMAN_CONFIRMING)` Hook 执行以下动作：
+   - 组装 AI 审查结论（结构化文字）。
+   - 若 `需要UI = true`，调 UI 设计 Agent 生成原型（组件树 + 样式 + 交互 + 线框图），写入飞书文档并更新 `UI设计稿链接`。
+   - 把「审查结论 + UI 原型链接」一起推送到 author 私聊。
+3. Author 的判断同时基于两份材料：
+   - 认可 → `human_confirm_yes` → 进入 REVIEWING。
+   - 不认可（包括"文字看起来对但 UI 不对"）→ `human_confirm_no` → 回 DISCUSSING。
+4. 打回后，author 在 DISCUSSING 里继续补字段。下一次再进入 HUMAN_CONFIRMING 时，UI 原型会**重新生成**，与更新后的需求保持一致。
+
+**与 REVIEWING 阶段的关系**：正式审查（REVIEWING）在项目群里发送的审查卡片，也应该携带 UI 原型链接，供项目相关人一起审查。
+
+**纯后端需求的处理**：`需要UI = false` 时，`onEnter(HUMAN_CONFIRMING)` Hook 跳过 UI 原型生成步骤，只推送审查结论。流程完全不受影响。
+
+**与分层工作流服务模式的契合**：UI 设计 Agent 属于能力层，是可替换的（今天是 design.md / UIUX ProMax，明天可以换 v0 / Figma Make / 其他）。Workflow Service 不感知 UI，UI 的生成时机由 Hook 实现层控制。符合 §1.3 的三层分离原则。
+
+---
+
+**首个参考实现**：`Snowziio/requirement-workflow-feishu`。该仓库是需求层 Coordinator Service + OpenClaw Author/Reviewer 的首个落地版本，具体 schema、状态迁移表、section rewrite 规则、Agent 契约的实现细节见该仓库的 `docs/specs/` 目录。方法论正文保持与参考实现解耦，两边以定期人工对齐的方式维持一致。
 
 ---
 
@@ -932,18 +1047,36 @@ docker compose -f docker/docker-compose.prod.yml up -d
 
 ### 3.1 人工协同轨（飞书 + OpenClaw 生态）
 
-#### ⓪ OpenClaw Agent 配置（v1.2 新增）
+#### ⓪ 层间工作流服务与 OpenClaw 分工（v1.3 更新）
 
-> 注：本节描述的是方法论 v1.2 的原始基线形态。
-> 在本仓库当前落地方案中，主协调能力已下沉为独立的 `Coordinator Service`；
-> OpenClaw 不再承担需求层主编排，而只承接 `author agent` / `review agent` 等智能角色。
+v1.3 对 OpenClaw 角色做了根本性调整：**OpenClaw 不再是工作流编排器，而是 AI Agent 能力提供层**。工作流编排职责由专用的层间工作流服务承担（见 §1.3）。
 
-**角色**：方法论原始基线中，OpenClaw 被视作飞书生态内的工作流编排器，驻扎在项目群。
-当前实现建议中，该能力已拆分为 `Coordinator Service + OpenClaw author/reviewer`。
+**三层结构**：
 
-**部署方式**：OpenClaw 飞书插件 + WebSocket 长连接（与 checkpoint-handler 类似）
+```
+工作流服务层        Hook 实现层            Agent 能力层
+─────────────────  ──────────────────────  ──────────────────
+Coordinator        feishu_gateway.py       OpenClaw
+Service            (Author/Reviewer        (提供 LLM 能力、
+（状态机 +         Hook 实现)              飞书工具调用)
+hook dispatcher）
+                   checkpoint-handler      GitHub Actions
+                   的卡点 Hook 实现        (CI/CD 能力)
+```
 
-**所需 Skills**：
+**Coordinator Service 职责**（需求层工作流服务）：
+- 状态机管理（7 状态，见 §2.1.2）
+- Hook 触发（`onEnter` / `onExit` 每个状态节点）
+- 真实来源（Bitable + JSON 持久化）
+- 不持有任何 AI SDK 依赖
+
+**OpenClaw 职责**（Agent 能力层）：
+- 提供 Author Agent 能力（多轮引导需求填写）
+- 提供 Reviewer Agent 能力（五维度审查）
+- 提供 UI Design Agent 能力（可选，`需要UI=true` 时）
+- 通过 Hook 接口被调用，不主动驱动状态机
+
+**OpenClaw Skills 配置**：
 
 | Skill | 用途 | 来源 |
 |-------|------|------|
@@ -956,22 +1089,20 @@ docker compose -f docker/docker-compose.prod.yml up -d
 | `github-bridge` | GitHub API（分支/PR/文件操作） | 自定义 |
 | `acm-validator` | ACM 兼容性检查（读取历史 ACM 比对） | 自定义 |
 
-**OpenClaw 与 checkpoint-handler 分工**：
+**工作流服务横向对比**：
 
-| 职责 | OpenClaw | checkpoint-handler |
-|------|----------|-------------------|
-| 覆盖层 | 需求层全流程 + 跨层状态同步 | 规格层-B → 交付层 |
-| 运行环境 | 飞书群聊（OpenClaw 飞书插件） | 独立服务（飞书 WebSocket） |
-| 状态存储 | Bitable 需求追踪表 | 无持久状态 |
-| 交互方式 | @mention 对话式 + 飞书卡片 | 仅飞书卡片按钮回调 |
-| GitHub 操作 | 创建分支/PR（半自动化阶段） | 合并 PR/触发部署 |
-| 通知发送 | 需求层所有通知 | 卡点2/3 通知 |
-| 卡点处理 | 卡点1a（方案门） | 卡点1b/2/3 |
+| 维度 | Coordinator Service | checkpoint-handler |
+|------|--------------------|--------------------|
+| 覆盖层 | 需求层 | 规格层-B → 交付层 |
+| 运行方式 | 独立服务（飞书 WebSocket） | 独立服务（飞书 WebSocket） |
+| 状态存储 | Bitable + JSON 持久化 | 无持久状态 |
+| 交互方式 | 创建群 / Author 私聊 / 项目群（三通道） | 仅飞书卡片按钮回调 |
+| AI 能力来源 | OpenClaw（Hook 实现层调用） | GitHub Actions（CI/CD） |
+| 卡点处理 | 卡点1a（方案门，HUMAN_CONFIRMING 状态） | 卡点1b/2/3 |
 
-**协作接口**：
-- 卡点1a 确认后：OpenClaw 更新 Bitable → checkpoint-handler 接管后续卡点
-- 卡点2/3 按钮回调：checkpoint-handler 处理 → 通知 OpenClaw 更新 Bitable 状态
-- 通信方式：共享 Bitable 表（OpenClaw 写，checkpoint-handler 读/写状态字段）
+**两个工作流服务的协作接口**：
+- 卡点1a 完成（`REQ_APPROVED`）→ Coordinator Service 更新 Bitable → 触发 GitHub 分支创建 → checkpoint-handler 接管
+- 通信方式：共享 Bitable 表（Coordinator Service 写需求层状态，checkpoint-handler 写开发层状态字段）
 
 负责回答五类核心问题：
 
@@ -1124,7 +1255,12 @@ ARM服务器作为Self-hosted Runner，承担：
 
 ### 3.3 两轨接口：卡点设计（v1.1 更新为四卡点）
 
-四个卡点是两轨之间的唯一接口：
+四个卡点是两轨之间的唯一接口。其中卡点1a（方案门）有**双门前置条件**（v1.3 新增），由 Coordinator Service 在工作流服务层强制执行，两个条件均满足才允许进入 REVIEWING 状态：
+
+- **AI Ready**：Reviewer Agent 判定需求文档已达到审查标准（`ai_ready = true`）
+- **Human Confirmed**：Author 在私聊确认"信息无误"（`human_confirmed = true`）
+
+双门约束写在 Coordinator Service 的状态机中，不依赖 Hook 实现层的配合。
 
 ```
 工程自动化轨产出结果
@@ -1220,20 +1356,11 @@ Spec 产物：
 - 这是所有自动化的权限基础
 
 ### 4.2 OpenClaw Agent（v1.2 新增）
-
-> 注：以下步骤属于方法论原始基线。
-> 当前仓库的实现方向已经调整为：
-> - `Coordinator Service` 负责飞书事件、状态机、Bitable 和正式文档
-> - OpenClaw 只作为 `author/reviewer` 的智能运行时
 - 安装 OpenClaw 飞书插件
 - 配置飞书连接（WebSocket 长连接）
 - 安装官方 Skills: `feishu-doc`, `feishu-bitable-creator`, `feishu-automation`
 - 开发并安装自定义 Skills: `requirement-writer`, `requirement-reviewer`, `ui-design-bridge`, `github-bridge`
 - 在项目群中添加 OpenClaw Agent，配置 @mention 响应
-  当前实现建议中，这一步会弱化为：
-  - author agent 提供私聊需求构造入口
-  - review agent 仅作为后台智能角色或定向交互角色
-  - 项目群中的主要系统消息由 Coordinator Service 对应机器人发送
 
 ### 4.3 飞书多维表格
 - **需求追踪表**（v1.2 新增）：字段见2.1节 Bitable 表结构，所有项目共用一张表，按项目字段筛选视图
@@ -1370,13 +1497,7 @@ Spec 产物：
 
 ### Phase 1：人工协同轨地基 — OpenClaw + 飞书工作流（当前阶段）
 
-> 注：这里的原始路线图以“OpenClaw 驻扎项目群”作为主路径。
-> 当前仓库对应的实现将调整为：
-> - 创建群中 `@CoordinatorService` 创建需求
-> - 用户私聊 author agent 完成需求构造
-> - 项目群负责同步状态、审查通知与最终结果
-
-**目标**：需求层在飞书内完全闭环，OpenClaw 驱动全流程。
+**目标**：Coordinator Service 稳定运行，OpenClaw Author/Reviewer Agent 接入，需求创建到批准全流程跑通。
 
 ```
 Step 1: OpenClaw 基础配置
@@ -1474,13 +1595,13 @@ Step 5: 端到端验证（用测试需求）
 9. **REQ ID 穿透**：需求 ID 从飞书文档标题贯穿到 GitHub 分支名、PR、ACM metadata，全链路可追溯。（v1.2）
 10. **飞书内闭环**：需求层全部工作在飞书生态内完成，不提前进入 GitHub。（v1.2）
 
-## 附录B：全链路流程总图（v1.2 更新）
+## 附录B：全链路流程总图（v1.3 更新）
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│              飞书需求空间（OpenClaw 驱动，飞书内闭环）              │
+│        飞书需求空间（Coordinator Service 管理，OpenClaw 提供 AI 能力）│
 │                                                                 │
-│  客户需求 → @OpenClaw 创建需求 → REQ-XXX-001                     │
+│  客户需求 → 发消息到创建群 → Coordinator Service 创建 REQ-XXX-001 │
 │                    ↓                                            │
 │  需求讨论（需求撰写 Agent 引导）→ 需求文档完成                     │
 │                    ↓                                            │
@@ -1508,30 +1629,44 @@ Step 5: 端到端验证（用测试需求）
 │  客户环境部署                                                    │
 └─────────────────────────────────────────────────────────────────┘
 
-Bitable 需求追踪表全程记录状态（OpenClaw + checkpoint-handler 协作更新）
+Bitable 需求追踪表全程记录状态（Coordinator Service + checkpoint-handler 协作更新）
 ```
 
-## 附录C：自研工具完成状态（v1.2 更新）
+## 附录C：自研工具完成状态（v1.3 更新）
+
+### 层间工作流服务（v1.3 新增类别）
+
+| # | 工具 | 状态 | 位置 |
+|---|------|------|------|
+| W1 | Coordinator Service（需求层工作流服务） | ✅ 完成（参考实现） | `Snowziio/requirement-workflow-feishu` |
+| W2 | 卡点响应处理器 / checkpoint-handler（规格→交付层） | ✅ 完成 | `services/checkpoint-handler/` |
+
+### 脚本与 CI 工具
 
 | # | 工具 | 状态 | 位置 |
 |---|------|------|------|
 | 1 | 飞书通知脚本 | ✅ 完成 | `scripts/notify_feishu.py` |
-| 2 | 卡点响应处理器 | ✅ 完成 | `services/checkpoint-handler/` |
-| 3 | AI 失败分析脚本 | ✅ 完成 | `scripts/analyze_failure.py` |
+| 2 | AI 失败分析脚本 | ✅ 完成 | `scripts/analyze_failure.py` |
+| 3 | 客户部署脚本 | ✅ 完成 | `deploy/deploy.sh` |
 | 4 | 项目回顾生成器 | □ 待建 | — |
-| 5 | 客户部署脚本 | ✅ 完成 | `deploy/deploy.sh` |
-| 6 | Spec 转化服务 | □ 待建 | — |
-| 7 | spec-to-harness workflow | □ 待建 | `.github/workflows/spec-to-harness.yml` |
-| 8 | harness-confirmed workflow | □ 待建 | `.github/workflows/harness-confirmed.yml` |
-| 9 | ACM 兼容性检查脚本 | □ 待建 | — |
-| 10 | OpenClaw Skill: requirement-writer | □ 待建 | OpenClaw custom skill |
-| 11 | OpenClaw Skill: requirement-reviewer | □ 待建 | OpenClaw custom skill |
-| 12 | OpenClaw Skill: ui-design-bridge | □ 待建 | OpenClaw custom skill |
-| 13 | OpenClaw Skill: github-bridge | □ 待建 | OpenClaw custom skill |
+| 5 | Spec 转化服务 | □ 待建 | — |
+| 6 | spec-to-harness workflow | □ 待建 | `.github/workflows/spec-to-harness.yml` |
+| 7 | harness-confirmed workflow | □ 待建 | `.github/workflows/harness-confirmed.yml` |
+| 8 | ACM 兼容性检查脚本 | □ 待建 | — |
+
+### OpenClaw Hook 实现（Agent 能力层）
+
+| # | 工具 | 状态 | 位置 |
+|---|------|------|------|
+| O1 | OpenClaw Skill: requirement-writer | □ 待建 | OpenClaw custom skill |
+| O2 | OpenClaw Skill: requirement-reviewer | □ 待建 | OpenClaw custom skill |
+| O3 | OpenClaw Skill: ui-design-bridge | □ 待建 | OpenClaw custom skill |
+| O4 | OpenClaw Skill: github-bridge | □ 待建 | OpenClaw custom skill |
 
 ---
 
-*版本：v1.2 | 日期：2026-04-08*
+*版本：v1.3 | 日期：2026-04-10*
+*v1.3 变更：层间工作流服务模式（§1.3）、需求层架构反转（Coordinator Service 主导）、7 状态机、双门约束、UI 设计 Hook 机制、Bitable 会话状态字段扩展*
 *v1.2 变更：OpenClaw 集成、需求层四阶段子流程、Bitable 状态机、REQ ID 跨层穿透*
 *v1.1 变更：规格层拆分、ACM 引入、四卡点模型、两阶段流程设计*
-*下一步：Phase 1 — OpenClaw + 飞书工作流基础设施建设*
+*首个参考实现：Snowziio/requirement-workflow-feishu*

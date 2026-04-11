@@ -163,6 +163,6 @@ review 不应只是阶段末尾的最终审查，而应成为每轮写作的组�
 
 本设计吸收了三类来源：
 
-- Harness Engineering 方法论 v1.2
+- Harness Engineering 方法论 v1.3（本仓库为 v1.3 首个参考实现）
 - 分阶段契约工作流设计
 - 本次 HARNESS 环境的实际联调和缺陷观察

@@ -19,7 +19,7 @@
 
 ## 当前阶段
 
-当前仓库已完成 v1.2 的设计收敛，架构边界已经更新为：
+本仓库是 **Harness Engineering 方法论 v1.3 的首个参考实现**，架构边界：
 
 - `Coordinator Service`：独立飞书应用后台，负责事件监听、状态机、Bitable、正式文档写回
 - OpenClaw：只承接 `author agent` 与 `review agent` 两类智能能力
@@ -51,7 +51,7 @@
 - `staging.yml`：`main` 分支构建镜像并部署到 staging
 - `deploy.yml`：按 customer 配置做正式部署
 - `bootstrap-bitable-app.yml`：创建新的 Bitable app 与 Requirements 表
-- `sync-bitable-schema.yml`：按 v1.2 规范自动补齐当前 Bitable 字段
+- `sync-bitable-schema.yml`：按 v1.3 规范自动补齐当前 Bitable 字段
 
 当前不再把 `coordinator-service` 走单独的旁路部署流，而是回到 `harness-scaffold` 标准 git 驱动发布方式。
 
