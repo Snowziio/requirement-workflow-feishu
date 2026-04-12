@@ -16,6 +16,15 @@ from .models import (
     utc_now,
 )
 
+LEGACY_STATUS_ALIASES = {
+    "DISCUSSION_ROUTING": WorkflowStatus.DRAFTING.value,
+    "DISCUSSING": WorkflowStatus.DRAFTING.value,
+    "AI_REVIEWING": WorkflowStatus.AI_REVIEW.value,
+    "HUMAN_CONFIRMING": WorkflowStatus.HUMAN_CONFIRM.value,
+    "REVIEWING": WorkflowStatus.FINAL_REVIEW.value,
+    "REQ_APPROVED": WorkflowStatus.APPROVED.value,
+}
+
 
 class JsonStateStore:
     """Very small persistence layer for early deployment and local testing."""
@@ -52,13 +61,15 @@ class JsonStateStore:
         discussion_history_payload = data.get("discussion_history", [])
         review_history_payload = data.get("review_history", [])
         human_review_history_payload = data.get("human_review_history", [])
+        raw_status = str(data.get("status", WorkflowStatus.CREATED.value))
+        normalized_status = LEGACY_STATUS_ALIASES.get(raw_status, raw_status)
         requirement = Requirement(
             req_id=data["req_id"],
             name=data["name"],
             project=data["project"],
             summary=data["summary"],
             creator=data["creator"],
-            status=WorkflowStatus(data.get("status", WorkflowStatus.CREATED.value)),
+            status=WorkflowStatus(normalized_status),
             current_phase=data.get("current_phase", "需求构造"),
             current_round=data.get("current_round", 0),
             current_discussion_field=data.get("current_discussion_field", ""),
