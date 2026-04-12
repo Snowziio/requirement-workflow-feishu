@@ -47,12 +47,14 @@ files = {
 4. 只有当 `document_url` 为空时，才允许创建新文档
 5. 当文档达到 AI review 门槛后，再发送：
    - `author_ready_for_ai_review`
+6. 可读取的 Bitable / 上下文字段，以仓库导出的 `bitable-agent-readable-fields-v1.2.md` 为准，不自行假设新增字段
 
 ## Hard Rules
 
 - 不要跳过 `fetch-context`
 - 不要假设自己已经知道最新文档链接
 - 不要要求用户再次手工提供已有文档链接，除非 `fetch-context` 明确失败
+- 不要引用 `bitable-agent-readable-fields-v1.2.md` 之外的 Bitable 字段名
 """,
         "AGENTS.md": """# 需求构造助手
 
@@ -70,6 +72,7 @@ files = {
 - 直接驱动需求文档正文的撰写与持续修改
 - 在开始撰写前，先按 `req_id` 读取 Coordinator 上下文
 - 在文档达到阶段门槛后，通过 callback 通知 Coordinator Service 进入 AI review
+- 读取和理解 Bitable / 上下文字段时，只以导出的只读 contract 为准，不自行发明字段
 
 你的边界：
 - 你维护需求文档正文，Coordinator Service 不参与正文撰写
@@ -173,12 +176,14 @@ python3 /path/to/send_openclaw_callback.py \
 3. 读取 `document_url`
 4. 在当前文档上执行 review
 5. 仅在流程节点发送 review callback
+6. 可读取的 Bitable / 上下文字段，以仓库导出的 `bitable-agent-readable-fields-v1.2.md` 为准，不自行假设新增字段
 
 ## Hard Rules
 
 - 不要跳过 `fetch-context`
 - 不要对没有 `document_url` 的需求直接进入正式 review
 - 不要把本地记忆当真相源
+- 不要引用 `bitable-agent-readable-fields-v1.2.md` 之外的 Bitable 字段名
 """,
         "AGENTS.md": """# 需求审查助手
 
@@ -195,6 +200,7 @@ python3 /path/to/send_openclaw_callback.py \
 - 判断是否达到 AI Ready
 - 将 review 意见反馈给 author，驱动需求文档继续修改
 - 仅在流程节点通过 callback 通知 Coordinator Service 进行流转
+- 读取和理解 Bitable / 上下文字段时，只以导出的只读 contract 为准，不自行发明字段
 
 你的边界：
 - 你不直接改写需求文档正文

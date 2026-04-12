@@ -114,3 +114,28 @@
   [send_openclaw_callback.py](/Users/daxin/work/requirement-workflow-feishu/scripts/send_openclaw_callback.py)
 - 最小闭环 smoke 脚本：
   [run_openclaw_smoke.py](/Users/daxin/work/requirement-workflow-feishu/scripts/run_openclaw_smoke.py)
+
+## Bitable Schema 约定
+
+- Bitable 字段的唯一真相源是 [bitable_schema_v12.json](/Users/daxin/work/requirement-workflow-feishu/bitable_schema_v12.json)
+- Coordinator 的写入字段映射由 [bitable_schema.py](/Users/daxin/work/requirement-workflow-feishu/src/requirement_workflow_v12/bitable_schema.py) 从 schema 派生
+- 建表与补字段脚本统一读取同一份 schema：
+  - [bootstrap_bitable_app_v12.py](/Users/daxin/work/requirement-workflow-feishu/scripts/bootstrap_bitable_app_v12.py)
+  - [sync_bitable_schema_v12.py](/Users/daxin/work/requirement-workflow-feishu/scripts/sync_bitable_schema_v12.py)
+- 给 author / reviewer 使用的只读字段契约由脚本导出，不手写维护：
+  - [export_agent_bitable_contract_v12.py](/Users/daxin/work/requirement-workflow-feishu/scripts/export_agent_bitable_contract_v12.py)
+  - 产物：[bitable-agent-readable-fields-v1.2.md](/Users/daxin/work/requirement-workflow-feishu/docs/specs/bitable-agent-readable-fields-v1.2.md)
+
+## 修改 Bitable 字段的标准步骤
+
+1. 先修改 [bitable_schema_v12.json](/Users/daxin/work/requirement-workflow-feishu/bitable_schema_v12.json)
+2. 执行 `python3 scripts/export_agent_bitable_contract_v12.py`
+3. 执行 `python3 -m unittest discover -s tests -v`
+4. 如果需要创建或补齐线上字段，执行 schema sync 工作流或运行 [sync_bitable_schema_v12.py](/Users/daxin/work/requirement-workflow-feishu/scripts/sync_bitable_schema_v12.py)
+5. 同步远端 author / reviewer 模板，确保它们只引用 [bitable-agent-readable-fields-v1.2.md](/Users/daxin/work/requirement-workflow-feishu/docs/specs/bitable-agent-readable-fields-v1.2.md) 中定义的字段
+
+禁止事项：
+
+- 不要只改 `FeishuGateway._record_fields()` 而不改 schema
+- 不要只改 Bitable 线上表结构而不回写 schema
+- 不要在 agent 的 `SKILL.md` / `TOOLS.md` 中手写新的 Bitable 字段名而不先更新 schema

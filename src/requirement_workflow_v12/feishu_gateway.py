@@ -45,6 +45,7 @@ except ImportError:  # pragma: no cover - optional during tests before runtime d
     CreateMessageRequestBody = Any
 
 from .config import Settings
+from .bitable_schema import build_coordinator_record_fields
 from .models import Requirement
 
 
@@ -273,26 +274,7 @@ class FeishuGateway:
         self._ensure_success(response, "create document blocks")
 
     def _record_fields(self, requirement: Requirement) -> dict[str, object]:
-        return {
-            "REQ ID": requirement.req_id,
-            "需求名称": requirement.name,
-            "项目代号": requirement.project,
-            "需求简述": requirement.summary,
-            "状态": requirement.status.value,
-            "当前阶段": requirement.current_phase,
-            "当前轮次": requirement.current_round,
-            "当前讨论字段": requirement.current_discussion_field,
-            "当前Owner": requirement.current_owner,
-            "当前接手角色": requirement.current_role_label,
-            "已完成字段": json.dumps(requirement.completed_fields, ensure_ascii=False),
-            "待补字段": json.dumps(requirement.pending_fields, ensure_ascii=False),
-            "最近一次提问": requirement.latest_question,
-            "最近一次review结论": requirement.latest_review_summary,
-            "AI Ready": requirement.ai_ready,
-            "Human Confirmed": requirement.human_confirmed,
-            "需求文档链接": requirement.document_url,
-            "最近一次写回时间": requirement.latest_writeback_at.isoformat() if requirement.latest_writeback_at else "",
-        }
+        return build_coordinator_record_fields(requirement)
 
     def _list_block_children(self, document_id: str, block_id: str) -> list[Block]:
         items: list[Block] = []

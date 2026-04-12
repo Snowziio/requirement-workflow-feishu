@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import uuid
-from dataclasses import dataclass
+from pathlib import Path
 
 import lark_oapi as lark
 from lark_oapi.api.bitable.v1 import (
@@ -14,38 +14,10 @@ from lark_oapi.api.bitable.v1 import (
     UpdateAppTableFieldRequest,
 )
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
 
-FIELD_TYPE_TEXT = 1
-FIELD_TYPE_NUMBER = 2
-FIELD_TYPE_CHECKBOX = 7
-
-
-@dataclass(frozen=True)
-class FieldSpec:
-    name: str
-    field_type: int
-
-
-FIELD_SPECS: list[FieldSpec] = [
-    FieldSpec("REQ ID", FIELD_TYPE_TEXT),
-    FieldSpec("需求名称", FIELD_TYPE_TEXT),
-    FieldSpec("项目代号", FIELD_TYPE_TEXT),
-    FieldSpec("需求简述", FIELD_TYPE_TEXT),
-    FieldSpec("状态", FIELD_TYPE_TEXT),
-    FieldSpec("当前阶段", FIELD_TYPE_TEXT),
-    FieldSpec("当前轮次", FIELD_TYPE_NUMBER),
-    FieldSpec("当前讨论字段", FIELD_TYPE_TEXT),
-    FieldSpec("当前Owner", FIELD_TYPE_TEXT),
-    FieldSpec("当前接手角色", FIELD_TYPE_TEXT),
-    FieldSpec("已完成字段", FIELD_TYPE_TEXT),
-    FieldSpec("待补字段", FIELD_TYPE_TEXT),
-    FieldSpec("最近一次提问", FIELD_TYPE_TEXT),
-    FieldSpec("最近一次review结论", FIELD_TYPE_TEXT),
-    FieldSpec("AI Ready", FIELD_TYPE_CHECKBOX),
-    FieldSpec("Human Confirmed", FIELD_TYPE_CHECKBOX),
-    FieldSpec("需求文档链接", FIELD_TYPE_TEXT),
-    FieldSpec("最近一次写回时间", FIELD_TYPE_TEXT),
-]
+from requirement_workflow_v12.bitable_schema import coordinator_managed_field_specs
 
 
 def required_env(name: str) -> str:
@@ -127,11 +99,12 @@ def main() -> int:
     app_token = required_env("FEISHU_BITABLE_APP_TOKEN")
     table_id = required_env("FEISHU_BITABLE_TABLE_ID")
     client = build_client()
+    field_specs = coordinator_managed_field_specs()
 
     current_fields = list_fields(client, app_token, table_id)
     print(f"[info] current field count: {len(current_fields)}")
 
-    for spec in FIELD_SPECS:
+    for spec in field_specs:
         existing = current_fields.get(spec.name)
         if existing is None:
             create_field(client, app_token, table_id, spec)

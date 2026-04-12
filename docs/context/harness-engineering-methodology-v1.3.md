@@ -345,6 +345,15 @@ v1.2 的 Bitable 只记录**生命周期状态**。v1.3 的 Bitable 同时承担
 
 **命名一致性**：Bitable 实际字段名（含大小写）以参考实现为准；方法论正文不再单独描述字段名，避免命名漂移。
 
+**参考实现约定**：字段真相源固定为仓库根目录的 `bitable_schema_v12.json`。任何字段新增、重命名、类型变更，必须先修改该 schema，再派生更新：
+
+- Coordinator 写入映射
+- Bitable 建表 / schema sync 脚本
+- author / reviewer 可读字段 contract
+- 远端 agent 模板中的字段说明
+
+禁止直接在代码、Bitable 后台或 agent 模板里绕过 schema 单独新增字段，否则视为配置漂移。
+
 #### 2.1.8 REQ ID 跨层穿透映射（保留自 v1.2，无变更）
 
 | 层 | 载体 | REQ ID 出现位置 |

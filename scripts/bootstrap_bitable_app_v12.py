@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
-from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 import lark_oapi as lark
@@ -15,37 +15,10 @@ from lark_oapi.api.bitable.v1 import (
     ReqTable,
 )
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
 
-FIELD_TYPE_TEXT = 1
-FIELD_TYPE_NUMBER = 2
-FIELD_TYPE_CHECKBOX = 7
-
-
-@dataclass(frozen=True)
-class FieldSpec:
-    name: str
-    field_type: int
-
-
-FIELD_SPECS: list[FieldSpec] = [
-    FieldSpec("REQ ID", FIELD_TYPE_TEXT),
-    FieldSpec("需求名称", FIELD_TYPE_TEXT),
-    FieldSpec("项目代号", FIELD_TYPE_TEXT),
-    FieldSpec("需求简述", FIELD_TYPE_TEXT),
-    FieldSpec("状态", FIELD_TYPE_TEXT),
-    FieldSpec("当前阶段", FIELD_TYPE_TEXT),
-    FieldSpec("当前轮次", FIELD_TYPE_NUMBER),
-    FieldSpec("当前讨论字段", FIELD_TYPE_TEXT),
-    FieldSpec("当前Owner", FIELD_TYPE_TEXT),
-    FieldSpec("当前接手角色", FIELD_TYPE_TEXT),
-    FieldSpec("已完成字段", FIELD_TYPE_TEXT),
-    FieldSpec("待补字段", FIELD_TYPE_TEXT),
-    FieldSpec("最近一次提问", FIELD_TYPE_TEXT),
-    FieldSpec("最近一次review结论", FIELD_TYPE_TEXT),
-    FieldSpec("AI Ready", FIELD_TYPE_CHECKBOX),
-    FieldSpec("Human Confirmed", FIELD_TYPE_CHECKBOX),
-    FieldSpec("需求文档链接", FIELD_TYPE_TEXT),
-]
+from requirement_workflow_v12.bitable_schema import coordinator_managed_field_specs
 
 
 def required_env(name: str) -> str:
@@ -70,8 +43,8 @@ def build_client() -> lark.Client:
 
 def build_headers() -> list[AppTableCreateHeader]:
     return [
-        AppTableCreateHeader.builder().field_name(spec.name).type(spec.field_type).build()
-        for spec in FIELD_SPECS
+        AppTableCreateHeader.builder().field_name(spec.name).type(spec.bitable_type).build()
+        for spec in coordinator_managed_field_specs()
     ]
 
 

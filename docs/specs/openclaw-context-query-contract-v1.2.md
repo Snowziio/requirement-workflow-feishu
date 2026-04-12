@@ -11,6 +11,7 @@
 - `Coordinator Service` 仍然是状态机与 Bitable 的真相源
 - `author` / `reviewer` 可以读取上下文，但不能把自己当成流程真相源
 - 读取接口只返回只读上下文，不提供写能力
+- Bitable 字段名以 [bitable-agent-readable-fields-v1.2.md](/Users/daxin/work/requirement-workflow-feishu/docs/specs/bitable-agent-readable-fields-v1.2.md) 和仓库根目录的 `bitable_schema_v12.json` 为准
 
 ## 3. Endpoint
 

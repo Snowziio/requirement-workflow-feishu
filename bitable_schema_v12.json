@@ -1,0 +1,149 @@
+{
+  "version": "v1.2",
+  "fields": [
+    {
+      "name": "REQ ID",
+      "field_type": "text",
+      "required": true,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "需求唯一主键。"
+    },
+    {
+      "name": "需求名称",
+      "field_type": "text",
+      "required": true,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "需求标题。"
+    },
+    {
+      "name": "项目代号",
+      "field_type": "text",
+      "required": true,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "需求所属项目。"
+    },
+    {
+      "name": "需求简述",
+      "field_type": "text",
+      "required": true,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "创建需求时的简要背景。"
+    },
+    {
+      "name": "状态",
+      "field_type": "text",
+      "required": true,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "状态机主状态。"
+    },
+    {
+      "name": "当前阶段",
+      "field_type": "text",
+      "required": true,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "面向人的当前阶段展示。"
+    },
+    {
+      "name": "当前轮次",
+      "field_type": "number",
+      "required": true,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "当前需求构造或 review 的轮次。"
+    },
+    {
+      "name": "当前讨论字段",
+      "field_type": "text",
+      "required": true,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "当前聚焦的讨论字段。"
+    },
+    {
+      "name": "当前Owner",
+      "field_type": "text",
+      "required": true,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "当前流程接手者。"
+    },
+    {
+      "name": "当前接手角色",
+      "field_type": "text",
+      "required": true,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "当前接手角色的人类可读标签。"
+    },
+    {
+      "name": "已完成字段",
+      "field_type": "text",
+      "required": true,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "已完成字段的 JSON 数组字符串。"
+    },
+    {
+      "name": "待补字段",
+      "field_type": "text",
+      "required": true,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "待补字段的 JSON 数组字符串。"
+    },
+    {
+      "name": "最近一次提问",
+      "field_type": "text",
+      "required": false,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "当前轮对用户的最新追问。"
+    },
+    {
+      "name": "最近一次review结论",
+      "field_type": "text",
+      "required": false,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "最近一次 review 的摘要结论。"
+    },
+    {
+      "name": "AI Ready",
+      "field_type": "checkbox",
+      "required": true,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "是否达到人工确认门槛。"
+    },
+    {
+      "name": "Human Confirmed",
+      "field_type": "checkbox",
+      "required": true,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "人工确认是否已通过。"
+    },
+    {
+      "name": "需求文档链接",
+      "field_type": "text",
+      "required": false,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "需求文档的唯一复用链接。"
+    },
+    {
+      "name": "最近一次写回时间",
+      "field_type": "text",
+      "required": false,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "description": "Coordinator 最近一次成功写回状态的 ISO 时间戳。"
+    }
+  ]
+}
