@@ -297,8 +297,8 @@ class CoordinatorRuntimeApp:
     def _handle_author_private_message(self, context: MessageContext) -> list[OutboundMessage]:
         text = context.text.strip()
         LOGGER.info("Handling p2p command user_id=%s chat_id=%s text=%s", context.user_id, context.chat_id, text)
-        if text.startswith("开始需求构造 "):
-            req_id = text.replace("开始需求构造 ", "", 1).strip()
+        req_id = self._extract_author_start_req_id(text)
+        if req_id is not None:
             response = self.service.start_author_private_session(
                 AuthorStartBinding(
                     req_id=req_id,
@@ -357,6 +357,15 @@ class CoordinatorRuntimeApp:
                     ]
 
         return [OutboundMessage(receive_id=context.chat_id, text=response.message)]
+
+    def _extract_author_start_req_id(self, text: str) -> str | None:
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if line.startswith("开始需求构造 "):
+                req_id = line.replace("开始需求构造 ", "", 1).strip()
+                if req_id:
+                    return req_id
+        return None
 
     def _handle_author_turn(self, context: MessageContext, requirement: Requirement) -> list[OutboundMessage]:
         current_field = requirement.current_discussion_field

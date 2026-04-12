@@ -210,7 +210,7 @@
 - `FINAL_REVIEW`
 - `APPROVED`
 
-如果线上 Bitable 里仍有旧值：
+旧值不再作为正式状态使用。如果线上 Bitable 里仍有以下历史值：
 
 - `DISCUSSION_ROUTING`
 - `DISCUSSING`
@@ -219,7 +219,15 @@
 - `REVIEWING`
 - `REQ_APPROVED`
 
-需要先执行状态迁移，再继续用新版本 Coordinator。
+需要先执行状态迁移脚本，再继续用新版本 Coordinator。
+
+推荐迁移映射：
+
+- `DISCUSSION_ROUTING` / `DISCUSSING` -> `DRAFTING`
+- `AI_REVIEWING` -> `AI_REVIEW`
+- `HUMAN_CONFIRMING` -> `HUMAN_CONFIRM`
+- `REVIEWING` -> `FINAL_REVIEW`
+- `REQ_APPROVED` -> `APPROVED`
 
 ## 4. v1.2 状态机
 
@@ -242,6 +250,21 @@
 
 - `APPROVED`
   - 需求层通过
+
+最小流转图：
+
+```mermaid
+stateDiagram-v2
+    [*] --> DRAFTING
+    DRAFTING --> AI_REVIEW: author_submit
+    AI_REVIEW --> DRAFTING: ai_review_reject
+    AI_REVIEW --> HUMAN_CONFIRM: ai_review_pass
+    HUMAN_CONFIRM --> DRAFTING: human_confirm_no
+    HUMAN_CONFIRM --> FINAL_REVIEW: human_confirm_yes
+    FINAL_REVIEW --> DRAFTING: final_review_reject
+    FINAL_REVIEW --> APPROVED: final_review_pass
+    APPROVED --> [*]
+```
 
 ## 4.2 触发事件列表
 

@@ -18,7 +18,7 @@ from requirement_workflow_v12 import (
     Settings,
     WorkflowStatus,
 )
-from requirement_workflow_v12.service_app import CoordinatorRuntimeApp
+from requirement_workflow_v12.service_app import CoordinatorRuntimeApp, MessageContext
 
 
 class RequirementWorkflowV12Test(unittest.TestCase):
@@ -182,6 +182,67 @@ class RequirementWorkflowV12Test(unittest.TestCase):
             self.assertEqual(refreshed.current_round, 3)
             self.assertEqual(refreshed.status, WorkflowStatus.AI_REVIEWING)
             self.assertEqual(refreshed.document_url, "https://example.com/doc/REQ-HARNESS-001")
+
+    def test_author_private_message_accepts_forwarded_handoff_package(self) -> None:
+        class FakeGateway:
+            def sync_requirement_document(self, requirement) -> None:
+                return None
+
+            def update_requirement_record(self, requirement) -> None:
+                return None
+
+            def bitable_url(self) -> str:
+                return "https://example.com/bitable"
+
+        with TemporaryDirectory() as temp_dir:
+            runtime_service = CoordinatorService()
+            response = runtime_service.create_requirement_from_group(
+                CreationRequest(
+                    project="HARNESS",
+                    name="启动包转发测试",
+                    summary="验证私发启动指令整段转发也能被识别。",
+                    creator="tester",
+                    creator_user_id="user-1",
+                    creation_chat_id="chat-1",
+                )
+            )
+            requirement = runtime_service.get_requirement(response.req_id)
+            assert requirement is not None
+            requirement.document_url = "https://example.com/doc/REQ-HARNESS-001"
+
+            app = CoordinatorRuntimeApp(
+                Settings(
+                    feishu_app_id="app-id",
+                    feishu_app_secret="app-secret",
+                    state_store_path=str(Path(temp_dir) / "state.json"),
+                ),
+                service=runtime_service,
+                gateway=FakeGateway(),
+            )
+
+            forwarded_text = (
+                "请私聊需求构造助手，并发送以下完整上下文：\n\n"
+                f"开始需求构造 {response.req_id}\n"
+                "需求名称：启动包转发测试\n"
+                "需求简述：验证私发启动指令整段转发也能被识别。\n"
+                "需求文档：https://example.com/doc/REQ-HARNESS-001\n"
+                "多维表格：https://example.com/bitable\n"
+            )
+            outbound = app.handle_text_message(
+                MessageContext(
+                    chat_id="p2p-chat-1",
+                    chat_type="p2p",
+                    user_id="user-1",
+                    text=forwarded_text,
+                    message_id="msg-1",
+                )
+            )
+
+            self.assertEqual(len(outbound), 1)
+            self.assertIn("确认开始", outbound[0].text)
+            refreshed = runtime_service.get_requirement(response.req_id)
+            assert refreshed is not None
+            self.assertEqual(refreshed.author_dm_chat_id, "p2p-chat-1")
 
     def test_openclaw_author_turn_callback_rejects_missing_signature(self) -> None:
         class FakeGateway:
