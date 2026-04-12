@@ -19,6 +19,15 @@ from .state_machine import Event, apply_event
 
 LOGGER = logging.getLogger(__name__)
 
+AUTHOR_EVENT_ALIASES = {
+    "author_ready_for_ai_review": "author_submit",
+}
+
+REVIEW_EVENT_ALIASES = {
+    "review_returned_for_revision": "ai_review_reject",
+    "review_ready_for_human_confirmation": "ai_review_pass",
+}
+
 
 @dataclass
 class AuthorTurnResult:
@@ -131,12 +140,9 @@ class CoordinatorService:
         requirement.author_dm_chat_id = binding.author_dm_chat_id
         requirement.active_private_binding_confirmed = False
         self.active_req_by_user[binding.user_id] = requirement.req_id
-        if requirement.status != WorkflowStatus.DISCUSSING:
-            self.handoff_to_author(requirement)
-        else:
-            requirement.current_owner = "author"
-            requirement.current_role_label = "需求构造Agent"
-            requirement.touch()
+        requirement.current_owner = "author"
+        requirement.current_role_label = "需求构造Agent"
+        requirement.touch()
         LOGGER.info(
             "Started author private session req_id=%s user_id=%s chat_id=%s status=%s",
             requirement.req_id,
@@ -220,34 +226,14 @@ class CoordinatorService:
         return requirement
 
     def handoff_to_author(self, requirement: Requirement) -> Requirement:
-        decision = apply_event(requirement.status, Event.HANDOFF_TO_AUTHOR)
-        if not decision.allowed:
-            raise ValueError(decision.message)
-        requirement.status = decision.next_status
         requirement.current_owner = "author"
         requirement.current_role_label = "需求构造Agent"
         requirement.touch()
-        LOGGER.info("Handed off to author req_id=%s status=%s", requirement.req_id, requirement.status.value)
-        return requirement
-
-    def ensure_author_handoff(self, requirement: Requirement, *, reason: str) -> Requirement:
-        if requirement.status == WorkflowStatus.DISCUSSION_ROUTING:
-            requirement = self.handoff_to_author(requirement)
-            LOGGER.info(
-                "Auto-handed off requirement to author req_id=%s reason=%s status=%s",
-                requirement.req_id,
-                reason,
-                requirement.status.value,
-            )
+        LOGGER.info("Prepared author ownership req_id=%s status=%s", requirement.req_id, requirement.status.value)
         return requirement
 
     def handle_author_turn(self, requirement: Requirement, turn: AuthorTurnResult) -> Requirement:
-        decision = apply_event(requirement.status, Event.SUBMIT_AUTHOR_ROUND)
-        if not decision.allowed:
-            raise ValueError(decision.message)
-
         requirement.current_round += 1
-        requirement.status = decision.next_status
         requirement.document = self.compiler.rewrite_sections(requirement, turn.updates)
         requirement.latest_writeback_at = requirement.document.updated_at
         requirement.discussion_history.append(
@@ -270,8 +256,8 @@ class CoordinatorService:
         )
         requirement.latest_question = turn.next_question
         requirement.current_phase = "需求构造"
-        requirement.current_owner = "reviewer"
-        requirement.current_role_label = "审查Agent"
+        requirement.current_owner = "author"
+        requirement.current_role_label = "需求构造Agent"
         requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
         LOGGER.info(
@@ -298,7 +284,12 @@ class CoordinatorService:
         return self.handle_author_turn(requirement, turn)
 
     def handle_review_result(self, requirement: Requirement, result: ReviewResult) -> Requirement:
-        event = Event.FINISH_AI_REVIEW_READY if result.ready_for_human_confirmation else Event.FINISH_AI_REVIEW_NOT_READY
+        if requirement.status == WorkflowStatus.DRAFTING:
+            author_submit = apply_event(requirement.status, Event.AUTHOR_SUBMIT)
+            if not author_submit.allowed:
+                raise ValueError(author_submit.message)
+            requirement.status = author_submit.next_status
+        event = Event.AI_REVIEW_PASS if result.ready_for_human_confirmation else Event.AI_REVIEW_REJECT
         decision = apply_event(requirement.status, event)
         if not decision.allowed:
             raise ValueError(decision.message)
@@ -339,11 +330,10 @@ class CoordinatorService:
         requirement = self.requirements.get(payload.req_id)
         if requirement is None:
             raise ValueError(f"未知需求：{payload.req_id}")
-        if payload.event != "author_ready_for_ai_review":
+        event_name = AUTHOR_EVENT_ALIASES.get(payload.event, payload.event)
+        if event_name != "author_submit":
             raise ValueError(f"不支持的 author 事件：{payload.event}")
-        requirement = self.ensure_author_handoff(requirement, reason="author_event")
-
-        decision = apply_event(requirement.status, Event.SUBMIT_AUTHOR_ROUND)
+        decision = apply_event(requirement.status, Event.AUTHOR_SUBMIT)
         if not decision.allowed:
             raise ValueError(decision.message)
 
@@ -362,7 +352,7 @@ class CoordinatorService:
         LOGGER.info(
             "Accepted author event req_id=%s event=%s status=%s round=%s document_url=%s",
             requirement.req_id,
-            payload.event,
+            event_name,
             requirement.status.value,
             requirement.current_round,
             requirement.document_url,
@@ -373,15 +363,16 @@ class CoordinatorService:
         requirement = self.requirements.get(payload.req_id)
         if requirement is None:
             raise ValueError(f"未知需求：{payload.req_id}")
+        event_name = REVIEW_EVENT_ALIASES.get(payload.event, payload.event)
 
         supported_events = {
-            "review_returned_for_revision",
-            "review_ready_for_human_confirmation",
+            "ai_review_reject",
+            "ai_review_pass",
         }
-        if payload.event not in supported_events:
+        if event_name not in supported_events:
             raise PermissionError(
                 "review callback 只允许 reviewer 上报 AI review 结论："
-                "`review_returned_for_revision` 或 `review_ready_for_human_confirmation`。"
+                "`ai_review_reject` 或 `ai_review_pass`。"
                 "人工确认和正式审查必须由 Coordinator 的人工操作入口推进。"
             )
 
@@ -390,8 +381,8 @@ class CoordinatorService:
         requirement.latest_review_summary = payload.review_summary
         requirement.latest_writeback_at = utc_now()
 
-        if payload.event == "review_returned_for_revision":
-            decision = apply_event(requirement.status, Event.FINISH_AI_REVIEW_NOT_READY)
+        if event_name == "ai_review_reject":
+            decision = apply_event(requirement.status, Event.AI_REVIEW_REJECT)
             if not decision.allowed:
                 raise ValueError(decision.message)
             requirement.status = decision.next_status
@@ -399,9 +390,10 @@ class CoordinatorService:
             requirement.current_owner = "author"
             requirement.current_role_label = "需求构造Agent"
             requirement.ai_ready = False
+            requirement.human_confirmed = False
             requirement.latest_question = payload.review_summary
-        elif payload.event == "review_ready_for_human_confirmation":
-            decision = apply_event(requirement.status, Event.FINISH_AI_REVIEW_READY)
+        elif event_name == "ai_review_pass":
+            decision = apply_event(requirement.status, Event.AI_REVIEW_PASS)
             if not decision.allowed:
                 raise ValueError(decision.message)
             requirement.status = decision.next_status
@@ -417,7 +409,7 @@ class CoordinatorService:
         LOGGER.info(
             "Accepted review event req_id=%s event=%s status=%s phase=%s ai_ready=%s human_confirmed=%s",
             requirement.req_id,
-            payload.event,
+            event_name,
             requirement.status.value,
             requirement.current_phase,
             requirement.ai_ready,
@@ -429,7 +421,6 @@ class CoordinatorService:
         requirement = self.requirements.get(payload.req_id)
         if requirement is None:
             raise ValueError(f"未知需求：{payload.req_id}")
-        requirement = self.ensure_author_handoff(requirement, reason="context_query")
         LOGGER.info(
             "Served requirement context req_id=%s status=%s phase=%s round=%s document_url=%s",
             requirement.req_id,
@@ -504,13 +495,14 @@ class CoordinatorService:
         requirement.human_review_history.append(HumanReviewResult(approved=approved, summary=review_summary))
         if approved:
             requirement.current_phase = "正式审查"
-            requirement.current_owner = "coordinator-service"
-            requirement.current_role_label = "需求协调服务"
+            requirement.current_owner = "review"
+            requirement.current_role_label = "正式审查"
             requirement.latest_question = "需求构造完成，可进入正式审查。"
         else:
             requirement.current_phase = "需求构造"
             requirement.current_owner = "author"
             requirement.current_role_label = "需求构造Agent"
+            requirement.ai_ready = False
             requirement.latest_question = "请继续补充或修正需求内容，然后我们会再进行一轮 AI review。"
 
         requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
@@ -527,7 +519,7 @@ class CoordinatorService:
     def approve_requirement(self, requirement: Requirement) -> Requirement:
         decision = apply_event(
             requirement.status,
-            Event.APPROVE_REQUIREMENT,
+            Event.FINAL_REVIEW_PASS,
             human_confirmed=requirement.human_confirmed,
         )
         if not decision.allowed:
@@ -544,7 +536,7 @@ class CoordinatorService:
         return requirement
 
     def request_changes_after_review(self, requirement: Requirement, summary: str | None = None) -> Requirement:
-        decision = apply_event(requirement.status, Event.REQUEST_CHANGES)
+        decision = apply_event(requirement.status, Event.FINAL_REVIEW_REJECT)
         if not decision.allowed:
             raise ValueError(decision.message)
 
@@ -553,6 +545,8 @@ class CoordinatorService:
         requirement.current_owner = "author"
         requirement.current_role_label = "需求构造Agent"
         requirement.latest_review_summary = summary or "正式审查要求继续修改。"
+        requirement.ai_ready = False
+        requirement.human_confirmed = False
         requirement.latest_question = "正式审查未通过，请根据审查意见继续补充，然后再发起下一轮 AI review。"
         requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()

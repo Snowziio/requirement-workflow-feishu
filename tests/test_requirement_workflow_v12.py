@@ -71,7 +71,7 @@ class RequirementWorkflowV12Test(unittest.TestCase):
             "输入": "输入包括需求简述、每轮用户补充、历史 review 结论和当前文档草稿。",
             "输出": "输出包括结构化需求文档、AI review 结论、人工 review 决策和最终批准状态。",
             "边界": "本次不包含规格层转化、不做 GitHub PR 自动生成，也不覆盖部署流水线。",
-            "验收标准": "系统必须保留每轮讨论摘要；AI review 必须给出明确结论；人工确认通过后状态应进入 REVIEWING。",
+            "验收标准": "系统必须保留每轮讨论摘要；AI review 必须给出明确结论；人工确认通过后状态应进入 FINAL_REVIEW。",
             "非功能要求": "单轮状态写回应保持幂等，服务重启后仍可恢复会话状态。",
         }
         ordered_fields = list(fields.items())
@@ -94,10 +94,10 @@ class RequirementWorkflowV12Test(unittest.TestCase):
                 ),
             )
 
-        self.assertEqual(requirement.status, WorkflowStatus.HUMAN_CONFIRMING)
+        self.assertEqual(requirement.status, WorkflowStatus.HUMAN_CONFIRM)
 
         requirement = self.service.handle_human_confirmation(requirement, approved=True)
-        self.assertEqual(requirement.status, WorkflowStatus.REVIEWING)
+        self.assertEqual(requirement.status, WorkflowStatus.FINAL_REVIEW)
         self.assertEqual(len(requirement.human_review_history), 1)
         self.assertIn("人工确认通过", requirement.document.sections["人工Review结论"])
 
@@ -123,10 +123,10 @@ class RequirementWorkflowV12Test(unittest.TestCase):
             )
 
         requirement = self.service.handle_human_confirmation(requirement, approved=True)
-        self.assertEqual(requirement.status, WorkflowStatus.REVIEWING)
+        self.assertEqual(requirement.status, WorkflowStatus.FINAL_REVIEW)
 
         requirement = self.service.approve_requirement(requirement)
-        self.assertEqual(requirement.status, WorkflowStatus.REQ_APPROVED)
+        self.assertEqual(requirement.status, WorkflowStatus.APPROVED)
 
     def test_openclaw_author_turn_callback_updates_requirement(self) -> None:
         class FakeGateway:

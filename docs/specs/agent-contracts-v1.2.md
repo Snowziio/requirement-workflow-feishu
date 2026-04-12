@@ -121,7 +121,7 @@ author 输入必须至少包含：
 author 面向 Coordinator 的输出应是流程事件，而不是文档字段增量：
 
 - `event`
-  - 例如 `author_ready_for_ai_review`
+  - 例如 `author_submit`
 - `summary`
   - 当前文档已达到什么流转条件
 - `document_url`
@@ -151,7 +151,7 @@ author 不负责：
 
 ```json
 {
-  "event": "author_ready_for_ai_review",
+  "event": "author_submit",
   "summary": "需求文档已完成当前轮撰写，可进入 AI review。",
   "document_url": "https://example.com/doc/REQ-HARNESS-001",
   "document_version": "v3"
@@ -213,7 +213,7 @@ reviewer 不负责：
 
 ```json
 {
-  "event": "review_returned_for_revision",
+  "event": "ai_review_reject",
   "review_summary": "AI review 认为验收标准仍不可验证，需要继续修改需求文档。",
   "review_notes_url": "https://example.com/review/REQ-HARNESS-001",
   "document_url": "https://example.com/doc/REQ-HARNESS-001",

@@ -22,7 +22,7 @@ class BitableSchemaContractTest(unittest.TestCase):
             project="HARNESS",
             summary="验证 Coordinator 写入字段集合和 schema 一致。",
             creator="tester",
-            status=WorkflowStatus.DISCUSSING,
+            status=WorkflowStatus.DRAFTING,
         )
         fields = build_coordinator_record_fields(requirement)
         self.assertEqual(tuple(fields.keys()), coordinator_managed_field_names())

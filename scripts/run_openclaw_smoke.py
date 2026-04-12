@@ -32,17 +32,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--iteration-round", type=int, default=None, help="Optional iteration round for author event")
     parser.add_argument(
         "--review-event",
-        default="review_ready_for_human_confirmation",
+        default="ai_review_pass",
         choices=[
-            "review_returned_for_revision",
-            "review_ready_for_human_confirmation",
+            "ai_review_reject",
+            "ai_review_pass",
         ],
         help="Reviewer event to send after author-ready",
     )
     parser.add_argument(
         "--skip-author",
         action="store_true",
-        help="Skip author_ready_for_ai_review and only fetch context plus optional reviewer event",
+        help="Skip author_submit and only fetch context plus optional reviewer event",
     )
     parser.add_argument(
         "--skip-review",
@@ -52,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--author-summary",
         default="author 已完成当前轮需求文档撰写，可进入 AI review。",
-        help="Summary used for author_ready_for_ai_review",
+        help="Summary used for author_submit",
     )
     parser.add_argument(
         "--review-summary",
@@ -101,7 +101,7 @@ def main() -> int:
                 "{}{}".format(base_url, AUTHOR_ENDPOINT),
                 {
                     "req_id": args.req_id,
-                    "event": "author_ready_for_ai_review",
+                    "event": "author_submit",
                     "summary": args.author_summary,
                     "document_url": args.document_url or "",
                     "document_version": args.document_version or "",

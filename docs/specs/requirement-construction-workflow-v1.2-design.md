@@ -4,7 +4,7 @@
 
 本设计用于将当前“需求层最小闭环”升级为“可多轮构造、可持续 review、可结构化写回”的需求构造工作流。
 
-本设计只覆盖需求层，止步到 `REQ_APPROVED`。
+本设计只覆盖需求层，止步到 `APPROVED`。
 
 ## 2. 设计原则
 
@@ -103,12 +103,11 @@
 
 ```text
 CREATED
--> DISCUSSION_ROUTING
--> DISCUSSING
--> AI_REVIEWING
--> HUMAN_CONFIRMING
--> REVIEWING
--> REQ_APPROVED
+-> DRAFTING
+-> AI_REVIEW
+-> HUMAN_CONFIRM
+-> FINAL_REVIEW
+-> APPROVED
 ```
 
 ### 4.1 状态定义
@@ -116,48 +115,42 @@ CREATED
 - `CREATED`
   - 刚创建记录，尚未进入需求构造
 
-- `DISCUSSION_ROUTING`
-  - Coordinator Service 完成 author 接手准备
-
-- `DISCUSSING`
+- `DRAFTING`
   - author 与用户进行当前轮需求构造
 
-- `AI_REVIEWING`
+- `AI_REVIEW`
   - reviewer 对当前轮草稿进行审查
 
-- `HUMAN_CONFIRMING`
+- `HUMAN_CONFIRM`
   - AI 已达门槛，等待人工确认是否准确表达意图
 
-- `REVIEWING`
+- `FINAL_REVIEW`
   - 进入正式需求审查阶段
 
-- `REQ_APPROVED`
+- `APPROVED`
   - 需求层完成
 
 ### 4.2 核心流转规则
 
-- `CREATED -> DISCUSSION_ROUTING`
-  - 创建 REQ 后由 Coordinator Service 自动进入
+- `CREATED -> DRAFTING`
+  - 创建 REQ 后直接进入需求构造
 
-- `DISCUSSION_ROUTING -> DISCUSSING`
-  - author 正式接手
-
-- `DISCUSSING -> AI_REVIEWING`
+- `DRAFTING -> AI_REVIEW`
   - 当前轮草稿写回后自动触发
 
-- `AI_REVIEWING -> DISCUSSING`
+- `AI_REVIEW -> DRAFTING`
   - review 不通过，继续打磨
 
-- `AI_REVIEWING -> HUMAN_CONFIRMING`
+- `AI_REVIEW -> HUMAN_CONFIRM`
   - review 通过，等待人工确认
 
-- `HUMAN_CONFIRMING -> DISCUSSING`
+- `HUMAN_CONFIRM -> DRAFTING`
   - 人工不满意，退回继续打磨
 
-- `HUMAN_CONFIRMING -> REVIEWING`
+- `HUMAN_CONFIRM -> FINAL_REVIEW`
   - 人工确认满意，进入正式审查
 
-- `REVIEWING -> REQ_APPROVED`
+- `FINAL_REVIEW -> APPROVED`
   - 正式审查通过
 
 ## 5. Bitable 字段设计
@@ -232,7 +225,7 @@ CREATED
 将流程事件上报逻辑单独收敛为 callback 契约：
 
 - author 上报“可进入 AI review”
-- review 上报“退回修改 / 进入人工确认 / 通过 / 退回”
+- review 上报“退回修改 / 进入人工确认”
 - Coordinator Service 仅消费事件并更新 Bitable / 状态机
 
 这样可以避免 Coordinator 重新介入需求文档撰写。

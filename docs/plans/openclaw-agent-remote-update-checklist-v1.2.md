@@ -23,15 +23,15 @@
 - 不再向 Coordinator 提交字段级 `updates`
 - 仅在文档达到阶段门槛时，调用 callback：
   - `POST /callbacks/openclaw/author-turn`
-  - `event=author_ready_for_ai_review`
+  - `event=author_submit`
 
 ## 4. Review Agent 新约束
 
 - 负责 review 循环，不直接修改需求文档正文
 - review 意见返回给 author，驱动文档继续修改
 - 仅在流程节点调用 callback：
-  - `review_returned_for_revision`
-  - `review_ready_for_human_confirmation`
+  - `ai_review_reject`
+  - `ai_review_pass`
 - 不得代替人工确认或正式审查发送状态迁移事件
 
 ## 5. Callback 安全要求

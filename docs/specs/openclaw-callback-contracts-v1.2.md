@@ -53,14 +53,14 @@ signature = hex(hmac_sha256(secret, timestamp + "." + raw_body))
 `author agent` 在与需求提出者完成一轮或多轮需求撰写后，通知 Coordinator：
 
 - 当前需求文档已经达到可进入 AI review 的门槛
-- Coordinator 应把状态推进到 `AI_REVIEWING`
+- Coordinator 应把状态推进到 `AI_REVIEW`
 
 ### 4.2 请求体
 
 ```json
 {
   "req_id": "REQ-HARNESS-001",
-  "event": "author_ready_for_ai_review",
+  "event": "author_submit",
   "summary": "需求文档已完成当前轮撰写，可进入 AI review。",
   "document_url": "https://example.com/doc/REQ-HARNESS-001",
   "document_version": "v3",
@@ -74,7 +74,7 @@ signature = hex(hmac_sha256(secret, timestamp + "." + raw_body))
   - 必填，字符串
 - `event`
   - 必填
-  - 当前仅支持：`author_ready_for_ai_review`
+  - 当前仅支持：`author_submit`
 - `summary`
   - 必填
   - 用于写入 Bitable 的最近状态说明
@@ -94,7 +94,7 @@ signature = hex(hmac_sha256(secret, timestamp + "." + raw_body))
 {
   "ok": true,
   "req_id": "REQ-HARNESS-001",
-  "status": "AI_REVIEWING",
+  "status": "AI_REVIEW",
   "current_phase": "AI Review",
   "current_round": 3,
   "current_owner": "reviewer",
@@ -116,10 +116,10 @@ signature = hex(hmac_sha256(secret, timestamp + "." + raw_body))
 
 ### 5.2 支持事件
 
-- `review_returned_for_revision`
-  - AI review 未通过，退回 `DISCUSSING`
-- `review_ready_for_human_confirmation`
-  - AI review 已通过，进入 `HUMAN_CONFIRMING`
+- `ai_review_reject`
+  - AI review 未通过，退回 `DRAFTING`
+- `ai_review_pass`
+  - AI review 已通过，进入 `HUMAN_CONFIRM`
 
 注意：
 
@@ -132,7 +132,7 @@ signature = hex(hmac_sha256(secret, timestamp + "." + raw_body))
 ```json
 {
   "req_id": "REQ-HARNESS-001",
-  "event": "review_returned_for_revision",
+  "event": "ai_review_reject",
   "review_summary": "AI review 认为验收标准仍不可验证，需要继续修改需求文档。",
   "review_notes_url": "https://example.com/review/REQ-HARNESS-001",
   "document_url": "https://example.com/doc/REQ-HARNESS-001",
@@ -165,7 +165,7 @@ signature = hex(hmac_sha256(secret, timestamp + "." + raw_body))
 {
   "ok": true,
   "req_id": "REQ-HARNESS-001",
-  "status": "DISCUSSING",
+  "status": "DRAFTING",
   "current_phase": "需求构造",
   "ai_ready": false,
   "latest_review_summary": "AI review 认为验收标准仍不可验证，需要继续修改需求文档。",
@@ -180,12 +180,12 @@ signature = hex(hmac_sha256(secret, timestamp + "." + raw_body))
 -> Coordinator 创建 REQ 与 Bitable 记录
 -> 用户私聊 author agent
 -> author agent 完成需求文档撰写
--> author callback: author_ready_for_ai_review
--> Coordinator 状态 -> AI_REVIEWING
+-> author callback: author_submit
+-> Coordinator 状态 -> AI_REVIEW
 -> 用户与 review agent 进行 review 沟通
 -> review agent 给出审查意见并回传给 author agent
 -> author agent 修改需求文档
--> review callback: review_returned_for_revision / review_ready_for_human_confirmation
+-> review callback: ai_review_reject / ai_review_pass
 -> 人工确认：由 Coordinator 指令入口推进
 -> 正式审查：由 Coordinator 指令入口推进
 -> Coordinator 只负责状态流转与工作流通知

@@ -8,14 +8,13 @@ from .models import WorkflowStatus
 
 class Event(str, Enum):
     CREATE_REQUIREMENT = "create_requirement"
-    HANDOFF_TO_AUTHOR = "handoff_to_author"
-    SUBMIT_AUTHOR_ROUND = "submit_author_round"
-    FINISH_AI_REVIEW_NOT_READY = "finish_ai_review_not_ready"
-    FINISH_AI_REVIEW_READY = "finish_ai_review_ready"
+    AUTHOR_SUBMIT = "author_submit"
+    AI_REVIEW_REJECT = "ai_review_reject"
+    AI_REVIEW_PASS = "ai_review_pass"
     HUMAN_CONFIRM_YES = "human_confirm_yes"
     HUMAN_CONFIRM_NO = "human_confirm_no"
-    APPROVE_REQUIREMENT = "approve_requirement"
-    REQUEST_CHANGES = "request_changes"
+    FINAL_REVIEW_PASS = "final_review_pass"
+    FINAL_REVIEW_REJECT = "final_review_reject"
 
 
 @dataclass
@@ -27,15 +26,14 @@ class TransitionDecision:
 
 
 TRANSITIONS: dict[tuple[WorkflowStatus, Event], WorkflowStatus] = {
-    (WorkflowStatus.CREATED, Event.CREATE_REQUIREMENT): WorkflowStatus.DISCUSSION_ROUTING,
-    (WorkflowStatus.DISCUSSION_ROUTING, Event.HANDOFF_TO_AUTHOR): WorkflowStatus.DISCUSSING,
-    (WorkflowStatus.DISCUSSING, Event.SUBMIT_AUTHOR_ROUND): WorkflowStatus.AI_REVIEWING,
-    (WorkflowStatus.AI_REVIEWING, Event.FINISH_AI_REVIEW_NOT_READY): WorkflowStatus.DISCUSSING,
-    (WorkflowStatus.AI_REVIEWING, Event.FINISH_AI_REVIEW_READY): WorkflowStatus.HUMAN_CONFIRMING,
-    (WorkflowStatus.HUMAN_CONFIRMING, Event.HUMAN_CONFIRM_NO): WorkflowStatus.DISCUSSING,
-    (WorkflowStatus.HUMAN_CONFIRMING, Event.HUMAN_CONFIRM_YES): WorkflowStatus.REVIEWING,
-    (WorkflowStatus.REVIEWING, Event.APPROVE_REQUIREMENT): WorkflowStatus.REQ_APPROVED,
-    (WorkflowStatus.REVIEWING, Event.REQUEST_CHANGES): WorkflowStatus.DISCUSSING,
+    (WorkflowStatus.CREATED, Event.CREATE_REQUIREMENT): WorkflowStatus.DRAFTING,
+    (WorkflowStatus.DRAFTING, Event.AUTHOR_SUBMIT): WorkflowStatus.AI_REVIEW,
+    (WorkflowStatus.AI_REVIEW, Event.AI_REVIEW_REJECT): WorkflowStatus.DRAFTING,
+    (WorkflowStatus.AI_REVIEW, Event.AI_REVIEW_PASS): WorkflowStatus.HUMAN_CONFIRM,
+    (WorkflowStatus.HUMAN_CONFIRM, Event.HUMAN_CONFIRM_NO): WorkflowStatus.DRAFTING,
+    (WorkflowStatus.HUMAN_CONFIRM, Event.HUMAN_CONFIRM_YES): WorkflowStatus.FINAL_REVIEW,
+    (WorkflowStatus.FINAL_REVIEW, Event.FINAL_REVIEW_PASS): WorkflowStatus.APPROVED,
+    (WorkflowStatus.FINAL_REVIEW, Event.FINAL_REVIEW_REJECT): WorkflowStatus.DRAFTING,
 }
 
 
@@ -54,7 +52,7 @@ def apply_event(
             requires=["AI Ready = true"],
         )
 
-    if event == Event.APPROVE_REQUIREMENT and not human_confirmed:
+    if event == Event.FINAL_REVIEW_PASS and not human_confirmed:
         return TransitionDecision(
             allowed=False,
             next_status=current_status,

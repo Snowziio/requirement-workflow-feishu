@@ -41,6 +41,15 @@ except ImportError:  # pragma: no cover - optional during local editing before d
 
 LOGGER = logging.getLogger(__name__)
 
+AUTHOR_CALLBACK_EVENT_ALIASES = {
+    "author_ready_for_ai_review": "author_submit",
+}
+
+REVIEW_CALLBACK_EVENT_ALIASES = {
+    "review_returned_for_revision": "ai_review_reject",
+    "review_ready_for_human_confirmation": "ai_review_pass",
+}
+
 
 @dataclass
 class MessageContext:
@@ -330,16 +339,16 @@ class CoordinatorRuntimeApp:
         if active_req_id:
             requirement = self.service.get_requirement(active_req_id)
             if requirement is not None and requirement.active_private_binding_confirmed:
-                if requirement.status == WorkflowStatus.DISCUSSING:
+                if requirement.status == WorkflowStatus.DRAFTING:
                     return self._handle_author_turn(context, requirement)
-                if requirement.status == WorkflowStatus.HUMAN_CONFIRMING:
+                if requirement.status == WorkflowStatus.HUMAN_CONFIRM:
                     return [
                         OutboundMessage(
                             receive_id=context.chat_id,
                             text="当前处于人工确认阶段，请回复“确认需求”或“继续修改”。",
                         )
                     ]
-                if requirement.status == WorkflowStatus.REQ_APPROVED:
+                if requirement.status == WorkflowStatus.APPROVED:
                     return [
                         OutboundMessage(
                             receive_id=context.chat_id,
@@ -369,12 +378,12 @@ class CoordinatorRuntimeApp:
         requirement = self.service.handle_review_result(requirement, review)
         self._sync_requirement_outputs(requirement)
         self._save_state()
-        if requirement.status == WorkflowStatus.HUMAN_CONFIRMING:
-            self._dispatch_transition_notifications(requirement, trigger="review_ready_for_human_confirmation")
+        if requirement.status == WorkflowStatus.HUMAN_CONFIRM:
+            self._dispatch_transition_notifications(requirement, trigger="ai_review_pass")
         else:
-            self._dispatch_transition_notifications(requirement, trigger="review_returned_for_revision")
+            self._dispatch_transition_notifications(requirement, trigger="ai_review_reject")
 
-        if requirement.status == WorkflowStatus.HUMAN_CONFIRMING:
+        if requirement.status == WorkflowStatus.HUMAN_CONFIRM:
             response_text = (
                 f"需求构造 Agent：已更新【{current_field}】。\n\n"
                 f"审查 Agent：{requirement.latest_review_summary}\n\n"
@@ -425,7 +434,7 @@ class CoordinatorRuntimeApp:
         requirement = self.service.get_requirement(active_req_id)
         if requirement is None:
             return [OutboundMessage(receive_id=context.chat_id, text=f"未知需求：{active_req_id}")]
-        if requirement.status != WorkflowStatus.HUMAN_CONFIRMING:
+        if requirement.status != WorkflowStatus.HUMAN_CONFIRM:
             return [OutboundMessage(receive_id=context.chat_id, text="当前还没到人工确认阶段，请先继续完成需求构造。")]
 
         requirement = self.service.handle_human_confirmation(requirement, approved=approved)
@@ -456,7 +465,7 @@ class CoordinatorRuntimeApp:
         requirement = self.service.get_requirement(active_req_id)
         if requirement is None:
             return [OutboundMessage(receive_id=context.chat_id, text=f"未知需求：{active_req_id}")]
-        if requirement.status != WorkflowStatus.REVIEWING:
+        if requirement.status != WorkflowStatus.FINAL_REVIEW:
             return [OutboundMessage(receive_id=context.chat_id, text="当前还没进入正式审查阶段。")]
 
         if approved:
@@ -502,6 +511,7 @@ class CoordinatorRuntimeApp:
 
         req_id = str(payload.get("req_id", "")).strip()
         event = str(payload.get("event", "")).strip()
+        normalized_event = AUTHOR_CALLBACK_EVENT_ALIASES.get(event, event)
         summary = str(payload.get("summary", "")).strip()
         document_url = str(payload.get("document_url", "")).strip()
         document_version = str(payload.get("document_version", "")).strip()
@@ -509,7 +519,7 @@ class CoordinatorRuntimeApp:
 
         if not req_id or not event or not summary:
             return 400, {"error": "invalid_payload", "message": "req_id、event、summary 为必填字段。"}
-        if event != "author_ready_for_ai_review":
+        if normalized_event != "author_submit":
             return 400, {"error": "invalid_payload", "message": f"不支持的 author 事件：{event}。"}
         if iteration_round is not None and not isinstance(iteration_round, int):
             return 400, {"error": "invalid_payload", "message": "iteration_round 必须是整数。"}
@@ -517,7 +527,7 @@ class CoordinatorRuntimeApp:
         LOGGER.info(
             "Received author callback req_id=%s event=%s iteration_round=%s document_url=%s",
             req_id,
-            event,
+            normalized_event,
             iteration_round,
             document_url,
         )
@@ -526,7 +536,7 @@ class CoordinatorRuntimeApp:
             requirement = self.service.submit_author_event_payload(
                 AgentAuthorEventPayload(
                     req_id=req_id,
-                    event=event,
+                    event=normalized_event,
                     summary=summary,
                     document_url=document_url,
                     document_version=document_version,
@@ -535,7 +545,7 @@ class CoordinatorRuntimeApp:
             )
             self._sync_requirement_outputs(requirement)
             self._save_state()
-            self._dispatch_transition_notifications(requirement, trigger="author_ready_for_ai_review")
+            self._dispatch_transition_notifications(requirement, trigger="author_submit")
         except ValueError as exc:
             return 404, {"error": "not_found", "message": str(exc)}
         except Exception as exc:
@@ -576,6 +586,7 @@ class CoordinatorRuntimeApp:
 
         req_id = str(payload.get("req_id", "")).strip()
         event = str(payload.get("event", "")).strip()
+        normalized_event = REVIEW_CALLBACK_EVENT_ALIASES.get(event, event)
         review_summary = str(payload.get("review_summary", "")).strip()
         review_notes_url = str(payload.get("review_notes_url", "")).strip()
         document_url = str(payload.get("document_url", "")).strip()
@@ -584,15 +595,15 @@ class CoordinatorRuntimeApp:
         if not req_id or not event or not review_summary:
             return 400, {"error": "invalid_payload", "message": "req_id、event、review_summary 为必填字段。"}
         supported_events = {
-            "review_returned_for_revision",
-            "review_ready_for_human_confirmation",
+            "ai_review_reject",
+            "ai_review_pass",
         }
-        if event not in supported_events:
+        if normalized_event not in supported_events:
             return 400, {
                 "error": "invalid_payload",
                 "message": (
                     "review callback 只允许 reviewer 上报 AI review 结论："
-                    "`review_returned_for_revision` 或 `review_ready_for_human_confirmation`。"
+                    "`ai_review_reject` 或 `ai_review_pass`。"
                     "人工确认与正式审查请通过 Coordinator 的人工操作入口推进。"
                 ),
             }
@@ -600,7 +611,7 @@ class CoordinatorRuntimeApp:
         LOGGER.info(
             "Received review callback req_id=%s event=%s document_url=%s review_notes_url=%s",
             req_id,
-            event,
+            normalized_event,
             document_url,
             review_notes_url,
         )
@@ -609,7 +620,7 @@ class CoordinatorRuntimeApp:
             requirement = self.service.submit_review_event_payload(
                 AgentReviewEventPayload(
                     req_id=req_id,
-                    event=event,
+                    event=normalized_event,
                     review_summary=review_summary,
                     review_notes_url=review_notes_url,
                     document_url=document_url,
@@ -618,7 +629,7 @@ class CoordinatorRuntimeApp:
             )
             self._sync_requirement_outputs(requirement)
             self._save_state()
-            self._dispatch_transition_notifications(requirement, trigger=event)
+            self._dispatch_transition_notifications(requirement, trigger=normalized_event)
         except PermissionError as exc:
             return 400, {"error": "invalid_payload", "message": str(exc)}
         except ValueError as exc:
@@ -1306,7 +1317,7 @@ class CoordinatorRuntimeApp:
         author_name = self.settings.openclaw_author_agent_name
         latest_review = requirement.latest_review_summary or "暂无"
 
-        if trigger == "author_ready_for_ai_review":
+        if trigger == "author_submit":
             return (
                 "indigo",
                 f"{requirement.req_id} 已进入 AI Review",
@@ -1314,7 +1325,7 @@ class CoordinatorRuntimeApp:
                 "状态已切换到 AI Review，reviewer 可以开始正式审查当前文档。",
                 f"请由 {reviewer_name} 接手审查；若审查不通过，请明确给出退回原因。",
             )
-        if trigger == "review_returned_for_revision":
+        if trigger == "ai_review_reject":
             return (
                 "orange",
                 f"{requirement.req_id} AI Review 未通过",
@@ -1322,7 +1333,7 @@ class CoordinatorRuntimeApp:
                 "reviewer 判定当前文档尚未达到 AI Review 标准，流程已退回需求构造阶段。",
                 f"请由 {author_name} 根据审查意见继续修改文档后，再发起下一轮 AI Review。",
             )
-        if trigger == "review_ready_for_human_confirmation":
+        if trigger == "ai_review_pass":
             return (
                 "green",
                 f"{requirement.req_id} AI Review 已通过",

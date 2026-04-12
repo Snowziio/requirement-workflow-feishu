@@ -47,7 +47,7 @@
     "name": "需求构造与评审闭环",
     "project": "HARNESS",
     "summary": "验证 agent 私聊构造、review 循环与状态流转。",
-    "status": "AI_REVIEWING",
+    "status": "AI_REVIEW",
     "current_phase": "AI Review",
     "current_owner": "reviewer",
     "current_role_label": "需求审查Agent",
@@ -75,6 +75,6 @@
 ## 7. 推荐使用方式
 
 - author 在接手需求或准备继续修改前，先按 `req_id` 拉一次上下文
-- reviewer 在开始审查前，先拉一次上下文确认当前状态确实处于 `AI_REVIEWING`
+- reviewer 在开始审查前，先拉一次上下文确认当前状态确实处于 `AI_REVIEW`
 - 不要把本地 session 里的记忆当真相源，优先以这里返回的 `status/current_phase/document_url/latest_review_summary` 为准
 - 如果返回 `document_url` 非空，author 必须复用该文档，不得另起一份新文档

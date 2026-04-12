@@ -29,7 +29,7 @@ def build_signature(secret: str, timestamp: str, raw_body: bytes) -> str:
 def build_author_payload(args: argparse.Namespace) -> Dict[str, Any]:
     return {
         "req_id": args.req_id,
-        "event": "author_ready_for_ai_review",
+        "event": "author_submit",
         "summary": args.summary,
         "document_url": args.document_url or "",
         "document_version": args.document_version or "",
@@ -89,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="mode")
 
-    author_parser = subparsers.add_parser("author-ready", help="Send author_ready_for_ai_review")
+    author_parser = subparsers.add_parser("author-ready", help="Send author_submit")
     author_parser.add_argument("--summary", required=True, help="Event summary for Coordinator/Bitable")
     author_parser.add_argument("--document-url", default="", help="Current requirement document URL")
     author_parser.add_argument("--document-version", default="", help="Optional document version label")
@@ -100,8 +100,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--event",
         required=True,
         choices=[
-            "review_returned_for_revision",
-            "review_ready_for_human_confirmation",
+            "ai_review_reject",
+            "ai_review_pass",
         ],
         help="Review workflow event name",
     )

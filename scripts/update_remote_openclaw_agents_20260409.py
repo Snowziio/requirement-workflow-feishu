@@ -46,7 +46,7 @@ files = {
    - 禁止重新创建第二份需求文档
 4. 只有当 `document_url` 为空时，才允许创建新文档
 5. 当文档达到 AI review 门槛后，再发送：
-   - `author_ready_for_ai_review`
+   - `author_submit`
 6. 可读取的 Bitable / 上下文字段，以仓库导出的 `bitable-agent-readable-fields-v1.2.md` 为准，不自行假设新增字段
 
 ## Hard Rules
@@ -79,7 +79,7 @@ files = {
 - 如果上下文里已经存在 `document_url`，你必须复用该文档继续撰写，禁止重新创建第二份需求文档
 - 只有在 `document_url` 为空时，才允许创建新文档，并在后续 callback 中回写新的 `document_url`
 - 你不向 Coordinator Service 提交字段级 updates
-- 你只在流程节点上报事件，例如 `author_ready_for_ai_review`
+- 你只在流程节点上报事件，例如 `author_submit`
 """,
         "TOOLS.md": """# Tools And Environment
 
@@ -116,7 +116,7 @@ files = {
 ## Callback Contract
 
 - Endpoint: `POST /callbacks/openclaw/author-turn`
-- Event: `author_ready_for_ai_review`
+- Event: `author_submit`
 - Required fields: `req_id`, `event`, `summary`
 - Optional fields: `document_url`, `document_version`, `iteration_round`
 - 如果配置了 `OPENCLAW_CALLBACK_SECRET`，必须带：
@@ -185,8 +185,8 @@ python3 /path/to/send_openclaw_callback.py \
 - 不要把本地记忆当真相源
 - 不要引用 `bitable-agent-readable-fields-v1.2.md` 之外的 Bitable 字段名
 - 只要你向用户输出了正式 review 结论，就必须在同一轮完成对应 callback；只说结论不回调，视为任务未完成
-- 当结论是“未通过/需修改”时，必须发送 `review_returned_for_revision`
-- 当结论是“可进入人工确认”时，必须发送 `review_ready_for_human_confirmation`
+- 当结论是“未通过/需修改”时，必须发送 `ai_review_reject`
+- 当结论是“可进入人工确认”时，必须发送 `ai_review_pass`
 """,
         "AGENTS.md": """# 需求审查助手
 
@@ -209,8 +209,8 @@ python3 /path/to/send_openclaw_callback.py \
 - 你不直接改写需求文档正文
 - 你不向 Coordinator Service 提交字段级 review 细节作为真相源
 - 你只上报流程事件，例如：
-  - `review_returned_for_revision`
-  - `review_ready_for_human_confirmation`
+  - `ai_review_reject`
+  - `ai_review_pass`
 - 如果你已经向用户给出了正式审查结论，但没有完成对应 callback，这次审查不算完成
 """,
         "TOOLS.md": """# Tools And Environment
@@ -252,8 +252,8 @@ python3 /path/to/send_openclaw_callback.py \
 ## Mandatory Completion Rule
 
 - reviewer 的完成标准不是“说出了结论”，而是“说出结论并成功调用 callback”
-- 如果得出未通过结论，必须发 `review_returned_for_revision`
-- 如果得出通过结论，必须发 `review_ready_for_human_confirmation`
+- 如果得出未通过结论，必须发 `ai_review_reject`
+- 如果得出通过结论，必须发 `ai_review_pass`
 - reviewer 不得代替人工确认或正式审查发送流程事件；`human_confirmed`、`human_rejected`、`final_review_passed`、`final_review_rejected` 必须由 Coordinator 的人工操作入口推进
 - 若 callback 失败，必须向用户明确说明“流程状态尚未更新”，不能让用户误以为 Coordinator 已接收到结论
 
@@ -278,7 +278,7 @@ python3 /path/to/send_openclaw_callback.py \
   --secret "$OPENCLAW_CALLBACK_SECRET" \
   --req-id "$REQ_ID" \
   review-event \
-  --event review_ready_for_human_confirmation \
+  --event ai_review_pass \
   --summary "AI review 已通过，可进入人工确认。" \
   --review-notes-url "$CURRENT_REVIEW_NOTES_URL" \
   --document-url "$CURRENT_DOCUMENT_URL" \

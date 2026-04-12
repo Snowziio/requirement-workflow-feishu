@@ -41,7 +41,7 @@ python3 ./scripts/run_openclaw_smoke.py \
   --secret "$OPENCLAW_CALLBACK_SECRET" \
   --req-id "$REQ_ID" \
   --document-url "$CURRENT_DOCUMENT_URL" \
-  --review-event review_ready_for_human_confirmation
+  --review-event ai_review_pass
 ```
 
 ## 4. skill 运行前置配置
@@ -147,7 +147,7 @@ reviewer 只在流程节点发送 callback，不在普通 review 对话中的每
 
 - reviewer 已得出“当前文档仍需修改”的结论
 - reviewer 已把修改意见交回 author
-- 一旦给出这种正式结论，就必须立即发送 `review_returned_for_revision`
+- 一旦给出这种正式结论，就必须立即发送 `ai_review_reject`
 
 ```bash
 python3 /path/to/send_openclaw_callback.py \
@@ -155,7 +155,7 @@ python3 /path/to/send_openclaw_callback.py \
   --secret "$OPENCLAW_CALLBACK_SECRET" \
   --req-id "$REQ_ID" \
   review-event \
-  --event review_returned_for_revision \
+  --event ai_review_reject \
   --summary "AI review 未通过，已将修改意见返回 author。" \
   --review-notes-url "$CURRENT_REVIEW_NOTES_URL" \
   --document-url "$CURRENT_DOCUMENT_URL" \
@@ -168,7 +168,7 @@ python3 /path/to/send_openclaw_callback.py \
 
 - AI review 已通过
 - reviewer 判断当前文档已可进入人工确认
-- 一旦给出这种正式结论，就必须立即发送 `review_ready_for_human_confirmation`
+- 一旦给出这种正式结论，就必须立即发送 `ai_review_pass`
 
 ```bash
 python3 /path/to/send_openclaw_callback.py \
@@ -176,7 +176,7 @@ python3 /path/to/send_openclaw_callback.py \
   --secret "$OPENCLAW_CALLBACK_SECRET" \
   --req-id "$REQ_ID" \
   review-event \
-  --event review_ready_for_human_confirmation \
+  --event ai_review_pass \
   --summary "AI review 已通过，可进入人工确认。" \
   --review-notes-url "$CURRENT_REVIEW_NOTES_URL" \
   --document-url "$CURRENT_DOCUMENT_URL" \
@@ -188,12 +188,12 @@ python3 /path/to/send_openclaw_callback.py \
 ```python
 if review_requires_revision():
     notify_coordinator(
-        event="review_returned_for_revision",
+        event="ai_review_reject",
         review_summary="AI review 未通过，已将修改意见返回 author。",
     )
 elif review_is_ai_ready():
     notify_coordinator(
-        event="review_ready_for_human_confirmation",
+        event="ai_review_pass",
         review_summary="AI review 已通过，可进入人工确认。",
     )
 ```
@@ -202,7 +202,7 @@ elif review_is_ai_ready():
 
 reviewer 在开始审查前，至少应确认：
 
-- `status == AI_REVIEWING`
+- `status == AI_REVIEW`
 - `document_url` 非空
 - `latest_review_summary` 与当前轮目标不冲突
 
@@ -229,9 +229,9 @@ reviewer 在开始审查前，至少应确认：
 
 ## 8. 最小上线清单
 
-- author 能发 `author_ready_for_ai_review`
-- reviewer 能发 `review_returned_for_revision`
-- reviewer 能发 `review_ready_for_human_confirmation`
+- author 能发 `author_submit`
+- reviewer 能发 `ai_review_reject`
+- reviewer 能发 `ai_review_pass`
 - skill 环境已配置 `COORDINATOR_BASE_URL` 与 `OPENCLAW_CALLBACK_SECRET`
 - 已做一轮真实 smoke test
 

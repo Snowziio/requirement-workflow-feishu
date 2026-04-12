@@ -113,7 +113,7 @@ python3 ./scripts/send_openclaw_callback.py \
 ```json
 {
   "req_id": "REQ-HARNESS-001",
-  "event": "author_ready_for_ai_review",
+  "event": "author_submit",
   "summary": "需求文档已完成当前轮撰写，可进入 AI review。",
   "document_url": "https://example.com/doc/REQ-HARNESS-001",
   "document_version": "v3",
@@ -129,7 +129,7 @@ import requests
 
 payload = {
     "req_id": "REQ-HARNESS-001",
-    "event": "author_ready_for_ai_review",
+    "event": "author_submit",
     "summary": "需求文档已完成当前轮撰写，可进入 AI review。",
     "document_url": "https://example.com/doc/REQ-HARNESS-001",
     "document_version": "v3",
@@ -167,7 +167,7 @@ python3 ./scripts/send_openclaw_callback.py \
 {
   "ok": true,
   "req_id": "REQ-HARNESS-001",
-  "status": "AI_REVIEWING",
+  "status": "AI_REVIEW",
   "current_phase": "AI Review",
   "current_round": 3,
   "current_owner": "reviewer",
@@ -177,19 +177,19 @@ python3 ./scripts/send_openclaw_callback.py \
 
 ## 6. Reviewer Callback 示例
 
-### 6.1 `review_returned_for_revision`
+### 6.1 `ai_review_reject`
 
 适用场景：
 
 - AI review 未通过
 - reviewer 已把意见返回给 author
-- 流程应回到 `DISCUSSING`
+- 流程应回到 `DRAFTING`
 - 只要 reviewer 已向用户输出“未通过 / 需修改”的正式结论，就必须立即发送这个事件
 
 ```json
 {
   "req_id": "REQ-HARNESS-001",
-  "event": "review_returned_for_revision",
+  "event": "ai_review_reject",
   "review_summary": "AI review 认为验收标准仍不可验证，需要继续修改需求文档。",
   "review_notes_url": "https://example.com/review/REQ-HARNESS-001",
   "document_url": "https://example.com/doc/REQ-HARNESS-001",
@@ -197,7 +197,7 @@ python3 ./scripts/send_openclaw_callback.py \
 }
 ```
 
-### 6.2 `review_ready_for_human_confirmation`
+### 6.2 `ai_review_pass`
 
 适用场景：
 
@@ -208,7 +208,7 @@ python3 ./scripts/send_openclaw_callback.py \
 ```json
 {
   "req_id": "REQ-HARNESS-001",
-  "event": "review_ready_for_human_confirmation",
+  "event": "ai_review_pass",
   "review_summary": "AI review 已通过，当前需求文档可进入人工确认。",
   "review_notes_url": "https://example.com/review/REQ-HARNESS-001",
   "document_url": "https://example.com/doc/REQ-HARNESS-001",
@@ -231,7 +231,7 @@ import requests
 
 payload = {
     "req_id": "REQ-HARNESS-001",
-    "event": "review_returned_for_revision",
+    "event": "ai_review_reject",
     "review_summary": "AI review 认为验收标准仍不可验证，需要继续修改需求文档。",
     "review_notes_url": "https://example.com/review/REQ-HARNESS-001",
     "document_url": "https://example.com/doc/REQ-HARNESS-001",
@@ -259,7 +259,7 @@ python3 ./scripts/send_openclaw_callback.py \
   --secret "$OPENCLAW_CALLBACK_SECRET" \
   --req-id "REQ-HARNESS-001" \
   review-event \
-  --event review_returned_for_revision \
+  --event ai_review_reject \
   --summary "AI review 认为验收标准仍不可验证，需要继续修改需求文档。" \
   --review-notes-url "https://example.com/review/REQ-HARNESS-001" \
   --document-url "https://example.com/doc/REQ-HARNESS-001" \
@@ -274,7 +274,7 @@ python3 ./scripts/send_openclaw_callback.py \
   --secret "$OPENCLAW_CALLBACK_SECRET" \
   --req-id "REQ-HARNESS-001" \
   review-event \
-  --event review_ready_for_human_confirmation \
+  --event ai_review_pass \
   --summary "AI review 已通过，当前需求文档可进入人工确认。" \
   --review-notes-url "https://example.com/review/REQ-HARNESS-001" \
   --document-url "https://example.com/doc/REQ-HARNESS-001" \
@@ -298,9 +298,9 @@ python3 ./scripts/send_openclaw_callback.py \
 
 ## 10. 最小联调顺序
 
-1. author 发送 `author_ready_for_ai_review`
-2. reviewer 发送 `review_returned_for_revision`
-3. reviewer 发送 `review_ready_for_human_confirmation`
+1. author 发送 `author_submit`
+2. reviewer 发送 `ai_review_reject`
+3. reviewer 发送 `ai_review_pass`
 4. 人工确认通过 Coordinator 指令入口推进
 5. 正式审查通过 Coordinator 指令入口推进
 

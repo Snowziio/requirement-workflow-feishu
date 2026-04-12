@@ -135,7 +135,7 @@
 - 写入方：Coordinator Service
 - 用途：
   - 表示 reviewer 是否认为已达到人工确认门槛
-  - 作为进入 `HUMAN_CONFIRMING` 的硬门禁
+  - 作为进入 `HUMAN_CONFIRM` 的硬门禁
 
 #### `Human Confirmed`
 
@@ -144,7 +144,7 @@
 - 写入方：Coordinator Service
 - 用途：
   - 表示人工是否确认当前需求准确
-  - 作为进入 `REVIEWING` 的硬门禁
+  - 作为进入 `FINAL_REVIEW` 的硬门禁
 
 ### D. 追踪与恢复字段
 
@@ -187,7 +187,7 @@
 
 创建需求成功后，建议默认写入：
 
-- `状态 = DISCUSSION_ROUTING`
+- `状态 = DRAFTING`
 - `当前阶段 = 需求构造`
 - `当前轮次 = 0`
 - `当前讨论字段 = 问题描述`
@@ -207,59 +207,53 @@
 - `CREATED`
   - 记录已创建，但尚未进入构造流程
 
-- `DISCUSSION_ROUTING`
-  - Coordinator Service 已准备好 author 接手上下文
-
-- `DISCUSSING`
+- `DRAFTING`
   - author 正在进行某一轮需求构造
 
-- `AI_REVIEWING`
+- `AI_REVIEW`
   - reviewer 正在审当前轮草稿
 
-- `HUMAN_CONFIRMING`
+- `HUMAN_CONFIRM`
   - reviewer 已判定达到门槛，等待人工确认
 
-- `REVIEWING`
+- `FINAL_REVIEW`
   - 已结束需求构造，进入正式需求审查
 
-- `REQ_APPROVED`
+- `APPROVED`
   - 需求层通过
 
 ## 4.2 触发事件列表
 
 - `create_requirement`
-- `handoff_to_author`
-- `submit_author_round`
-- `finish_ai_review_not_ready`
-- `finish_ai_review_ready`
+- `author_submit`
+- `ai_review_reject`
+- `ai_review_pass`
 - `human_confirm_yes`
 - `human_confirm_no`
-- `enter_review`
-- `approve_requirement`
-- `request_changes`
+- `final_review_pass`
+- `final_review_reject`
 
 ## 4.3 状态流转表
 
 | 当前状态 | 触发事件 | 条件 | 下一状态 | 写入动作 |
 |---|---|---|---|---|
-| CREATED | create_requirement | 创建成功 | DISCUSSION_ROUTING | 初始化讨论态字段 |
-| DISCUSSION_ROUTING | handoff_to_author | author 上下文准备完成 | DISCUSSING | owner=author，写入首问 |
-| DISCUSSING | submit_author_round | author 通知可进入 AI review | AI_REVIEWING | current_round 更新为当前文档迭代轮次（如有） |
-| AI_REVIEWING | finish_ai_review_not_ready | AI Ready = false | DISCUSSING | 写 review 结论，更新下一轮问题 |
-| AI_REVIEWING | finish_ai_review_ready | AI Ready = true | HUMAN_CONFIRMING | owner=human，写确认提示 |
-| HUMAN_CONFIRMING | human_confirm_no | 人工不满意 | DISCUSSING | Human Confirmed=false，退回继续打磨 |
-| HUMAN_CONFIRMING | human_confirm_yes | 人工确认满意 | REVIEWING | Human Confirmed=true，进入正式审查 |
-| REVIEWING | approve_requirement | 审查通过 | REQ_APPROVED | 写通过结果 |
-| REVIEWING | request_changes | 审查要求修改 | DISCUSSING | 清空门禁，回退继续打磨 |
+| CREATED | create_requirement | 创建成功 | DRAFTING | 初始化草稿态字段 |
+| DRAFTING | author_submit | author 通知可进入 AI review | AI_REVIEW | current_round 更新为当前文档迭代轮次（如有） |
+| AI_REVIEW | ai_review_reject | AI Ready = false | DRAFTING | 写 review 结论，更新下一轮问题 |
+| AI_REVIEW | ai_review_pass | AI Ready = true | HUMAN_CONFIRM | owner=human，写确认提示 |
+| HUMAN_CONFIRM | human_confirm_no | 人工不满意 | DRAFTING | Human Confirmed=false，退回继续打磨 |
+| HUMAN_CONFIRM | human_confirm_yes | 人工确认满意 | FINAL_REVIEW | Human Confirmed=true，进入正式审查 |
+| FINAL_REVIEW | final_review_pass | 审查通过 | APPROVED | 写通过结果 |
+| FINAL_REVIEW | final_review_reject | 审查要求修改 | DRAFTING | 清空门禁，回退继续打磨 |
 
 ## 4.4 非法流转规则
 
 以下情况必须拒绝：
 
-- `DISCUSSING` 直接进入 `REVIEWING`，但 `AI Ready` 和 `Human Confirmed` 不满足
-- `HUMAN_CONFIRMING` 之前执行人工确认
-- `REQ_APPROVED` 后再次执行通过
-- 非 `REVIEWING` 状态下执行正式批准
+- `DRAFTING` 直接进入 `FINAL_REVIEW`，但 `AI Ready` 和 `Human Confirmed` 不满足
+- `HUMAN_CONFIRM` 之前执行人工确认
+- `APPROVED` 后再次执行通过
+- 非 `FINAL_REVIEW` 状态下执行正式批准
 
 拒绝时要求：
 
@@ -274,30 +268,30 @@
 仅当 reviewer 明确判断当前草稿达到人工确认门槛时：
 
 - `AI Ready = true`
-- 允许进入 `HUMAN_CONFIRMING`
+- 允许进入 `HUMAN_CONFIRM`
 
 否则：
 
 - `AI Ready = false`
-- 强制回到 `DISCUSSING`
+- 强制回到 `DRAFTING`
 
 ### 人工门禁
 
 仅当人工确认当前需求准确表达意图时：
 
 - `Human Confirmed = true`
-- 允许进入 `REVIEWING`
+- 允许进入 `FINAL_REVIEW`
 
 否则：
 
 - `Human Confirmed = false`
-- 回到 `DISCUSSING`
+- 回到 `DRAFTING`
 
 ## 4.6 退回策略
 
 ### 构造阶段退回
 
-从 `AI_REVIEWING` 或 `HUMAN_CONFIRMING` 退回 `DISCUSSING` 时：
+从 `AI_REVIEW` 或 `HUMAN_CONFIRM` 退回 `DRAFTING` 时：
 
 - 保留当前轮次
 - 保留已完成字段
@@ -307,7 +301,7 @@
 
 ### 正式审查退回
 
-从 `REVIEWING` 被打回 `DISCUSSING` 时：
+从 `FINAL_REVIEW` 被打回 `DRAFTING` 时：
 
 - `AI Ready = false`
 - `Human Confirmed = false`
@@ -327,13 +321,13 @@
 
 推荐的 Workflow 条件判断：
 
-- `状态 = HUMAN_CONFIRMING` 且 `Human Confirmed = false`
+- `状态 = HUMAN_CONFIRM` 且 `Human Confirmed = false`
   - 发送人工确认提醒
 
-- `状态 = DISCUSSING` 且超过阈值未更新 `最近一次写回时间`
+- `状态 = DRAFTING` 且超过阈值未更新 `最近一次写回时间`
   - 发送催办提醒
 
-- `状态 = REVIEWING`
+- `状态 = FINAL_REVIEW`
   - 触发正式审查相关通知
 
 ## 6. 第一阶段验收点
