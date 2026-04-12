@@ -120,14 +120,12 @@ signature = hex(hmac_sha256(secret, timestamp + "." + raw_body))
   - AI review 未通过，退回 `DISCUSSING`
 - `review_ready_for_human_confirmation`
   - AI review 已通过，进入 `HUMAN_CONFIRMING`
-- `human_confirmed`
-  - 人工确认通过，进入 `REVIEWING`
-- `human_rejected`
-  - 人工确认退回，回到 `DISCUSSING`
-- `final_review_passed`
-  - 正式审查通过，进入 `REQ_APPROVED`
-- `final_review_rejected`
-  - 正式审查退回，回到 `DISCUSSING`
+
+注意：
+
+- reviewer callback 只覆盖 AI review 阶段
+- 人工确认与正式审查必须由 Coordinator 的人工操作入口推进
+- reviewer 不得代替人工确认或正式审查发起状态迁移
 
 ### 5.3 请求体
 
@@ -187,7 +185,9 @@ signature = hex(hmac_sha256(secret, timestamp + "." + raw_body))
 -> 用户与 review agent 进行 review 沟通
 -> review agent 给出审查意见并回传给 author agent
 -> author agent 修改需求文档
--> review callback: review_returned_for_revision / review_ready_for_human_confirmation / ...
+-> review callback: review_returned_for_revision / review_ready_for_human_confirmation
+-> 人工确认：由 Coordinator 指令入口推进
+-> 正式审查：由 Coordinator 指令入口推进
 -> Coordinator 只负责状态流转与工作流通知
 ```
 

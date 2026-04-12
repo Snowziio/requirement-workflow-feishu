@@ -211,10 +211,6 @@ python3 /path/to/send_openclaw_callback.py \
 - 你只上报流程事件，例如：
   - `review_returned_for_revision`
   - `review_ready_for_human_confirmation`
-  - `human_confirmed`
-  - `human_rejected`
-  - `final_review_passed`
-  - `final_review_rejected`
 - 如果你已经向用户给出了正式审查结论，但没有完成对应 callback，这次审查不算完成
 """,
         "TOOLS.md": """# Tools And Environment
@@ -258,6 +254,7 @@ python3 /path/to/send_openclaw_callback.py \
 - reviewer 的完成标准不是“说出了结论”，而是“说出结论并成功调用 callback”
 - 如果得出未通过结论，必须发 `review_returned_for_revision`
 - 如果得出通过结论，必须发 `review_ready_for_human_confirmation`
+- reviewer 不得代替人工确认或正式审查发送流程事件；`human_confirmed`、`human_rejected`、`final_review_passed`、`final_review_rejected` 必须由 Coordinator 的人工操作入口推进
 - 若 callback 失败，必须向用户明确说明“流程状态尚未更新”，不能让用户误以为 Coordinator 已接收到结论
 
 ## Suggested Command Pattern

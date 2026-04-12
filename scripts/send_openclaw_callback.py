@@ -102,10 +102,6 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[
             "review_returned_for_revision",
             "review_ready_for_human_confirmation",
-            "human_confirmed",
-            "human_rejected",
-            "final_review_passed",
-            "final_review_rejected",
         ],
         help="Review workflow event name",
     )

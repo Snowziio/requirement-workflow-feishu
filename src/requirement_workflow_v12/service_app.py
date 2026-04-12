@@ -586,13 +586,16 @@ class CoordinatorRuntimeApp:
         supported_events = {
             "review_returned_for_revision",
             "review_ready_for_human_confirmation",
-            "human_confirmed",
-            "human_rejected",
-            "final_review_passed",
-            "final_review_rejected",
         }
         if event not in supported_events:
-            return 400, {"error": "invalid_payload", "message": f"不支持的 review 事件：{event}。"}
+            return 400, {
+                "error": "invalid_payload",
+                "message": (
+                    "review callback 只允许 reviewer 上报 AI review 结论："
+                    "`review_returned_for_revision` 或 `review_ready_for_human_confirmation`。"
+                    "人工确认与正式审查请通过 Coordinator 的人工操作入口推进。"
+                ),
+            }
 
         LOGGER.info(
             "Received review callback req_id=%s event=%s document_url=%s review_notes_url=%s",
@@ -616,6 +619,8 @@ class CoordinatorRuntimeApp:
             self._sync_requirement_outputs(requirement)
             self._save_state()
             self._dispatch_transition_notifications(requirement, trigger=event)
+        except PermissionError as exc:
+            return 400, {"error": "invalid_payload", "message": str(exc)}
         except ValueError as exc:
             return 404, {"error": "not_found", "message": str(exc)}
         except Exception as exc:

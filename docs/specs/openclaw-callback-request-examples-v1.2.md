@@ -216,75 +216,12 @@ python3 ./scripts/send_openclaw_callback.py \
 }
 ```
 
-### 6.3 `human_confirmed`
+### 6.3 边界说明
 
-适用场景：
-
-- 需求提出者已完成人工确认
-- 流程应进入正式审查
-
-```json
-{
-  "req_id": "REQ-HARNESS-001",
-  "event": "human_confirmed",
-  "review_summary": "人工确认通过，需求表达与预期一致。",
-  "document_url": "https://example.com/doc/REQ-HARNESS-001",
-  "review_result": "human_confirmed"
-}
-```
-
-### 6.4 `human_rejected`
-
-适用场景：
-
-- 需求提出者人工确认不通过
-- 流程应退回 `DISCUSSING`
-
-```json
-{
-  "req_id": "REQ-HARNESS-001",
-  "event": "human_rejected",
-  "review_summary": "人工确认未通过，需要继续修改需求文档。",
-  "document_url": "https://example.com/doc/REQ-HARNESS-001",
-  "review_result": "human_rejected"
-}
-```
-
-### 6.5 `final_review_passed`
-
-适用场景：
-
-- 正式审查通过
-- 流程应进入 `REQ_APPROVED`
-
-```json
-{
-  "req_id": "REQ-HARNESS-001",
-  "event": "final_review_passed",
-  "review_summary": "正式审查通过，可进入下一层流程。",
-  "review_notes_url": "https://example.com/review/final/REQ-HARNESS-001",
-  "document_url": "https://example.com/doc/REQ-HARNESS-001",
-  "review_result": "approved"
-}
-```
-
-### 6.6 `final_review_rejected`
-
-适用场景：
-
-- 正式审查退回
-- 流程应回到 `DISCUSSING`
-
-```json
-{
-  "req_id": "REQ-HARNESS-001",
-  "event": "final_review_rejected",
-  "review_summary": "正式审查未通过，需要继续补充文档后再次发起审查。",
-  "review_notes_url": "https://example.com/review/final/REQ-HARNESS-001",
-  "document_url": "https://example.com/doc/REQ-HARNESS-001",
-  "review_result": "rejected"
-}
-```
+- reviewer callback 只负责 AI review 阶段
+- `human_confirmed` / `human_rejected` 不是 reviewer callback 事件
+- `final_review_passed` / `final_review_rejected` 也不是 reviewer callback 事件
+- 这四类流转必须由 Coordinator 的人工操作入口推进
 
 ## 7. Reviewer 通用请求模板
 
@@ -364,7 +301,7 @@ python3 ./scripts/send_openclaw_callback.py \
 1. author 发送 `author_ready_for_ai_review`
 2. reviewer 发送 `review_returned_for_revision`
 3. reviewer 发送 `review_ready_for_human_confirmation`
-4. 人工确认后发送 `human_confirmed`
-5. 正式审查发送 `final_review_passed`
+4. 人工确认通过 Coordinator 指令入口推进
+5. 正式审查通过 Coordinator 指令入口推进
 
 只要这 5 步走通，主流程就能完整闭环。

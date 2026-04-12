@@ -501,6 +501,68 @@ class RequirementWorkflowV12Test(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertEqual(refreshed.status, WorkflowStatus.DISCUSSING)
 
+    def test_openclaw_review_result_callback_rejects_human_confirmation_event(self) -> None:
+        class FakeGateway:
+            def sync_requirement_document(self, requirement) -> None:
+                return None
+
+            def update_requirement_record(self, requirement) -> None:
+                return None
+
+        with TemporaryDirectory() as temp_dir:
+            runtime_service = CoordinatorService()
+            response = runtime_service.create_requirement_from_group(
+                CreationRequest(
+                    project="HARNESS",
+                    name="review callback 权限边界测试",
+                    summary="验证 reviewer 不能代替人工确认推进状态。",
+                    creator="tester",
+                    creator_user_id="user-1",
+                    creation_chat_id="chat-1",
+                )
+            )
+            requirement = runtime_service.get_requirement(response.req_id)
+            assert requirement is not None
+            runtime_service.handoff_to_author(requirement)
+            runtime_service.submit_author_event_payload(
+                AgentAuthorEventPayload(
+                    req_id=response.req_id,
+                    event="author_ready_for_ai_review",
+                    summary="author 已完成需求文档撰写。",
+                    document_url="https://example.com/doc/reviewer-boundary",
+                    iteration_round=1,
+                )
+            )
+
+            app = CoordinatorRuntimeApp(
+                Settings(
+                    feishu_app_id="app-id",
+                    feishu_app_secret="app-secret",
+                    state_store_path=str(Path(temp_dir) / "state.json"),
+                ),
+                service=runtime_service,
+                gateway=FakeGateway(),
+            )
+
+            status, payload = app.handle_openclaw_review_result_callback(
+                json.dumps(
+                    {
+                        "req_id": response.req_id,
+                        "event": "human_confirmed",
+                        "review_summary": "reviewer 误将人工确认也作为 callback 上报。",
+                        "review_notes_url": "https://example.com/review-notes/forbidden",
+                    },
+                    ensure_ascii=False,
+                ).encode()
+            )
+
+            refreshed = runtime_service.get_requirement(response.req_id)
+            assert refreshed is not None
+            self.assertEqual(status, 400)
+            self.assertEqual(payload["error"], "invalid_payload")
+            self.assertIn("只允许 reviewer 上报 AI review 结论", payload["message"])
+            self.assertEqual(refreshed.status, WorkflowStatus.AI_REVIEWING)
+
     def test_openclaw_requirement_context_query_returns_context(self) -> None:
         class FakeGateway:
             def sync_requirement_document(self, requirement) -> None:

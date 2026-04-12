@@ -374,6 +374,17 @@ class CoordinatorService:
         if requirement is None:
             raise ValueError(f"未知需求：{payload.req_id}")
 
+        supported_events = {
+            "review_returned_for_revision",
+            "review_ready_for_human_confirmation",
+        }
+        if payload.event not in supported_events:
+            raise PermissionError(
+                "review callback 只允许 reviewer 上报 AI review 结论："
+                "`review_returned_for_revision` 或 `review_ready_for_human_confirmation`。"
+                "人工确认和正式审查必须由 Coordinator 的人工操作入口推进。"
+            )
+
         if payload.document_url:
             requirement.document_url = payload.document_url
         requirement.latest_review_summary = payload.review_summary
@@ -399,25 +410,6 @@ class CoordinatorService:
             requirement.current_role_label = "人工确认"
             requirement.ai_ready = True
             requirement.latest_question = "AI review 已通过，请进行人工确认。"
-        elif payload.event == "human_confirmed":
-            requirement = self.handle_human_confirmation(requirement, approved=True)
-            requirement.latest_review_summary = payload.review_summary
-            if payload.document_url:
-                requirement.document_url = payload.document_url
-        elif payload.event == "human_rejected":
-            requirement = self.handle_human_confirmation(requirement, approved=False)
-            requirement.latest_review_summary = payload.review_summary
-            if payload.document_url:
-                requirement.document_url = payload.document_url
-        elif payload.event == "final_review_passed":
-            requirement = self.approve_requirement(requirement)
-            requirement.latest_review_summary = payload.review_summary
-            if payload.document_url:
-                requirement.document_url = payload.document_url
-        elif payload.event == "final_review_rejected":
-            requirement = self.request_changes_after_review(requirement, summary=payload.review_summary)
-            if payload.document_url:
-                requirement.document_url = payload.document_url
         else:
             raise ValueError(f"不支持的 review 事件：{payload.event}")
 

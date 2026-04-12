@@ -32,10 +32,7 @@
 - 仅在流程节点调用 callback：
   - `review_returned_for_revision`
   - `review_ready_for_human_confirmation`
-  - `human_confirmed`
-  - `human_rejected`
-  - `final_review_passed`
-  - `final_review_rejected`
+- 不得代替人工确认或正式审查发送状态迁移事件
 
 ## 5. Callback 安全要求
 
@@ -53,4 +50,4 @@
 3. 配置 callback secret
 4. 做 author -> AI review 联调
 5. 做 review -> revision / human confirm 联调
-6. 做 final review pass / reject 联调
+6. 做人工确认 / 正式审查的人工作业联调
