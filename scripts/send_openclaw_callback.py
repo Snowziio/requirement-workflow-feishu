@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import hmac
 import json
+import os
 import sys
 import time
 from typing import Any, Dict, Optional
@@ -14,6 +15,7 @@ from urllib.request import Request, urlopen
 AUTHOR_ENDPOINT = "/callbacks/openclaw/author-turn"
 REVIEW_ENDPOINT = "/callbacks/openclaw/review-result"
 CONTEXT_QUERY_ENDPOINT = "/queries/openclaw/requirement-context"
+DEFAULT_COORDINATOR_BASE_URL = "http://127.0.0.1:8004"
 
 
 def build_signature(secret: str, timestamp: str, raw_body: bytes) -> str:
@@ -77,8 +79,12 @@ def post_json(url: str, payload: Dict[str, Any], secret: Optional[str]) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Send an OpenClaw workflow event callback to Coordinator Service.")
-    parser.add_argument("--base-url", required=True, help="Coordinator base URL, e.g. https://coordinator.example.com")
-    parser.add_argument("--secret", default="", help="Optional callback signing secret")
+    parser.add_argument(
+        "--base-url",
+        default="",
+        help="Coordinator base URL. Defaults to $COORDINATOR_BASE_URL or http://127.0.0.1:8004",
+    )
+    parser.add_argument("--secret", default="", help="Optional callback signing secret. Defaults to $OPENCLAW_CALLBACK_SECRET")
     parser.add_argument("--req-id", required=True, help="Requirement ID, e.g. REQ-HARNESS-001")
 
     subparsers = parser.add_subparsers(dest="mode")
@@ -119,7 +125,8 @@ def main() -> int:
     if not args.mode:
         parser.error("a callback mode is required")
 
-    base_url = args.base_url.rstrip("/")
+    base_url = (args.base_url or os.environ.get("COORDINATOR_BASE_URL") or DEFAULT_COORDINATOR_BASE_URL).rstrip("/")
+    secret = args.secret or os.environ.get("OPENCLAW_CALLBACK_SECRET") or None
     if args.mode == "author-ready":
         endpoint = AUTHOR_ENDPOINT
         payload = build_author_payload(args)
@@ -130,7 +137,7 @@ def main() -> int:
         endpoint = REVIEW_ENDPOINT
         payload = build_review_payload(args)
 
-    return post_json(f"{base_url}{endpoint}", payload, args.secret or None)
+    return post_json(f"{base_url}{endpoint}", payload, secret)
 
 
 if __name__ == "__main__":

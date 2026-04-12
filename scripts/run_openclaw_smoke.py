@@ -2,12 +2,14 @@
 
 import argparse
 import json
+import os
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 from send_openclaw_callback import (
     AUTHOR_ENDPOINT,
     CONTEXT_QUERY_ENDPOINT,
+    DEFAULT_COORDINATOR_BASE_URL,
     REVIEW_ENDPOINT,
     post_json,
 )
@@ -17,8 +19,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run a minimal OpenClaw -> Coordinator smoke flow for a single requirement."
     )
-    parser.add_argument("--base-url", required=True, help="Coordinator base URL, e.g. https://coordinator.example.com")
-    parser.add_argument("--secret", default="", help="Optional callback signing secret")
+    parser.add_argument(
+        "--base-url",
+        default="",
+        help="Coordinator base URL. Defaults to $COORDINATOR_BASE_URL or http://127.0.0.1:8004",
+    )
+    parser.add_argument("--secret", default="", help="Optional callback signing secret. Defaults to $OPENCLAW_CALLBACK_SECRET")
     parser.add_argument("--req-id", required=True, help="Requirement ID, e.g. REQ-HARNESS-001")
     parser.add_argument("--document-url", default="", help="Optional requirement document URL to write back in events")
     parser.add_argument("--review-notes-url", default="", help="Optional review notes URL for reviewer events")
@@ -81,8 +87,8 @@ def run_step(
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-    base_url = args.base_url.rstrip("/")
-    secret = args.secret or None
+    base_url = (args.base_url or os.environ.get("COORDINATOR_BASE_URL") or DEFAULT_COORDINATOR_BASE_URL).rstrip("/")
+    secret = args.secret or os.environ.get("OPENCLAW_CALLBACK_SECRET") or None
 
     steps: List[Tuple[str, str, Dict[str, Any]]] = [
         (

@@ -28,6 +28,11 @@
 - review 事件枚举合法性检查
 - `req_id` 上下文查询
 
+默认情况下，如果不显式传 `--base-url`，helper 会按以下顺序选择：
+
+- `$COORDINATOR_BASE_URL`
+- `http://127.0.0.1:8004`
+
 在真实联调前，也可以先用 smoke 脚本串一次最小闭环：
 
 ```bash
@@ -74,6 +79,11 @@ python3 /path/to/send_openclaw_callback.py \
 - `bitable_url`
 - `bitable_record_id`
 
+如果返回结果中 `document_url` 非空：
+
+- 必须在该文档上继续撰写/审查
+- 不允许重新创建第二份需求文档
+
 ## 5. Author Skill 触发规则
 
 author 只在以下条件满足时发送 callback：
@@ -87,6 +97,11 @@ author 不应在以下场景发送 callback：
 - 只是补充一小段零散内容
 - 问题仍明显不清晰
 - reviewer 尚未返回到 author 的修改意见已处理完成前
+
+author 还必须遵守：
+
+- 如果 context 返回了 `document_url`，就在该文档继续撰写
+- 只有当 `document_url` 为空时，才允许新建文档并在 callback 时回写新的 `document_url`
 
 ### 5.1 建议命令模板
 

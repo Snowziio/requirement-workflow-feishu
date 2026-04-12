@@ -34,6 +34,26 @@ files = {
 - 角色：在与用户的私聊中显式接手需求构造，持续撰写和修改需求文档，并在达到阶段门槛后通知 Coordinator Service 进入下一流程阶段。
 - 绑定账号：founder-brief
 """,
+        "SKILL.md": """# Requirement Workflow Skill
+
+## Mandatory Startup Sequence
+
+1. 当用户给出 `REQ-ID` 后，先读取 Coordinator 上下文：
+   - `python3 /home/admin/.openclaw/bin/send_openclaw_callback.py --req-id \"$REQ_ID\" fetch-context`
+2. 检查返回结果中的 `document_url`
+3. 如果 `document_url` 非空：
+   - 必须复用该文档继续撰写
+   - 禁止重新创建第二份需求文档
+4. 只有当 `document_url` 为空时，才允许创建新文档
+5. 当文档达到 AI review 门槛后，再发送：
+   - `author_ready_for_ai_review`
+
+## Hard Rules
+
+- 不要跳过 `fetch-context`
+- 不要假设自己已经知道最新文档链接
+- 不要要求用户再次手工提供已有文档链接，除非 `fetch-context` 明确失败
+""",
         "AGENTS.md": """# 需求构造助手
 
 ## Mission
@@ -48,10 +68,13 @@ files = {
 - 收紧边界
 - 推动验收标准量化
 - 直接驱动需求文档正文的撰写与持续修改
+- 在开始撰写前，先按 `req_id` 读取 Coordinator 上下文
 - 在文档达到阶段门槛后，通过 callback 通知 Coordinator Service 进入 AI review
 
 你的边界：
 - 你维护需求文档正文，Coordinator Service 不参与正文撰写
+- 如果上下文里已经存在 `document_url`，你必须复用该文档继续撰写，禁止重新创建第二份需求文档
+- 只有在 `document_url` 为空时，才允许创建新文档，并在后续 callback 中回写新的 `document_url`
 - 你不向 Coordinator Service 提交字段级 updates
 - 你只在流程节点上报事件，例如 `author_ready_for_ai_review`
 """,
@@ -72,6 +95,7 @@ files = {
 
 - Endpoint: `POST /queries/openclaw/requirement-context`
 - Required fields: `req_id`
+- 默认 base URL：`http://127.0.0.1:8004`
 - 返回值重点字段：
   - `status`
   - `current_phase`
@@ -79,6 +103,12 @@ files = {
   - `latest_review_summary`
   - `bitable_url`
   - `bitable_record_id`
+
+## Document Reuse Rule
+
+- 如果 context 返回了 `document_url`，必须在这份文档上继续撰写
+- 不允许为了继续需求构造而再次新建第二份需求文档
+- 只有在 `document_url` 为空时，才允许创建新文档
 
 ## Callback Contract
 
@@ -96,7 +126,7 @@ files = {
 
 ```bash
 python3 /path/to/send_openclaw_callback.py \
-  --base-url "$COORDINATOR_BASE_URL" \
+  --base-url "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}" \
   --secret "$OPENCLAW_CALLBACK_SECRET" \
   --req-id "$REQ_ID" \
   fetch-context
@@ -107,7 +137,7 @@ python3 /path/to/send_openclaw_callback.py \
 
 ```bash
 python3 /path/to/send_openclaw_callback.py \
-  --base-url "$COORDINATOR_BASE_URL" \
+  --base-url "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}" \
   --secret "$OPENCLAW_CALLBACK_SECRET" \
   --req-id "$REQ_ID" \
   author-ready \
@@ -132,6 +162,23 @@ python3 /path/to/send_openclaw_callback.py \
 - Emoji：🔍
 - 角色：与需求提出者完成需求审查循环，给出审查意见并在流程节点上通知 Coordinator Service 进行状态流转。
 - 绑定账号：meeting-closeout
+""",
+        "SKILL.md": """# Requirement Review Workflow Skill
+
+## Mandatory Startup Sequence
+
+1. 当用户给出 `REQ-ID` 后，先读取 Coordinator 上下文：
+   - `python3 /home/admin/.openclaw/bin/send_openclaw_callback.py --req-id \"$REQ_ID\" fetch-context`
+2. 确认当前 `status/current_phase`
+3. 读取 `document_url`
+4. 在当前文档上执行 review
+5. 仅在流程节点发送 review callback
+
+## Hard Rules
+
+- 不要跳过 `fetch-context`
+- 不要对没有 `document_url` 的需求直接进入正式 review
+- 不要把本地记忆当真相源
 """,
         "AGENTS.md": """# 需求审查助手
 
@@ -178,6 +225,7 @@ python3 /path/to/send_openclaw_callback.py \
 
 - Endpoint: `POST /queries/openclaw/requirement-context`
 - Required fields: `req_id`
+- 默认 base URL：`http://127.0.0.1:8004`
 - 返回值重点字段：
   - `status`
   - `current_phase`
@@ -201,7 +249,7 @@ python3 /path/to/send_openclaw_callback.py \
 
 ```bash
 python3 /path/to/send_openclaw_callback.py \
-  --base-url "$COORDINATOR_BASE_URL" \
+  --base-url "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}" \
   --secret "$OPENCLAW_CALLBACK_SECRET" \
   --req-id "$REQ_ID" \
   fetch-context
@@ -212,7 +260,7 @@ python3 /path/to/send_openclaw_callback.py \
 
 ```bash
 python3 /path/to/send_openclaw_callback.py \
-  --base-url "$COORDINATOR_BASE_URL" \
+  --base-url "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}" \
   --secret "$OPENCLAW_CALLBACK_SECRET" \
   --req-id "$REQ_ID" \
   review-event \

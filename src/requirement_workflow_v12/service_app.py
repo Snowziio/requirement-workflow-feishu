@@ -708,11 +708,13 @@ class CoordinatorRuntimeApp:
             req_id = value.get("req_id", "")
             if not req_id:
                 return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            requirement = self.service.get_requirement(req_id)
+            if requirement is None:
+                return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
             agent_name = self.settings.openclaw_author_agent_name
-            start_command = f"开始需求构造 {req_id}"
             self.gateway.send_text(
                 user_id,
-                f"请私聊 {agent_name}，并发送：\n{start_command}",
+                self._build_author_handoff_text(requirement, agent_name=agent_name),
                 receive_id_type=self.settings.feishu_user_id_type,
             )
             return 200, {"toast": {"type": "success", "content": "已将启动指令私发给你。"}}
@@ -1025,6 +1027,12 @@ class CoordinatorRuntimeApp:
             links.append(f"[查看多维表格]({bitable_url})")
         if links:
             elements.append({"tag": "markdown", "content": " | ".join(links)})
+        elements.append(
+            {
+                "tag": "markdown",
+                "content": "私聊需求构造助手时，请优先发送包含 `REQ ID`、需求文档链接和多维表格链接的完整启动消息，避免重复创建第二份文档。",
+            }
+        )
 
         actions: list[dict[str, object]] = [
             {
@@ -1052,7 +1060,10 @@ class CoordinatorRuntimeApp:
                 "tag": "div",
                 "text": {
                     "tag": "plain_text",
-                    "content": f"如果需要手动启动，请私聊 {self.settings.openclaw_author_agent_name} 并发送：开始需求构造 {requirement.req_id}",
+                    "content": (
+                        f"如果需要手动启动，请私聊 {self.settings.openclaw_author_agent_name}，"
+                        "并发送私发给你的完整启动消息。"
+                    ),
                 },
             }
         )
@@ -1065,6 +1076,19 @@ class CoordinatorRuntimeApp:
             },
             "elements": elements,
         }
+
+    def _build_author_handoff_text(self, requirement: Requirement, *, agent_name: str) -> str:
+        bitable_url = self.gateway.bitable_url() or "待同步"
+        document_url = requirement.document_url or "待同步"
+        return (
+            f"请私聊 {agent_name}，并发送以下完整上下文：\n\n"
+            f"开始需求构造 {requirement.req_id}\n"
+            f"需求名称：{requirement.name}\n"
+            f"需求简述：{requirement.summary}\n"
+            f"需求文档：{document_url}\n"
+            f"多维表格：{bitable_url}\n\n"
+            "要求：如果需求文档链接已存在，必须直接在该文档上继续撰写，不要重新创建第二份文档。"
+        )
 
     def _extract_message_context(self, data: P2ImMessageReceiveV1) -> MessageContext | None:
         event = getattr(data, "event", None)

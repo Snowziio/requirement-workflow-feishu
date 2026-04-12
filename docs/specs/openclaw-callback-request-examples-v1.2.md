@@ -20,6 +20,7 @@ OpenClaw skill 侧至少需要以下配置：
 
 - `COORDINATOR_BASE_URL`
   - 例如 `https://coordinator.example.com`
+  - 若与 Coordinator Service 同机部署，可直接使用 `http://127.0.0.1:8004`
 - `OPENCLAW_CALLBACK_SECRET`
   - 若 Coordinator 启用了 callback 签名校验，则这里必须保持一致
 
@@ -96,6 +97,7 @@ python3 /Users/daxin/work/requirement-workflow-feishu/scripts/send_openclaw_call
 - 当前状态是不是你预期的阶段
 - 当前需求文档链接是不是最新的
 - 最近 review 结论和待处理焦点是什么
+- 如果 `document_url` 已存在，后续必须复用这份文档
 ## 5. Author Callback 示例
 
 ### 5.1 触发时机

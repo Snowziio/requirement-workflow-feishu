@@ -15,6 +15,7 @@
 ## 3. Endpoint
 
 - `POST /queries/openclaw/requirement-context`
+- 同机默认访问地址可用：`http://127.0.0.1:8004`
 
 ## 4. 鉴权
 
@@ -75,3 +76,4 @@
 - author 在接手需求或准备继续修改前，先按 `req_id` 拉一次上下文
 - reviewer 在开始审查前，先拉一次上下文确认当前状态确实处于 `AI_REVIEWING`
 - 不要把本地 session 里的记忆当真相源，优先以这里返回的 `status/current_phase/document_url/latest_review_summary` 为准
+- 如果返回 `document_url` 非空，author 必须复用该文档，不得另起一份新文档
