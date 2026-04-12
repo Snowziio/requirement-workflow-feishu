@@ -122,6 +122,7 @@
 - 建表与补字段脚本统一读取同一份 schema：
   - [bootstrap_bitable_app_v12.py](scripts/bootstrap_bitable_app_v12.py)
   - [sync_bitable_schema_v12.py](scripts/sync_bitable_schema_v12.py)
+  - [migrate_bitable_status_values_v12.py](scripts/migrate_bitable_status_values_v12.py)
 - 给 author / reviewer 使用的只读字段契约由脚本导出，不手写维护：
   - [export_agent_bitable_contract_v12.py](scripts/export_agent_bitable_contract_v12.py)
   - 产物：[bitable-agent-readable-fields-v1.2.md](docs/specs/bitable-agent-readable-fields-v1.2.md)
@@ -133,6 +134,7 @@
 3. 执行 `python3 -m unittest discover -s tests -v`
 4. 如果需要创建或补齐线上字段，执行 schema sync 工作流或运行 [sync_bitable_schema_v12.py](scripts/sync_bitable_schema_v12.py)
 5. 同步远端 author / reviewer 模板，确保它们只引用 [bitable-agent-readable-fields-v1.2.md](docs/specs/bitable-agent-readable-fields-v1.2.md) 中定义的字段
+6. 如果状态机主状态发生重命名，先执行 [migrate_bitable_status_values_v12.py](scripts/migrate_bitable_status_values_v12.py) 把线上旧状态值迁移到新状态值
 
 禁止事项：
 

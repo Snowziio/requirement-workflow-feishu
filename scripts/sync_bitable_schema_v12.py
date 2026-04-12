@@ -17,7 +17,7 @@ from lark_oapi.api.bitable.v1 import (
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from requirement_workflow_v12.bitable_schema import coordinator_managed_field_specs
+from requirement_workflow_v12.bitable_schema import BitableFieldSpec, coordinator_managed_field_specs
 
 
 def required_env(name: str) -> str:
@@ -55,14 +55,14 @@ def list_fields(client: lark.Client, app_token: str, table_id: str) -> dict[str,
         page_token = data.page_token or ""
 
 
-def build_field_payload(spec: FieldSpec, *, field_id: str = "") -> AppTableField:
+def build_field_payload(spec: BitableFieldSpec, *, field_id: str = "") -> AppTableField:
     builder = AppTableFieldBuilder().field_name(spec.name).type(spec.field_type)
     if field_id:
         builder = builder.field_id(field_id)
     return builder.build()
 
 
-def create_field(client: lark.Client, app_token: str, table_id: str, spec: FieldSpec) -> None:
+def create_field(client: lark.Client, app_token: str, table_id: str, spec: BitableFieldSpec) -> None:
     request = (
         CreateAppTableFieldRequest.builder()
         .app_token(app_token)
@@ -76,7 +76,7 @@ def create_field(client: lark.Client, app_token: str, table_id: str, spec: Field
     print(f"[created] {spec.name}")
 
 
-def update_field(client: lark.Client, app_token: str, table_id: str, field_id: str, spec: FieldSpec) -> None:
+def update_field(client: lark.Client, app_token: str, table_id: str, field_id: str, spec: BitableFieldSpec) -> None:
     request = (
         UpdateAppTableFieldRequest.builder()
         .app_token(app_token)

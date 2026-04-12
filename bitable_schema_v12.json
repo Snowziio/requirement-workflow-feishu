@@ -39,7 +39,7 @@
       "required": true,
       "writer": "coordinator",
       "readers": ["author", "reviewer", "ops"],
-      "description": "状态机主状态。"
+      "description": "状态机主状态，仅使用 DRAFTING / AI_REVIEW / HUMAN_CONFIRM / FINAL_REVIEW / APPROVED 五个值。"
     },
     {
       "name": "当前阶段",
@@ -47,7 +47,7 @@
       "required": true,
       "writer": "coordinator",
       "readers": ["author", "reviewer", "ops"],
-      "description": "面向人的当前阶段展示。"
+      "description": "面向人的当前阶段展示，与五态主状态语义一致。"
     },
     {
       "name": "当前轮次",

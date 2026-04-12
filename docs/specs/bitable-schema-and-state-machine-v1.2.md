@@ -200,6 +200,27 @@
 - `Human Confirmed = false`
 - `最近一次提问 = "请先澄清问题本质，我们会逐轮完成需求构造。"`
 
+### 3.5 状态字段值约定
+
+`状态` 字段现在统一只允许以下 5 个值：
+
+- `DRAFTING`
+- `AI_REVIEW`
+- `HUMAN_CONFIRM`
+- `FINAL_REVIEW`
+- `APPROVED`
+
+如果线上 Bitable 里仍有旧值：
+
+- `DISCUSSION_ROUTING`
+- `DISCUSSING`
+- `AI_REVIEWING`
+- `HUMAN_CONFIRMING`
+- `REVIEWING`
+- `REQ_APPROVED`
+
+需要先执行状态迁移，再继续用新版本 Coordinator。
+
 ## 4. v1.2 状态机
 
 ## 4.1 状态定义
