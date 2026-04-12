@@ -10,6 +10,7 @@
 - `review agent` 负责 review 过程与审查意见生成
 - `Coordinator Service` 不参与需求文档撰写
 - `Coordinator Service` 只负责更新 Bitable、状态机、工作流与通知
+- 对 `review agent` 来说，正式结论必须与 callback 绑定；只输出自然语言结论而不上报事件，视为流程未完成
 
 因此 callback 是**事件上报**，不是**文档内容上报**。
 

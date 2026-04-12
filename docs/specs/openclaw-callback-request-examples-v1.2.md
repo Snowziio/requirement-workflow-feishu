@@ -184,6 +184,7 @@ python3 ./scripts/send_openclaw_callback.py \
 - AI review 未通过
 - reviewer 已把意见返回给 author
 - 流程应回到 `DISCUSSING`
+- 只要 reviewer 已向用户输出“未通过 / 需修改”的正式结论，就必须立即发送这个事件
 
 ```json
 {
@@ -202,6 +203,7 @@ python3 ./scripts/send_openclaw_callback.py \
 
 - AI review 已通过
 - 流程应进入人工确认
+- 只要 reviewer 已向用户输出“已通过 / 可进入人工确认”的正式结论，就必须立即发送这个事件
 
 ```json
 {

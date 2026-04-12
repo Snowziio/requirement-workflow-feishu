@@ -184,6 +184,9 @@ python3 /path/to/send_openclaw_callback.py \
 - 不要对没有 `document_url` 的需求直接进入正式 review
 - 不要把本地记忆当真相源
 - 不要引用 `bitable-agent-readable-fields-v1.2.md` 之外的 Bitable 字段名
+- 只要你向用户输出了正式 review 结论，就必须在同一轮完成对应 callback；只说结论不回调，视为任务未完成
+- 当结论是“未通过/需修改”时，必须发送 `review_returned_for_revision`
+- 当结论是“可进入人工确认”时，必须发送 `review_ready_for_human_confirmation`
 """,
         "AGENTS.md": """# 需求审查助手
 
@@ -212,6 +215,7 @@ python3 /path/to/send_openclaw_callback.py \
   - `human_rejected`
   - `final_review_passed`
   - `final_review_rejected`
+- 如果你已经向用户给出了正式审查结论，但没有完成对应 callback，这次审查不算完成
 """,
         "TOOLS.md": """# Tools And Environment
 
@@ -248,6 +252,13 @@ python3 /path/to/send_openclaw_callback.py \
 - 如果配置了 `OPENCLAW_CALLBACK_SECRET`，必须带：
   - `X-OpenClaw-Timestamp`
   - `X-OpenClaw-Signature`
+
+## Mandatory Completion Rule
+
+- reviewer 的完成标准不是“说出了结论”，而是“说出结论并成功调用 callback”
+- 如果得出未通过结论，必须发 `review_returned_for_revision`
+- 如果得出通过结论，必须发 `review_ready_for_human_confirmation`
+- 若 callback 失败，必须向用户明确说明“流程状态尚未更新”，不能让用户误以为 Coordinator 已接收到结论
 
 ## Suggested Command Pattern
 

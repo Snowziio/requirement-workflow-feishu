@@ -135,12 +135,19 @@ if document_is_ready_for_ai_review():
 
 reviewer 只在流程节点发送 callback，不在普通 review 对话中的每条建议后都发。
 
+强制规则：
+
+- reviewer 的完成标准不是“输出了结论”，而是“输出了结论并成功调用了对应 callback”
+- 如果 reviewer 已向用户给出正式结论，但没有 callback 到 Coordinator，这次 review 视为未完成
+- callback 失败时，reviewer 必须明确告知“流程状态尚未更新”，不能让用户误以为已进入下一阶段
+
 ### 6.1 退回修改
 
 适用条件：
 
 - reviewer 已得出“当前文档仍需修改”的结论
 - reviewer 已把修改意见交回 author
+- 一旦给出这种正式结论，就必须立即发送 `review_returned_for_revision`
 
 ```bash
 python3 /path/to/send_openclaw_callback.py \
@@ -161,6 +168,7 @@ python3 /path/to/send_openclaw_callback.py \
 
 - AI review 已通过
 - reviewer 判断当前文档已可进入人工确认
+- 一旦给出这种正式结论，就必须立即发送 `review_ready_for_human_confirmation`
 
 ```bash
 python3 /path/to/send_openclaw_callback.py \
@@ -199,6 +207,7 @@ reviewer 在开始审查前，至少应确认：
 - `latest_review_summary` 与当前轮目标不冲突
 
 如果状态不匹配，不应直接推进 callback。
+如果 callback 未成功，不应把“已退回/已通过”的结论表达成已完成流转。
 
 ## 7. 失败处理
 
@@ -216,6 +225,7 @@ reviewer 在开始审查前，至少应确认：
 - `400/401/404` 不自动无限重试
 - `500` 可有限次重试
 - 所有失败都要在 skill 日志中记录 `req_id`、event、response body
+- 如果 callback 没成功，必须明确告诉用户：`Coordinator 尚未收到 review 结论，流程状态未更新`
 
 ## 8. 最小上线清单
 
