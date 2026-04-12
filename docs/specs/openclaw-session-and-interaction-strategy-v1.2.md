@@ -160,29 +160,19 @@ author 收到后，先固定执行绑定确认：
 - `latest_author_result`
 - `latest_reviewer_result`
 
-### 6.2 单轮调用模型
+### 6.2 单轮交互模型
 
-每次 author/reviewer 被调用时，Coordinator Service 组装“单轮任务输入包”。
+author / reviewer 的主要工作都在各自的私聊交互面完成。
 
-输入包包含：
-
-- 当前正式草稿
-- 当前轮次
-- 当前字段
-- 最近 review 结论
-- 本轮用户输入
-- 必要的历史摘要
-
-不要把整段历史群聊原样传给 agent。
+Coordinator Service 不再组装“单轮任务输入包”驱动 agent，而只消费 agent 回传的流程事件。
 
 ### 6.3 结果回收模型
 
-每轮私聊结果都必须回到 Coordinator Service：
+每轮流程结果都必须回到 Coordinator Service：
 
-- author 输出结构化结果
-- Coordinator Service 持久化
-- reviewer 输出结构化 review
-- Coordinator Service 更新状态机
+- author 上报“可进入 AI review”
+- reviewer 上报“退回修改 / 进入人工确认 / 通过 / 退回”
+- Coordinator Service 更新状态机与 Bitable
 
 ## 7. OpenClaw 侧建议
 
@@ -228,8 +218,8 @@ OpenClaw 中的 author/reviewer 更适合被视为：
 1. 创建群中 `@CoordinatorService` 创建需求
 2. Coordinator Service 返回私聊启动指令
 3. 用户在 author 私聊中显式带 `req_id` 开始构造
-4. author 每轮把结果交回 Coordinator Service
-5. Coordinator Service 写 Bitable / 正式文档 / 调 reviewer
+4. author 在文档达到阶段门槛后，把流程事件交回 Coordinator Service
+5. Coordinator Service 仅写 Bitable / 工作流状态
 6. 项目群只负责同步状态和最终结果
 
 ## 10. 结论

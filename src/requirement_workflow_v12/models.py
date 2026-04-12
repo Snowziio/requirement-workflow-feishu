@@ -42,7 +42,29 @@ class ReviewResult:
     ready_for_human_confirmation: bool
     summary: str
     findings: list[ReviewFinding] = field(default_factory=list)
+    weak_fields: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
+    non_testable_acceptance_criteria: list[str] = field(default_factory=list)
     next_focus: str | None = None
+    reviewed_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class DiscussionTurn:
+    round_number: int
+    focused_field: str
+    user_input: str
+    normalized_updates: dict[str, str] = field(default_factory=dict)
+    review_summary: str = ""
+    next_question: str = ""
+    ai_ready_after_review: bool = False
+    created_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class HumanReviewResult:
+    approved: bool
+    summary: str
     reviewed_at: datetime = field(default_factory=utc_now)
 
 
@@ -86,7 +108,9 @@ class Requirement:
     active_private_binding_confirmed: bool = False
     latest_writeback_at: datetime | None = None
     document: RequirementDocument | None = None
+    discussion_history: list[DiscussionTurn] = field(default_factory=list)
     review_history: list[ReviewResult] = field(default_factory=list)
+    human_review_history: list[HumanReviewResult] = field(default_factory=list)
     updated_at: datetime = field(default_factory=utc_now)
 
     def touch(self) -> None:

@@ -55,8 +55,8 @@
 - 更新 Bitable
 - 维护 owner
 - 维护当前阶段 / 当前轮次 / 当前讨论字段
-- 调 author / reviewer
-- 把结果写回正式文档
+- 接收 author / reviewer 的流程事件
+- 推动工作流状态流转
 
 原则：
 
@@ -95,11 +95,11 @@
 ```text
 Feishu 触发器
   -> Coordinator Service 建立/更新流程状态
-  -> Author 显式接手一轮需求构造
-  -> Coordinator Service 写回草稿/正式文档
-  -> Reviewer 审本轮产物
-  -> Coordinator Service 根据 review 结果决定：
-       继续讨论 / 待人确认 / 进入审查
+  -> Author 显式接手需求文档构造
+  -> Author 通知 Coordinator 进入 AI review
+  -> Reviewer 审当前文档并与 author 循环协作
+  -> Reviewer 通知 Coordinator 流转结果
+  -> Coordinator 更新 Bitable / 工作流状态
 ```
 
 ## 6. 系统边界

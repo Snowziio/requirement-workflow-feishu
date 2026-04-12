@@ -1,8 +1,25 @@
 from .compiler import RequirementDocumentCompiler
 from .coordinator_service import AuthorTurnResult, CoordinatorService
 from .config import Settings, load_settings
-from .models import DISCUSSION_FIELDS, Requirement, RequirementDocument, ReviewFinding, ReviewResult, WorkflowStatus
-from .protocols import AuthorStartBinding, AuthorStartResponse, CreationRequest, CreationResponse
+from .models import (
+    DISCUSSION_FIELDS,
+    DiscussionTurn,
+    HumanReviewResult,
+    Requirement,
+    RequirementDocument,
+    ReviewFinding,
+    ReviewResult,
+    WorkflowStatus,
+)
+from .protocols import (
+    AgentAuthorEventPayload,
+    AgentRequirementContextQuery,
+    AgentReviewEventPayload,
+    AuthorStartBinding,
+    AuthorStartResponse,
+    CreationRequest,
+    CreationResponse,
+)
 from .store import JsonStateStore
 from .state_machine import Event, TransitionDecision, apply_event
 
@@ -14,13 +31,18 @@ except Exception:  # pragma: no cover - allow core imports before runtime deps a
 
 __all__ = [
     "AuthorTurnResult",
+    "AgentAuthorEventPayload",
+    "AgentRequirementContextQuery",
+    "AgentReviewEventPayload",
     "AuthorStartBinding",
     "AuthorStartResponse",
     "CoordinatorService",
     "CreationRequest",
     "CreationResponse",
     "DISCUSSION_FIELDS",
+    "DiscussionTurn",
     "Event",
+    "HumanReviewResult",
     "JsonStateStore",
     "Requirement",
     "RequirementDocument",

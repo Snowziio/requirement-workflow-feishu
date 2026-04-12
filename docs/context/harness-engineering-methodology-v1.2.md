@@ -87,11 +87,11 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：飞书文档 → Bitable → Gi
 ```
 Coordinator Service（独立飞书应用后台）
   ├── 监听飞书事件 / 卡片回调 / Workflow 触发
-  ├── 维护 Bitable 状态机与正式文档
-  └── 调用 OpenClaw 智能角色
-        ├── 需求撰写 Agent ── 引导式需求文档填写，完整度检查
+  ├── 维护 Bitable 状态机与工作流卡点
+  └── 接收 OpenClaw 智能角色的流程事件
+        ├── 需求撰写 Agent ── 私聊驱动需求文档撰写
         ├── UI 设计 Agent ─── 调用 design.md/UIUX ProMax 生成可还原设计稿
-        └── 需求审查 Agent ── 完整性/一致性/可测试性/历史冲突检查
+        └── 需求审查 Agent ── review 结论生成与流程事件通知
 ```
 
 #### 需求层内部四阶段子流程
@@ -1223,7 +1223,7 @@ Spec 产物：
 
 > 注：以下步骤属于方法论原始基线。
 > 当前仓库的实现方向已经调整为：
-> - `Coordinator Service` 负责飞书事件、状态机、Bitable 和正式文档
+> - `Coordinator Service` 负责飞书事件、状态机、Bitable 和工作流
 > - OpenClaw 只作为 `author/reviewer` 的智能运行时
 - 安装 OpenClaw 飞书插件
 - 配置飞书连接（WebSocket 长连接）

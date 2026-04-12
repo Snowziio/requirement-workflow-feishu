@@ -97,8 +97,8 @@
   - 更新 Bitable
   - 维护 owner
   - 维护当前阶段/当前轮次/当前讨论字段
-  - 调 author/reviewer
-  - 把结果写回正式文档
+  - 接收 author/reviewer 流程事件
+  - 推动工作流状态流转
 
 ### 内容构造层
 

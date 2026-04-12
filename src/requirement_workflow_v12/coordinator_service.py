@@ -3,8 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .compiler import RequirementDocumentCompiler
-from .models import DISCUSSION_FIELDS, Requirement, ReviewResult, WorkflowStatus
-from .protocols import AuthorStartBinding, AuthorStartResponse, CreationRequest, CreationResponse
+from .models import DISCUSSION_FIELDS, DiscussionTurn, HumanReviewResult, Requirement, ReviewResult, WorkflowStatus, utc_now
+from .protocols import (
+    AgentAuthorEventPayload,
+    AgentRequirementContextQuery,
+    AgentReviewEventPayload,
+    AuthorStartBinding,
+    AuthorStartResponse,
+    CreationRequest,
+    CreationResponse,
+)
 from .state_machine import Event, apply_event
 
 
@@ -78,7 +86,7 @@ class CoordinatorService:
         creation_message = (
             f"{req_id} 已创建\n"
             f"项目：{request.project}\n"
-            f"需求文档已初始化\n"
+            f"需求文档入口已准备，后续由需求构造 Agent 持续撰写\n"
             f"请私聊需求构造 Agent，并发送：\n{start_command}"
         )
         project_message = (
@@ -183,6 +191,7 @@ class CoordinatorService:
         requirement.latest_review_summary = ""
         requirement.latest_question = "请先澄清问题本质，我们会逐轮完成需求构造。"
         requirement.document = self.compiler.create_document(requirement)
+        requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
         return requirement
 
@@ -205,6 +214,15 @@ class CoordinatorService:
         requirement.status = decision.next_status
         requirement.document = self.compiler.rewrite_sections(requirement, turn.updates)
         requirement.latest_writeback_at = requirement.document.updated_at
+        requirement.discussion_history.append(
+            DiscussionTurn(
+                round_number=requirement.current_round,
+                focused_field=requirement.current_discussion_field,
+                user_input=turn.updates.get(requirement.current_discussion_field, ""),
+                normalized_updates=turn.updates,
+                next_question=turn.next_question,
+            )
+        )
 
         for field in turn.updates:
             if field not in requirement.completed_fields:
@@ -215,10 +233,24 @@ class CoordinatorService:
             requirement.pending_fields[0] if requirement.pending_fields else DISCUSSION_FIELDS[-1]
         )
         requirement.latest_question = turn.next_question
+        requirement.current_phase = "需求构造"
         requirement.current_owner = "reviewer"
         requirement.current_role_label = "审查Agent"
+        requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
         return requirement
+
+    def submit_author_turn_payload(self, payload) -> Requirement:
+        requirement = self.requirements.get(payload.req_id)
+        if requirement is None:
+            raise ValueError(f"未知需求：{payload.req_id}")
+        turn = AuthorTurnResult(
+            updates=payload.updates,
+            next_question=payload.next_question,
+            current_field_completed=payload.current_field_completed,
+            next_field=payload.next_field,
+        )
+        return self.handle_author_turn(requirement, turn)
 
     def handle_review_result(self, requirement: Requirement, result: ReviewResult) -> Requirement:
         event = Event.FINISH_AI_REVIEW_READY if result.ready_for_human_confirmation else Event.FINISH_AI_REVIEW_NOT_READY
@@ -230,18 +262,171 @@ class CoordinatorService:
         requirement.review_history.append(result)
         requirement.latest_review_summary = result.summary
         requirement.ai_ready = result.ready_for_human_confirmation
+        if requirement.discussion_history:
+            latest_turn = requirement.discussion_history[-1]
+            latest_turn.review_summary = result.summary
+            latest_turn.ai_ready_after_review = result.ready_for_human_confirmation
+            if result.next_focus:
+                latest_turn.next_question = result.next_focus
 
         if result.ready_for_human_confirmation:
+            requirement.current_phase = "人工确认"
             requirement.current_owner = "human"
             requirement.current_role_label = "人工确认"
             requirement.latest_question = "AI 评审已通过，请确认当前需求是否准确表达你的意图。"
         else:
+            requirement.current_phase = "需求构造"
             requirement.current_owner = "author"
             requirement.current_role_label = "需求构造Agent"
             requirement.latest_question = result.next_focus or requirement.latest_question
 
+        requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
         return requirement
+
+    def submit_review_payload(self, payload) -> Requirement:
+        requirement = self.requirements.get(payload.req_id)
+        if requirement is None:
+            raise ValueError(f"未知需求：{payload.req_id}")
+        return self.handle_review_result(requirement, payload.result)
+
+    def submit_author_event_payload(self, payload: AgentAuthorEventPayload) -> Requirement:
+        requirement = self.requirements.get(payload.req_id)
+        if requirement is None:
+            raise ValueError(f"未知需求：{payload.req_id}")
+        if payload.event != "author_ready_for_ai_review":
+            raise ValueError(f"不支持的 author 事件：{payload.event}")
+
+        decision = apply_event(requirement.status, Event.SUBMIT_AUTHOR_ROUND)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        requirement.status = decision.next_status
+        requirement.current_phase = "AI Review"
+        requirement.current_owner = "reviewer"
+        requirement.current_role_label = "需求审查Agent"
+        requirement.latest_review_summary = payload.summary
+        requirement.latest_question = "需求已提交 AI review，请由 review agent 与需求提出者完成审查。"
+        if payload.document_url:
+            requirement.document_url = payload.document_url
+        if payload.iteration_round is not None:
+            requirement.current_round = payload.iteration_round
+        requirement.latest_writeback_at = utc_now()
+        requirement.touch()
+        return requirement
+
+    def submit_review_event_payload(self, payload: AgentReviewEventPayload) -> Requirement:
+        requirement = self.requirements.get(payload.req_id)
+        if requirement is None:
+            raise ValueError(f"未知需求：{payload.req_id}")
+
+        if payload.document_url:
+            requirement.document_url = payload.document_url
+        requirement.latest_review_summary = payload.review_summary
+        requirement.latest_writeback_at = utc_now()
+
+        if payload.event == "review_returned_for_revision":
+            decision = apply_event(requirement.status, Event.FINISH_AI_REVIEW_NOT_READY)
+            if not decision.allowed:
+                raise ValueError(decision.message)
+            requirement.status = decision.next_status
+            requirement.current_phase = "需求构造"
+            requirement.current_owner = "author"
+            requirement.current_role_label = "需求构造Agent"
+            requirement.ai_ready = False
+            requirement.latest_question = payload.review_summary
+        elif payload.event == "review_ready_for_human_confirmation":
+            decision = apply_event(requirement.status, Event.FINISH_AI_REVIEW_READY)
+            if not decision.allowed:
+                raise ValueError(decision.message)
+            requirement.status = decision.next_status
+            requirement.current_phase = "人工确认"
+            requirement.current_owner = "human"
+            requirement.current_role_label = "人工确认"
+            requirement.ai_ready = True
+            requirement.latest_question = "AI review 已通过，请进行人工确认。"
+        elif payload.event == "human_confirmed":
+            requirement = self.handle_human_confirmation(requirement, approved=True)
+            requirement.latest_review_summary = payload.review_summary
+            if payload.document_url:
+                requirement.document_url = payload.document_url
+        elif payload.event == "human_rejected":
+            requirement = self.handle_human_confirmation(requirement, approved=False)
+            requirement.latest_review_summary = payload.review_summary
+            if payload.document_url:
+                requirement.document_url = payload.document_url
+        elif payload.event == "final_review_passed":
+            requirement = self.approve_requirement(requirement)
+            requirement.latest_review_summary = payload.review_summary
+            if payload.document_url:
+                requirement.document_url = payload.document_url
+        elif payload.event == "final_review_rejected":
+            requirement = self.request_changes_after_review(requirement, summary=payload.review_summary)
+            if payload.document_url:
+                requirement.document_url = payload.document_url
+        else:
+            raise ValueError(f"不支持的 review 事件：{payload.event}")
+
+        requirement.touch()
+        return requirement
+
+    def get_agent_requirement_context(self, payload: AgentRequirementContextQuery) -> dict[str, object]:
+        requirement = self.requirements.get(payload.req_id)
+        if requirement is None:
+            raise ValueError(f"未知需求：{payload.req_id}")
+
+        return {
+            "req_id": requirement.req_id,
+            "name": requirement.name,
+            "project": requirement.project,
+            "summary": requirement.summary,
+            "creator": requirement.creator,
+            "status": requirement.status.value,
+            "current_phase": requirement.current_phase,
+            "current_owner": requirement.current_owner,
+            "current_role_label": requirement.current_role_label,
+            "current_round": requirement.current_round,
+            "current_discussion_field": requirement.current_discussion_field,
+            "completed_fields": list(requirement.completed_fields),
+            "pending_fields": list(requirement.pending_fields),
+            "ai_ready": requirement.ai_ready,
+            "human_confirmed": requirement.human_confirmed,
+            "latest_review_summary": requirement.latest_review_summary,
+            "latest_question": requirement.latest_question,
+            "document_url": requirement.document_url,
+            "bitable_record_id": requirement.bitable_record_id,
+            "project_group_id": requirement.project_group_id,
+            "review_history": [
+                {
+                    "summary": review.summary,
+                    "ready_for_human_confirmation": review.ready_for_human_confirmation,
+                    "reviewed_at": review.reviewed_at.isoformat(),
+                }
+                for review in requirement.review_history[-5:]
+            ],
+            "human_review_history": [
+                {
+                    "approved": review.approved,
+                    "summary": review.summary,
+                    "reviewed_at": review.reviewed_at.isoformat(),
+                }
+                for review in requirement.human_review_history[-5:]
+            ],
+            "discussion_history": [
+                {
+                    "round_number": turn.round_number,
+                    "focused_field": turn.focused_field,
+                    "review_summary": turn.review_summary,
+                    "next_question": turn.next_question,
+                    "created_at": turn.created_at.isoformat(),
+                }
+                for turn in requirement.discussion_history[-5:]
+            ],
+            "latest_writeback_at": requirement.latest_writeback_at.isoformat()
+            if requirement.latest_writeback_at
+            else "",
+            "updated_at": requirement.updated_at.isoformat(),
+        }
 
     def handle_human_confirmation(self, requirement: Requirement, approved: bool) -> Requirement:
         event = Event.HUMAN_CONFIRM_YES if approved else Event.HUMAN_CONFIRM_NO
@@ -251,15 +436,20 @@ class CoordinatorService:
 
         requirement.status = decision.next_status
         requirement.human_confirmed = approved
+        review_summary = "人工确认通过，需求表达与预期一致。" if approved else "人工确认未通过，需求仍需继续打磨。"
+        requirement.human_review_history.append(HumanReviewResult(approved=approved, summary=review_summary))
         if approved:
+            requirement.current_phase = "正式审查"
             requirement.current_owner = "coordinator-service"
             requirement.current_role_label = "需求协调服务"
             requirement.latest_question = "需求构造完成，可进入正式审查。"
         else:
+            requirement.current_phase = "需求构造"
             requirement.current_owner = "author"
             requirement.current_role_label = "需求构造Agent"
             requirement.latest_question = "请继续补充或修正需求内容，然后我们会再进行一轮 AI review。"
 
+        requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
         return requirement
 
@@ -273,9 +463,26 @@ class CoordinatorService:
             raise ValueError(decision.message)
 
         requirement.status = decision.next_status
+        requirement.current_phase = "需求已批准"
         requirement.current_owner = "coordinator-service"
         requirement.current_role_label = "需求协调服务"
         requirement.latest_question = f"需求已批准，建议后续分支名为 spec/{requirement.req_id}。"
+        requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
+        requirement.touch()
+        return requirement
+
+    def request_changes_after_review(self, requirement: Requirement, summary: str | None = None) -> Requirement:
+        decision = apply_event(requirement.status, Event.REQUEST_CHANGES)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        requirement.status = decision.next_status
+        requirement.current_phase = "需求构造"
+        requirement.current_owner = "author"
+        requirement.current_role_label = "需求构造Agent"
+        requirement.latest_review_summary = summary or "正式审查要求继续修改。"
+        requirement.latest_question = "正式审查未通过，请根据审查意见继续补充，然后再发起下一轮 AI review。"
+        requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
         return requirement
 

@@ -16,7 +16,7 @@
 ### 2.2 正式文档与聊天过程分离
 
 - 聊天是交互过程
-- 正式文档是结构化编译产物
+- 正式文档由 author agent 驱动撰写与维护
 
 ### 2.3 重要状态必须持久化
 
@@ -61,8 +61,7 @@
 - 维护 Bitable 记录
 - 维护状态机
 - 维护当前轮次与当前讨论字段
-- 调 author / reviewer
-- 写回正式文档
+- 接收 author / reviewer 的流程事件
 - 宣布当前接手角色
 - 管理创建群、项目群、私聊会话与 `req_id` 的映射
 - 对外提供可审计的状态推进
@@ -222,23 +221,21 @@ CREATED
 - 历史约束摘要
 - 当前 review 摘要
 
-## 6.2 写回原则
+## 6.2 文档边界原则
 
-- 先读整篇正式文档
-- 识别 section 边界
-- 只替换目标 section 内容
-- 保持整体结构稳定
-- 不在文档末尾 append 聊天记录
+- 正式文档由 author agent 维护
+- Coordinator Service 只记录文档链接，不改写正文
+- review agent 负责给 author 反馈修改意见，不直接推进状态机
 
 ## 6.3 建议实现方式
 
-将写回逻辑单独收敛为 `doc compiler` 或独立写回模块：
+将流程事件上报逻辑单独收敛为 callback 契约：
 
-- 输入：author 结构化产出
-- 输入：review 结果
-- 输出：正式需求文档的 section 内容
+- author 上报“可进入 AI review”
+- review 上报“退回修改 / 进入人工确认 / 通过 / 退回”
+- Coordinator Service 仅消费事件并更新 Bitable / 状态机
 
-这样可以避免 author 直接操作正式文档时退化成自由写入。
+这样可以避免 Coordinator 重新介入需求文档撰写。
 
 ## 7. 每轮交互闭环
 
@@ -246,19 +243,18 @@ CREATED
 
 ```text
 用户在 author 私聊中输入
--> author 归一化当前轮内容
--> Coordinator Service 持久化讨论态并写回正式文档
--> reviewer 审当前轮草稿
--> Coordinator Service 根据 review 决定：
-   继续讨论 / 等待人工确认 / 进入正式审查
+-> author 完成需求文档撰写
+-> author 通知 Coordinator 进入 AI review
+-> reviewer 与需求提出者完成审查循环
+-> reviewer 通知 Coordinator 流转状态
+-> Coordinator 更新 Bitable 与工作流
 ```
 
 每轮都需要产出：
 
-- 当前轮结构化草稿
+- 最新需求文档
 - review 结论
-- 下一轮问题
-- 最新持久化状态
+- 最新工作流状态
 
 ## 8. 对用户可见的交互策略
 
@@ -317,17 +313,15 @@ Coordinator Service 为每个项目维护一个项目群。
 
 - 多轮追问逻辑
 - review 判断
-- 正式需求文档编译
+- 正式需求文档撰写
 
 ## 10. 第一阶段验收标准
 
 - `开始讨论` 不再只执行一次
 - 每轮讨论状态可恢复
-- 每轮 author 输出后都会自动触发 reviewer
+- 每轮状态推进都由 agent 明确通知 Coordinator
 - 未达到 `AI Ready` 不允许进入人工确认
 - 未达到 `Human Confirmed` 不允许进入正式审查
-- 正式需求文档按 section rewrite 写回
-- 文档中不再出现简单 append 的聊天摘要
 - Coordinator Service 只负责规则化编排，不承担深度需求写作
 
 ## 11. 建议实施顺序
@@ -336,6 +330,6 @@ Coordinator Service 为每个项目维护一个项目群。
 2. 设计并补齐 Bitable 新字段
 3. 抽离 Coordinator Service 的规则化职责
 4. 定义 author / reviewer 输入输出契约
-5. 实现文档 section rewrite
+5. 定义 callback 事件契约
 6. 接入飞书 Workflow / Automation
 7. 做新闭环联调与验证

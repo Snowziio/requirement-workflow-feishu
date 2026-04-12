@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 @dataclass
 class CreationRequest:
     project: str
@@ -47,3 +46,28 @@ class CreationFormPayload:
     background_links: str = ""
     priority: str = ""
     expected_due_date: str = ""
+
+
+@dataclass
+class AgentAuthorEventPayload:
+    req_id: str
+    event: str
+    summary: str
+    document_url: str = ""
+    document_version: str = ""
+    iteration_round: int | None = None
+
+
+@dataclass
+class AgentReviewEventPayload:
+    req_id: str
+    event: str
+    review_summary: str
+    review_notes_url: str = ""
+    document_url: str = ""
+    review_result: str = ""
+
+
+@dataclass
+class AgentRequirementContextQuery:
+    req_id: str

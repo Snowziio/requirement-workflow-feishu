@@ -242,9 +242,9 @@
 
 | 当前状态 | 触发事件 | 条件 | 下一状态 | 写入动作 |
 |---|---|---|---|---|
-| CREATED | create_requirement | 创建成功 | DISCUSSION_ROUTING | 初始化讨论态字段与正式文档 |
+| CREATED | create_requirement | 创建成功 | DISCUSSION_ROUTING | 初始化讨论态字段 |
 | DISCUSSION_ROUTING | handoff_to_author | author 上下文准备完成 | DISCUSSING | owner=author，写入首问 |
-| DISCUSSING | submit_author_round | 用户完成一轮输入 | AI_REVIEWING | current_round+1，写回正式文档 |
+| DISCUSSING | submit_author_round | author 通知可进入 AI review | AI_REVIEWING | current_round 更新为当前文档迭代轮次（如有） |
 | AI_REVIEWING | finish_ai_review_not_ready | AI Ready = false | DISCUSSING | 写 review 结论，更新下一轮问题 |
 | AI_REVIEWING | finish_ai_review_ready | AI Ready = true | HUMAN_CONFIRMING | owner=human，写确认提示 |
 | HUMAN_CONFIRMING | human_confirm_no | 人工不满意 | DISCUSSING | Human Confirmed=false，退回继续打磨 |

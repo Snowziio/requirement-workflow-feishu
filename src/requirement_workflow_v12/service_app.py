@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hmac
+import hashlib
 import json
 import logging
 import re
 import threading
+import time
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
@@ -11,8 +14,15 @@ from typing import Any
 from .config import Settings, load_settings
 from .coordinator_service import AuthorTurnResult, CoordinatorService
 from .feishu_gateway import FeishuGateway
-from .models import ReviewResult, WorkflowStatus
-from .protocols import AuthorStartBinding, CreationFormPayload, CreationRequest
+from .models import DISCUSSION_FIELDS, Requirement, ReviewFinding, ReviewResult, WorkflowStatus
+from .protocols import (
+    AgentAuthorEventPayload,
+    AgentRequirementContextQuery,
+    AgentReviewEventPayload,
+    AuthorStartBinding,
+    CreationFormPayload,
+    CreationRequest,
+)
 from .store import JsonStateStore
 
 try:
@@ -65,14 +75,16 @@ class CoordinatorRuntimeApp:
         settings: Settings,
         store: JsonStateStore | None = None,
         service: CoordinatorService | None = None,
+        gateway: FeishuGateway | None = None,
     ) -> None:
         self.settings = settings
         self.settings.validate_runtime()
         self.store = store or JsonStateStore(settings.state_store_path)
         self.service = service or CoordinatorService()
-        self.gateway = FeishuGateway(settings)
+        self.gateway = gateway or FeishuGateway(settings)
         requirements, active_req_by_user, project_groups = self.store.load_snapshot()
-        self.service.restore_snapshot(requirements, active_req_by_user, project_groups)
+        if service is None or requirements or active_req_by_user or project_groups:
+            self.service.restore_snapshot(requirements, active_req_by_user, project_groups)
         self._health_server: HTTPServer | None = None
         self._observed_creation_group_chat_id = settings.creation_group_chat_id
 
@@ -119,8 +131,15 @@ class CoordinatorRuntimeApp:
             def do_POST(self):
                 length = int(self.headers.get("Content-Length", "0"))
                 raw_body = self.rfile.read(length) if length else b"{}"
+                headers = {key: value for key, value in self.headers.items()}
                 if self.path == "/callbacks/card":
                     status, payload = app.handle_card_callback(raw_body)
+                elif self.path == "/callbacks/openclaw/author-turn":
+                    status, payload = app.handle_openclaw_author_turn_callback(raw_body, headers=headers)
+                elif self.path == "/callbacks/openclaw/review-result":
+                    status, payload = app.handle_openclaw_review_result_callback(raw_body, headers=headers)
+                elif self.path == "/queries/openclaw/requirement-context":
+                    status, payload = app.handle_openclaw_requirement_context_query(raw_body, headers=headers)
                 else:
                     status, payload = 404, {"error": "not_found"}
                 body = json.dumps(payload, ensure_ascii=False).encode()
@@ -231,13 +250,6 @@ class CoordinatorRuntimeApp:
             except Exception as exc:
                 LOGGER.warning("Failed to create document for %s: %s", requirement.req_id, exc)
 
-            requirement = self.service.get_requirement(requirement.req_id)
-            if requirement and requirement.document_id:
-                try:
-                    self.gateway.sync_requirement_document(requirement)
-                except Exception as exc:
-                    LOGGER.warning("Failed to sync requirement document for %s: %s", requirement.req_id, exc)
-
             if requirement and requirement.bitable_record_id:
                 try:
                     self.gateway.update_requirement_record(requirement)
@@ -290,6 +302,15 @@ class CoordinatorRuntimeApp:
         if text == "继续修改":
             return self._handle_human_confirmation(context, approved=False)
 
+        if text in {"确认通过", "通过审查"}:
+            return self._handle_formal_review_decision(context, approved=True)
+
+        if text in {"需要修改", "审查退回"}:
+            return self._handle_formal_review_decision(context, approved=False)
+
+        if text == "查看状态":
+            return self._handle_status_query(context)
+
         response = self.service.confirm_author_private_binding(context.user_id, text)
         if response.accepted:
             self._save_state()
@@ -318,7 +339,7 @@ class CoordinatorRuntimeApp:
 
         return [OutboundMessage(receive_id=context.chat_id, text=response.message)]
 
-    def _handle_author_turn(self, context: MessageContext, requirement) -> list[OutboundMessage]:
+    def _handle_author_turn(self, context: MessageContext, requirement: Requirement) -> list[OutboundMessage]:
         current_field = requirement.current_discussion_field
         next_field = self._next_discussion_field(requirement)
         if next_field:
@@ -334,15 +355,7 @@ class CoordinatorRuntimeApp:
         )
         requirement = self.service.handle_author_turn(requirement, turn)
 
-        review = ReviewResult(
-            ready_for_human_confirmation=not requirement.pending_fields,
-            summary=(
-                "当前核心字段已齐备，可以进入人工确认。"
-                if not requirement.pending_fields
-                else f"当前已补充【{current_field}】，下一轮请继续完善【{requirement.current_discussion_field}】。"
-            ),
-            next_focus=None if not requirement.pending_fields else requirement.latest_question,
-        )
+        review = self._build_rule_based_review(requirement, current_field=current_field)
         requirement = self.service.handle_review_result(requirement, review)
         self._sync_requirement_outputs(requirement)
         self._save_state()
@@ -359,8 +372,36 @@ class CoordinatorRuntimeApp:
                 f"需求构造 Agent：已更新【{current_field}】。\n\n"
                 f"审查 Agent：{requirement.latest_review_summary}\n\n"
                 f"下一步：{requirement.latest_question}"
-            )
+        )
         return [OutboundMessage(receive_id=context.chat_id, text=response_text)]
+
+    def _handle_status_query(self, context: MessageContext) -> list[OutboundMessage]:
+        active_req_id = self.service.active_req_by_user.get(context.user_id)
+        if not active_req_id:
+            return [OutboundMessage(receive_id=context.chat_id, text="当前没有激活的需求，请先发送“开始需求构造 REQ-ID”。")]
+
+        requirement = self.service.get_requirement(active_req_id)
+        if requirement is None:
+            return [OutboundMessage(receive_id=context.chat_id, text=f"未知需求：{active_req_id}")]
+
+        completed = "、".join(requirement.completed_fields) or "无"
+        pending = "、".join(requirement.pending_fields) or "无"
+        latest_ai_review = requirement.review_history[-1].summary if requirement.review_history else "暂无"
+        latest_human_review = requirement.human_review_history[-1].summary if requirement.human_review_history else "暂无"
+        text = (
+            f"{requirement.req_id} 当前状态\n"
+            f"状态：{requirement.status.value}\n"
+            f"阶段：{requirement.current_phase}\n"
+            f"轮次：{requirement.current_round}\n"
+            f"当前字段：{requirement.current_discussion_field}\n"
+            f"已完成：{completed}\n"
+            f"待补：{pending}\n"
+            f"AI Review：{latest_ai_review}\n"
+            f"人工 Review：{latest_human_review}\n"
+            f"下一步：{requirement.latest_question}\n"
+            f"需求文档：{requirement.document_url or '待同步'}"
+        )
+        return [OutboundMessage(receive_id=context.chat_id, text=text)]
 
     def _handle_human_confirmation(self, context: MessageContext, approved: bool) -> list[OutboundMessage]:
         active_req_id = self.service.active_req_by_user.get(context.user_id)
@@ -374,16 +415,15 @@ class CoordinatorRuntimeApp:
             return [OutboundMessage(receive_id=context.chat_id, text="当前还没到人工确认阶段，请先继续完成需求构造。")]
 
         requirement = self.service.handle_human_confirmation(requirement, approved=approved)
-        if approved:
-            requirement = self.service.approve_requirement(requirement)
 
         self._sync_requirement_outputs(requirement)
         self._save_state()
 
         if approved:
             response_text = (
-                f"{requirement.req_id} 已完成需求构造并进入通过状态。\n\n"
+                f"{requirement.req_id} 已完成人工确认并进入正式审查。\n\n"
                 f"当前状态：{requirement.status.value}\n"
+                f"下一步：请回复“确认通过”或“需要修改”。\n"
                 f"需求文档：{requirement.document_url or '待同步'}"
             )
         else:
@@ -393,6 +433,35 @@ class CoordinatorRuntimeApp:
             )
         return [OutboundMessage(receive_id=context.chat_id, text=response_text)]
 
+    def _handle_formal_review_decision(self, context: MessageContext, approved: bool) -> list[OutboundMessage]:
+        active_req_id = self.service.active_req_by_user.get(context.user_id)
+        if not active_req_id:
+            return [OutboundMessage(receive_id=context.chat_id, text="当前没有激活的需求，请先发送“开始需求构造 REQ-ID”。")]
+
+        requirement = self.service.get_requirement(active_req_id)
+        if requirement is None:
+            return [OutboundMessage(receive_id=context.chat_id, text=f"未知需求：{active_req_id}")]
+        if requirement.status != WorkflowStatus.REVIEWING:
+            return [OutboundMessage(receive_id=context.chat_id, text="当前还没进入正式审查阶段。")]
+
+        if approved:
+            requirement = self.service.approve_requirement(requirement)
+            response_text = (
+                f"{requirement.req_id} 已完成正式审查并批准通过。\n\n"
+                f"当前状态：{requirement.status.value}\n"
+                f"需求文档：{requirement.document_url or '待同步'}"
+            )
+        else:
+            requirement = self.service.request_changes_after_review(requirement)
+            response_text = (
+                f"{requirement.req_id} 已被正式审查退回。\n\n"
+                f"下一步：{requirement.latest_question}"
+            )
+
+        self._sync_requirement_outputs(requirement)
+        self._save_state()
+        return [OutboundMessage(receive_id=context.chat_id, text=response_text)]
+
     def handle_card_callback(self, raw_body: bytes) -> tuple[int, dict[str, object]]:
         try:
             payload = json.loads(raw_body.decode("utf-8") or "{}")
@@ -400,6 +469,161 @@ class CoordinatorRuntimeApp:
             return 400, {"error": "invalid_json"}
 
         return self._handle_card_action_payload(payload)
+
+    def handle_openclaw_author_turn_callback(
+        self,
+        raw_body: bytes,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, object]]:
+        auth_error = self._validate_openclaw_callback_auth(raw_body, headers=headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            payload = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return 400, {"error": "invalid_json"}
+
+        req_id = str(payload.get("req_id", "")).strip()
+        event = str(payload.get("event", "")).strip()
+        summary = str(payload.get("summary", "")).strip()
+        document_url = str(payload.get("document_url", "")).strip()
+        document_version = str(payload.get("document_version", "")).strip()
+        iteration_round = payload.get("iteration_round")
+
+        if not req_id or not event or not summary:
+            return 400, {"error": "invalid_payload", "message": "req_id、event、summary 为必填字段。"}
+        if event != "author_ready_for_ai_review":
+            return 400, {"error": "invalid_payload", "message": f"不支持的 author 事件：{event}。"}
+        if iteration_round is not None and not isinstance(iteration_round, int):
+            return 400, {"error": "invalid_payload", "message": "iteration_round 必须是整数。"}
+
+        try:
+            requirement = self.service.submit_author_event_payload(
+                AgentAuthorEventPayload(
+                    req_id=req_id,
+                    event=event,
+                    summary=summary,
+                    document_url=document_url,
+                    document_version=document_version,
+                    iteration_round=iteration_round,
+                )
+            )
+            self._sync_requirement_outputs(requirement)
+            self._save_state()
+        except ValueError as exc:
+            return 404, {"error": "not_found", "message": str(exc)}
+        except Exception as exc:
+            LOGGER.exception("Failed handling OpenClaw author turn callback for %s", req_id)
+            return 500, {"error": "author_turn_failed", "message": str(exc)}
+
+        return 200, {
+            "ok": True,
+            "req_id": requirement.req_id,
+            "status": requirement.status.value,
+            "current_phase": requirement.current_phase,
+            "current_round": requirement.current_round,
+            "current_owner": requirement.current_owner,
+            "latest_review_summary": requirement.latest_review_summary,
+        }
+
+    def handle_openclaw_review_result_callback(
+        self,
+        raw_body: bytes,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, object]]:
+        auth_error = self._validate_openclaw_callback_auth(raw_body, headers=headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            payload = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return 400, {"error": "invalid_json"}
+
+        req_id = str(payload.get("req_id", "")).strip()
+        event = str(payload.get("event", "")).strip()
+        review_summary = str(payload.get("review_summary", "")).strip()
+        review_notes_url = str(payload.get("review_notes_url", "")).strip()
+        document_url = str(payload.get("document_url", "")).strip()
+        review_result = str(payload.get("review_result", "")).strip()
+
+        if not req_id or not event or not review_summary:
+            return 400, {"error": "invalid_payload", "message": "req_id、event、review_summary 为必填字段。"}
+        supported_events = {
+            "review_returned_for_revision",
+            "review_ready_for_human_confirmation",
+            "human_confirmed",
+            "human_rejected",
+            "final_review_passed",
+            "final_review_rejected",
+        }
+        if event not in supported_events:
+            return 400, {"error": "invalid_payload", "message": f"不支持的 review 事件：{event}。"}
+
+        try:
+            requirement = self.service.submit_review_event_payload(
+                AgentReviewEventPayload(
+                    req_id=req_id,
+                    event=event,
+                    review_summary=review_summary,
+                    review_notes_url=review_notes_url,
+                    document_url=document_url,
+                    review_result=review_result,
+                )
+            )
+            self._sync_requirement_outputs(requirement)
+            self._save_state()
+        except ValueError as exc:
+            return 404, {"error": "not_found", "message": str(exc)}
+        except Exception as exc:
+            LOGGER.exception("Failed handling OpenClaw review result callback for %s", req_id)
+            return 500, {"error": "review_result_failed", "message": str(exc)}
+
+        return 200, {
+            "ok": True,
+            "req_id": requirement.req_id,
+            "status": requirement.status.value,
+            "current_phase": requirement.current_phase,
+            "ai_ready": requirement.ai_ready,
+            "latest_review_summary": requirement.latest_review_summary,
+            "current_owner": requirement.current_owner,
+        }
+
+    def handle_openclaw_requirement_context_query(
+        self,
+        raw_body: bytes,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, object]]:
+        auth_error = self._validate_openclaw_callback_auth(raw_body, headers=headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            payload = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return 400, {"error": "invalid_json"}
+
+        req_id = str(payload.get("req_id", "")).strip()
+        if not req_id:
+            return 400, {"error": "invalid_payload", "message": "req_id 为必填字段。"}
+
+        try:
+            context_payload = self.service.get_agent_requirement_context(AgentRequirementContextQuery(req_id=req_id))
+        except ValueError as exc:
+            return 404, {"error": "not_found", "message": str(exc)}
+        except Exception as exc:
+            LOGGER.exception("Failed handling OpenClaw requirement context query for %s", req_id)
+            return 500, {"error": "context_query_failed", "message": str(exc)}
+
+        bitable_url = self.gateway.bitable_url()
+        if bitable_url:
+            context_payload["bitable_url"] = bitable_url
+
+        return 200, {
+            "ok": True,
+            "context": context_payload,
+        }
 
     def _handle_card_action_payload(self, payload: dict[str, object]) -> tuple[int, dict[str, object]]:
         LOGGER.info("Handling card payload: %s", payload)
@@ -559,6 +783,73 @@ class CoordinatorRuntimeApp:
                 if isinstance(item, dict) and item.get("type") == "callback" and isinstance(item.get("value"), dict):
                     return item["value"]
         return {}
+
+    def _review_result_from_payload(self, payload: dict[str, object]) -> ReviewResult:
+        findings_payload = payload.get("findings", [])
+        findings: list[ReviewFinding] = []
+        if isinstance(findings_payload, list):
+            for item in findings_payload:
+                if not isinstance(item, dict):
+                    continue
+                severity = str(item.get("severity", "")).strip() or "medium"
+                if severity not in {"high", "medium", "low"}:
+                    severity = "medium"
+                findings.append(
+                    ReviewFinding(
+                        dimension=str(item.get("dimension", "")).strip(),
+                        summary=str(item.get("summary", "")).strip(),
+                        severity=severity,
+                    )
+                )
+        return ReviewResult(
+            ready_for_human_confirmation=bool(payload.get("ready_for_human_confirmation", False)),
+            summary=str(payload.get("summary", "")).strip(),
+            findings=findings,
+            weak_fields=[
+                str(item).strip() for item in payload.get("weak_fields", []) if str(item).strip()
+            ] if isinstance(payload.get("weak_fields", []), list) else [],
+            conflicts=[
+                str(item).strip() for item in payload.get("conflicts", []) if str(item).strip()
+            ] if isinstance(payload.get("conflicts", []), list) else [],
+            non_testable_acceptance_criteria=[
+                str(item).strip()
+                for item in payload.get("non_testable_acceptance_criteria", [])
+                if str(item).strip()
+            ] if isinstance(payload.get("non_testable_acceptance_criteria", []), list) else [],
+            next_focus=str(payload.get("next_focus", "")).strip() or None,
+        )
+
+    def _validate_openclaw_callback_auth(
+        self,
+        raw_body: bytes,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, object]] | None:
+        secret = self.settings.openclaw_callback_secret.strip()
+        if not secret:
+            return None
+
+        normalized_headers = {key.lower(): value for key, value in (headers or {}).items()}
+        timestamp = normalized_headers.get("x-openclaw-timestamp", "").strip()
+        signature = normalized_headers.get("x-openclaw-signature", "").strip().lower()
+        if not timestamp or not signature:
+            return 401, {"error": "unauthorized", "message": "缺少 OpenClaw 回调签名头。"}
+        if not timestamp.isdigit():
+            return 401, {"error": "unauthorized", "message": "OpenClaw 回调时间戳非法。"}
+
+        timestamp_value = int(timestamp)
+        now = int(time.time())
+        if abs(now - timestamp_value) > self.settings.openclaw_callback_ttl_seconds:
+            return 401, {"error": "unauthorized", "message": "OpenClaw 回调签名已过期。"}
+
+        expected = hmac.new(
+            secret.encode("utf-8"),
+            timestamp.encode("utf-8") + b"." + raw_body,
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(expected, signature):
+            return 401, {"error": "unauthorized", "message": "OpenClaw 回调签名不匹配。"}
+        return None
 
     def _build_requirement_creation_card(self, context: MessageContext) -> dict[str, object]:
         return {
@@ -749,6 +1040,65 @@ class CoordinatorRuntimeApp:
                 return field
         return None
 
+    def _build_rule_based_review(self, requirement: Requirement, *, current_field: str) -> ReviewResult:
+        if requirement.document is None:
+            return ReviewResult(
+                ready_for_human_confirmation=False,
+                summary="正式需求文档尚未初始化完成，请继续等待系统同步。",
+                next_focus=requirement.latest_question,
+            )
+
+        findings: list[ReviewFinding] = []
+        weak_fields: list[str] = []
+        conflicts: list[str] = []
+        non_testable_acceptance_criteria: list[str] = []
+        sections = requirement.document.sections
+        for field in DISCUSSION_FIELDS:
+            content = (sections.get(field) or "").strip()
+            if not content or content == "待补充":
+                findings.append(ReviewFinding(dimension=field, summary="该字段仍未补充。", severity="high"))
+                weak_fields.append(field)
+                continue
+            if len(content) < 12:
+                findings.append(ReviewFinding(dimension=field, summary="内容过短，仍不足以支撑后续实现。", severity="medium"))
+                weak_fields.append(field)
+                continue
+            if field == "验收标准" and not any(token in content for token in ("应", "必须", ">= ", "<=", "至少", "小于", "大于", "true", "false", "%", "秒", "分钟")):
+                findings.append(ReviewFinding(dimension=field, summary="缺少可验证或可量化的验收口径。", severity="high"))
+                weak_fields.append(field)
+                non_testable_acceptance_criteria.append(content)
+            if field == "边界" and not any(token in content for token in ("不包含", "不做", "不在本次", "排除", "暂不")):
+                findings.append(ReviewFinding(dimension=field, summary="边界描述不够明确，未清楚说明本次不做什么。", severity="medium"))
+                weak_fields.append(field)
+            if field == "输入":
+                output = (sections.get("输出") or "").strip()
+                if output and content and output == content:
+                    findings.append(ReviewFinding(dimension="一致性", summary="输入与输出内容完全相同，可能存在语义混淆。", severity="medium"))
+                    conflicts.append("输入与输出内容重复，尚未体现处理前后差异。")
+
+        ready = not weak_fields
+        if ready:
+            return ReviewResult(
+                ready_for_human_confirmation=True,
+                summary="AI review 认为当前需求已具备完整性、一致性与可验证性，可以进入人工确认。",
+                conflicts=conflicts,
+            )
+
+        next_focus = self._question_for_field(weak_fields[0])
+        if current_field in weak_fields:
+            summary = f"当前已补充【{current_field}】，但该字段仍需继续打磨；请优先完善【{weak_fields[0]}】。"
+        else:
+            summary = f"当前已补充【{current_field}】，下一轮请优先完善【{weak_fields[0]}】。"
+        return ReviewResult(
+            ready_for_human_confirmation=False,
+            summary=summary,
+            findings=findings,
+            weak_fields=weak_fields,
+            conflicts=conflicts,
+            non_testable_acceptance_criteria=non_testable_acceptance_criteria,
+            next_focus=next_focus,
+        )
+
     def _question_for_field(self, field: str) -> str:
         prompts = {
             "问题描述": "请说明这个需求当前要解决的核心问题，以及不解决会造成什么影响。",
@@ -762,12 +1112,6 @@ class CoordinatorRuntimeApp:
         return prompts.get(field, "请继续补充当前需求。")
 
     def _sync_requirement_outputs(self, requirement) -> None:
-        if requirement.document_id:
-            try:
-                self.gateway.sync_requirement_document(requirement)
-            except Exception as exc:
-                LOGGER.warning("Failed to sync requirement document for %s: %s", requirement.req_id, exc)
-
         if requirement.bitable_record_id:
             try:
                 self.gateway.update_requirement_record(requirement)

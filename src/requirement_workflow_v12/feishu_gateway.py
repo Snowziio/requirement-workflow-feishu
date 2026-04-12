@@ -3,23 +3,45 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
-import lark_oapi as lark
-from lark_oapi.api.bitable.v1 import AppTableRecord, CreateAppTableRecordRequest, UpdateAppTableRecordRequest
-from lark_oapi.api.docx.v1 import (
-    BatchDeleteDocumentBlockChildrenRequest,
-    BatchDeleteDocumentBlockChildrenRequestBody,
-    Block,
-    CreateDocumentBlockChildrenRequest,
-    CreateDocumentBlockChildrenRequestBody,
-    CreateDocumentRequest,
-    CreateDocumentRequestBody,
-    GetDocumentBlockChildrenRequest,
-    Text,
-    TextElement,
-    TextRun,
-)
-from lark_oapi.api.im.v1 import CreateChatRequest, CreateChatRequestBody, CreateMessageRequest, CreateMessageRequestBody
+try:  # pragma: no cover - optional during tests before runtime deps are installed
+    import lark_oapi as lark
+    from lark_oapi.api.bitable.v1 import AppTableRecord, CreateAppTableRecordRequest, UpdateAppTableRecordRequest
+    from lark_oapi.api.docx.v1 import (
+        BatchDeleteDocumentBlockChildrenRequest,
+        BatchDeleteDocumentBlockChildrenRequestBody,
+        Block,
+        CreateDocumentBlockChildrenRequest,
+        CreateDocumentBlockChildrenRequestBody,
+        CreateDocumentRequest,
+        CreateDocumentRequestBody,
+        GetDocumentBlockChildrenRequest,
+        Text,
+        TextElement,
+        TextRun,
+    )
+    from lark_oapi.api.im.v1 import CreateChatRequest, CreateChatRequestBody, CreateMessageRequest, CreateMessageRequestBody
+except ImportError:  # pragma: no cover - optional during tests before runtime deps are installed
+    lark = None
+    AppTableRecord = Any
+    CreateAppTableRecordRequest = Any
+    UpdateAppTableRecordRequest = Any
+    BatchDeleteDocumentBlockChildrenRequest = Any
+    BatchDeleteDocumentBlockChildrenRequestBody = Any
+    Block = Any
+    CreateDocumentBlockChildrenRequest = Any
+    CreateDocumentBlockChildrenRequestBody = Any
+    CreateDocumentRequest = Any
+    CreateDocumentRequestBody = Any
+    GetDocumentBlockChildrenRequest = Any
+    Text = Any
+    TextElement = Any
+    TextRun = Any
+    CreateChatRequest = Any
+    CreateChatRequestBody = Any
+    CreateMessageRequest = Any
+    CreateMessageRequestBody = Any
 
 from .config import Settings
 from .models import Requirement
@@ -48,6 +70,8 @@ class FeishuGateway:
     BLOCK_TYPE_HEADING2 = 4
 
     def __init__(self, settings: Settings) -> None:
+        if lark is None:
+            raise RuntimeError("lark_oapi is not installed. Install runtime dependencies first.")
         self.settings = settings
         self.client = lark.Client.builder().app_id(settings.feishu_app_id).app_secret(settings.feishu_app_secret).build()
 
@@ -228,13 +252,14 @@ class FeishuGateway:
             "当前讨论字段": requirement.current_discussion_field,
             "当前Owner": requirement.current_owner,
             "当前接手角色": requirement.current_role_label,
-            "已完成字段": ", ".join(requirement.completed_fields),
-            "待补字段": ", ".join(requirement.pending_fields),
+            "已完成字段": json.dumps(requirement.completed_fields, ensure_ascii=False),
+            "待补字段": json.dumps(requirement.pending_fields, ensure_ascii=False),
             "最近一次提问": requirement.latest_question,
             "最近一次review结论": requirement.latest_review_summary,
             "AI Ready": requirement.ai_ready,
             "Human Confirmed": requirement.human_confirmed,
             "需求文档链接": requirement.document_url,
+            "最近一次写回时间": requirement.latest_writeback_at.isoformat() if requirement.latest_writeback_at else "",
         }
 
     def _list_block_children(self, document_id: str, block_id: str) -> list[Block]:
@@ -261,10 +286,7 @@ class FeishuGateway:
         if requirement.document is None:
             return []
 
-        blocks: list[Block] = [
-            self._heading_block(self.BLOCK_TYPE_HEADING1, "需求概览"),
-            self._text_block(requirement.summary or "待补充"),
-        ]
+        blocks: list[Block] = []
         for section, content in requirement.document.sections.items():
             blocks.append(self._heading_block(self.BLOCK_TYPE_HEADING2, section))
             blocks.append(self._text_block(content or "待补充"))

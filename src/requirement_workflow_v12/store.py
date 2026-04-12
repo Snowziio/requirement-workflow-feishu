@@ -5,7 +5,16 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
-from .models import Requirement, RequirementDocument, ReviewFinding, ReviewResult, WorkflowStatus, utc_now
+from .models import (
+    DiscussionTurn,
+    HumanReviewResult,
+    Requirement,
+    RequirementDocument,
+    ReviewFinding,
+    ReviewResult,
+    WorkflowStatus,
+    utc_now,
+)
 
 
 class JsonStateStore:
@@ -40,7 +49,9 @@ class JsonStateStore:
 
     def _requirement_from_payload(self, data: dict) -> Requirement:
         document_payload = data.get("document")
+        discussion_history_payload = data.get("discussion_history", [])
         review_history_payload = data.get("review_history", [])
+        human_review_history_payload = data.get("human_review_history", [])
         requirement = Requirement(
             req_id=data["req_id"],
             name=data["name"],
@@ -69,7 +80,11 @@ class JsonStateStore:
             active_private_binding_confirmed=data.get("active_private_binding_confirmed", False),
             latest_writeback_at=self._parse_datetime(data.get("latest_writeback_at")),
             document=self._document_from_payload(document_payload) if document_payload else None,
+            discussion_history=[self._discussion_turn_from_payload(item) for item in discussion_history_payload],
             review_history=[self._review_result_from_payload(item) for item in review_history_payload],
+            human_review_history=[
+                self._human_review_result_from_payload(item) for item in human_review_history_payload
+            ],
             updated_at=self._parse_datetime(data.get("updated_at")) or utc_now(),
         )
         return requirement
@@ -93,7 +108,31 @@ class JsonStateStore:
                 )
                 for item in data.get("findings", [])
             ],
+            weak_fields=[str(item) for item in data.get("weak_fields", [])],
+            conflicts=[str(item) for item in data.get("conflicts", [])],
+            non_testable_acceptance_criteria=[
+                str(item) for item in data.get("non_testable_acceptance_criteria", [])
+            ],
             next_focus=data.get("next_focus"),
+            reviewed_at=self._parse_datetime(data.get("reviewed_at")) or utc_now(),
+        )
+
+    def _discussion_turn_from_payload(self, data: dict) -> DiscussionTurn:
+        return DiscussionTurn(
+            round_number=data.get("round_number", 0),
+            focused_field=data.get("focused_field", ""),
+            user_input=data.get("user_input", ""),
+            normalized_updates=data.get("normalized_updates", {}),
+            review_summary=data.get("review_summary", ""),
+            next_question=data.get("next_question", ""),
+            ai_ready_after_review=data.get("ai_ready_after_review", False),
+            created_at=self._parse_datetime(data.get("created_at")) or utc_now(),
+        )
+
+    def _human_review_result_from_payload(self, data: dict) -> HumanReviewResult:
+        return HumanReviewResult(
+            approved=data.get("approved", False),
+            summary=data.get("summary", ""),
             reviewed_at=self._parse_datetime(data.get("reviewed_at")) or utc_now(),
         )
 
