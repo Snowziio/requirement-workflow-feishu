@@ -711,6 +711,9 @@ class CoordinatorRuntimeApp:
             requirement = self.service.get_requirement(req_id)
             if requirement is None:
                 return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
+            requirement = self.service.ensure_author_handoff(requirement, reason="send_author_start")
+            self._sync_requirement_outputs(requirement)
+            self._save_state()
             agent_name = self.settings.openclaw_author_agent_name
             self.gateway.send_text(
                 user_id,

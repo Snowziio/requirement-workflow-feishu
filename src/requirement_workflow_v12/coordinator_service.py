@@ -230,6 +230,17 @@ class CoordinatorService:
         LOGGER.info("Handed off to author req_id=%s status=%s", requirement.req_id, requirement.status.value)
         return requirement
 
+    def ensure_author_handoff(self, requirement: Requirement, *, reason: str) -> Requirement:
+        if requirement.status == WorkflowStatus.DISCUSSION_ROUTING:
+            requirement = self.handoff_to_author(requirement)
+            LOGGER.info(
+                "Auto-handed off requirement to author req_id=%s reason=%s status=%s",
+                requirement.req_id,
+                reason,
+                requirement.status.value,
+            )
+        return requirement
+
     def handle_author_turn(self, requirement: Requirement, turn: AuthorTurnResult) -> Requirement:
         decision = apply_event(requirement.status, Event.SUBMIT_AUTHOR_ROUND)
         if not decision.allowed:
@@ -330,6 +341,7 @@ class CoordinatorService:
             raise ValueError(f"未知需求：{payload.req_id}")
         if payload.event != "author_ready_for_ai_review":
             raise ValueError(f"不支持的 author 事件：{payload.event}")
+        requirement = self.ensure_author_handoff(requirement, reason="author_event")
 
         decision = apply_event(requirement.status, Event.SUBMIT_AUTHOR_ROUND)
         if not decision.allowed:
@@ -425,6 +437,7 @@ class CoordinatorService:
         requirement = self.requirements.get(payload.req_id)
         if requirement is None:
             raise ValueError(f"未知需求：{payload.req_id}")
+        requirement = self.ensure_author_handoff(requirement, reason="context_query")
         LOGGER.info(
             "Served requirement context req_id=%s status=%s phase=%s round=%s document_url=%s",
             requirement.req_id,

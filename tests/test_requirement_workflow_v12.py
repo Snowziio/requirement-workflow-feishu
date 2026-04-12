@@ -479,6 +479,104 @@ class RequirementWorkflowV12Test(unittest.TestCase):
             self.assertEqual(context["bitable_record_id"], "rec-1")
             self.assertEqual(context["bitable_url"], "https://example.com/base/app-token?table=tbl-1")
 
+    def test_openclaw_requirement_context_query_auto_handoffs_from_discussion_routing(self) -> None:
+        class FakeGateway:
+            def sync_requirement_document(self, requirement) -> None:
+                return None
+
+            def update_requirement_record(self, requirement) -> None:
+                return None
+
+            def bitable_url(self) -> str:
+                return "https://example.com/base/app-token?table=tbl-1"
+
+        with TemporaryDirectory() as temp_dir:
+            runtime_service = CoordinatorService()
+            response = runtime_service.create_requirement_from_group(
+                CreationRequest(
+                    project="HARNESS",
+                    name="context auto handoff 测试",
+                    summary="验证 agent 拉上下文时可自动进入 DISCUSSING。",
+                    creator="tester",
+                    creator_user_id="user-1",
+                    creation_chat_id="chat-1",
+                )
+            )
+
+            app = CoordinatorRuntimeApp(
+                Settings(
+                    feishu_app_id="app-id",
+                    feishu_app_secret="app-secret",
+                    state_store_path=str(Path(temp_dir) / "state.json"),
+                ),
+                service=runtime_service,
+                gateway=FakeGateway(),
+            )
+
+            status, payload = app.handle_openclaw_requirement_context_query(
+                json.dumps({"req_id": response.req_id}, ensure_ascii=False).encode()
+            )
+
+            refreshed = runtime_service.get_requirement(response.req_id)
+            assert refreshed is not None
+            self.assertEqual(status, 200)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(refreshed.status, WorkflowStatus.DISCUSSING)
+            self.assertEqual(payload["context"]["status"], WorkflowStatus.DISCUSSING.value)
+            self.assertEqual(payload["context"]["current_owner"], "author")
+
+    def test_openclaw_author_callback_auto_handoffs_from_discussion_routing(self) -> None:
+        class FakeGateway:
+            def sync_requirement_document(self, requirement) -> None:
+                return None
+
+            def update_requirement_record(self, requirement) -> None:
+                return None
+
+        with TemporaryDirectory() as temp_dir:
+            runtime_service = CoordinatorService()
+            response = runtime_service.create_requirement_from_group(
+                CreationRequest(
+                    project="HARNESS",
+                    name="author callback auto handoff 测试",
+                    summary="验证 author callback 不会再被 DISCUSSION_ROUTING 卡住。",
+                    creator="tester",
+                    creator_user_id="user-1",
+                    creation_chat_id="chat-1",
+                )
+            )
+
+            app = CoordinatorRuntimeApp(
+                Settings(
+                    feishu_app_id="app-id",
+                    feishu_app_secret="app-secret",
+                    state_store_path=str(Path(temp_dir) / "state.json"),
+                ),
+                service=runtime_service,
+                gateway=FakeGateway(),
+            )
+
+            status, payload = app.handle_openclaw_author_turn_callback(
+                json.dumps(
+                    {
+                        "req_id": response.req_id,
+                        "event": "author_ready_for_ai_review",
+                        "summary": "author 已完成需求文档撰写。",
+                        "document_url": "https://example.com/doc/auto-handoff",
+                        "iteration_round": 1,
+                    },
+                    ensure_ascii=False,
+                ).encode()
+            )
+
+            refreshed = runtime_service.get_requirement(response.req_id)
+            assert refreshed is not None
+            self.assertEqual(status, 200)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(refreshed.status, WorkflowStatus.AI_REVIEWING)
+            self.assertEqual(refreshed.current_phase, "AI Review")
+            self.assertEqual(refreshed.document_url, "https://example.com/doc/auto-handoff")
+
     def test_openclaw_requirement_context_query_rejects_missing_signature(self) -> None:
         class FakeGateway:
             def sync_requirement_document(self, requirement) -> None:
