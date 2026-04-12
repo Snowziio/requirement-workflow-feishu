@@ -428,6 +428,7 @@ class CoordinatorRuntimeApp:
 
         self._sync_requirement_outputs(requirement)
         self._save_state()
+        self._dispatch_follow_up_messages(requirement, trigger="human_confirmed" if approved else "human_rejected")
 
         if approved:
             response_text = (
@@ -470,6 +471,7 @@ class CoordinatorRuntimeApp:
 
         self._sync_requirement_outputs(requirement)
         self._save_state()
+        self._dispatch_follow_up_messages(requirement, trigger="final_review_passed" if approved else "final_review_rejected")
         return [OutboundMessage(receive_id=context.chat_id, text=response_text)]
 
     def handle_card_callback(self, raw_body: bytes) -> tuple[int, dict[str, object]]:
@@ -529,6 +531,7 @@ class CoordinatorRuntimeApp:
             )
             self._sync_requirement_outputs(requirement)
             self._save_state()
+            self._dispatch_follow_up_messages(requirement, trigger="author_ready_for_ai_review")
         except ValueError as exc:
             return 404, {"error": "not_found", "message": str(exc)}
         except Exception as exc:
@@ -608,6 +611,7 @@ class CoordinatorRuntimeApp:
             )
             self._sync_requirement_outputs(requirement)
             self._save_state()
+            self._dispatch_follow_up_messages(requirement, trigger=event)
         except ValueError as exc:
             return 404, {"error": "not_found", "message": str(exc)}
         except Exception as exc:
@@ -1207,6 +1211,99 @@ class CoordinatorRuntimeApp:
                 self.gateway.update_requirement_record(requirement)
             except Exception as exc:
                 LOGGER.warning("Failed to update bitable record for %s: %s", requirement.req_id, exc)
+
+    def _dispatch_follow_up_messages(self, requirement: Requirement, *, trigger: str) -> None:
+        if not hasattr(self.gateway, "send_text"):
+            return
+        for outbound in self._build_follow_up_messages(requirement, trigger=trigger):
+            try:
+                self.gateway.send_text(
+                    outbound.receive_id,
+                    outbound.text,
+                    receive_id_type=outbound.receive_id_type,
+                )
+            except Exception as exc:
+                LOGGER.warning(
+                    "Failed to send follow-up message req_id=%s trigger=%s receive_id=%s: %s",
+                    requirement.req_id,
+                    trigger,
+                    outbound.receive_id,
+                    exc,
+                )
+
+    def _build_follow_up_messages(self, requirement: Requirement, *, trigger: str) -> list[OutboundMessage]:
+        text = self._build_follow_up_text(requirement, trigger=trigger)
+        if not text:
+            return []
+
+        messages: list[OutboundMessage] = []
+        if self._is_feishu_chat_id(requirement.project_group_id):
+            messages.append(OutboundMessage(receive_id=requirement.project_group_id, text=text))
+        if requirement.creator_user_id:
+            messages.append(
+                OutboundMessage(
+                    receive_id=requirement.creator_user_id,
+                    text=text,
+                    receive_id_type=self.settings.feishu_user_id_type,
+                )
+            )
+        return messages
+
+    def _build_follow_up_text(self, requirement: Requirement, *, trigger: str) -> str:
+        document_line = f"需求文档：{requirement.document_url or '待同步'}"
+        reviewer_name = self.settings.openclaw_reviewer_agent_name
+        author_name = self.settings.openclaw_author_agent_name
+
+        if trigger == "author_ready_for_ai_review":
+            return (
+                f"{requirement.req_id} 已完成本轮需求构造，并进入 AI Review。\n"
+                f"当前状态：{requirement.status.value}\n"
+                f"{document_line}\n"
+                f"下一步：请由 {reviewer_name} 接手审查当前文档。"
+            )
+        if trigger == "review_returned_for_revision":
+            return (
+                f"{requirement.req_id} 的 AI Review 已退回修改。\n"
+                f"当前状态：{requirement.status.value}\n"
+                f"{document_line}\n"
+                f"审查意见：{requirement.latest_review_summary}\n"
+                f"下一步：请由 {author_name} 继续修改需求文档后再发起下一轮 AI Review。"
+            )
+        if trigger == "review_ready_for_human_confirmation":
+            return (
+                f"{requirement.req_id} 已通过 AI Review，进入人工确认。\n"
+                f"当前状态：{requirement.status.value}\n"
+                f"{document_line}\n"
+                "下一步：请需求提出者确认当前文档是否准确表达需求。"
+            )
+        if trigger == "human_confirmed":
+            return (
+                f"{requirement.req_id} 已完成人工确认，进入正式审查。\n"
+                f"当前状态：{requirement.status.value}\n"
+                f"{document_line}\n"
+                "下一步：请执行正式审查结论。"
+            )
+        if trigger == "human_rejected":
+            return (
+                f"{requirement.req_id} 被人工确认退回修改。\n"
+                f"当前状态：{requirement.status.value}\n"
+                f"{document_line}\n"
+                f"下一步：{requirement.latest_question}"
+            )
+        if trigger == "final_review_passed":
+            return (
+                f"{requirement.req_id} 已完成正式审查并批准通过。\n"
+                f"当前状态：{requirement.status.value}\n"
+                f"{document_line}"
+            )
+        if trigger == "final_review_rejected":
+            return (
+                f"{requirement.req_id} 在正式审查阶段被退回。\n"
+                f"当前状态：{requirement.status.value}\n"
+                f"{document_line}\n"
+                f"下一步：{requirement.latest_question}"
+            )
+        return ""
 
     def _save_state(self) -> None:
         self.store.save_snapshot(

@@ -282,11 +282,17 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
     def test_openclaw_review_result_callback_advances_state(self) -> None:
         class FakeGateway:
+            def __init__(self) -> None:
+                self.text_messages = []
+
             def sync_requirement_document(self, requirement) -> None:
                 return None
 
             def update_requirement_record(self, requirement) -> None:
                 return None
+
+            def send_text(self, receive_id, text, receive_id_type="chat_id") -> None:
+                self.text_messages.append((receive_id, receive_id_type, text))
 
         with TemporaryDirectory() as temp_dir:
             runtime_service = CoordinatorService()
@@ -302,6 +308,7 @@ class RequirementWorkflowV12Test(unittest.TestCase):
             )
             requirement = runtime_service.get_requirement(response.req_id)
             assert requirement is not None
+            requirement.project_group_id = "oc_group_1"
             runtime_service.handoff_to_author(requirement)
             runtime_service.submit_author_event_payload(
                 AgentAuthorEventPayload(
@@ -313,6 +320,7 @@ class RequirementWorkflowV12Test(unittest.TestCase):
                 )
             )
 
+            gateway = FakeGateway()
             app = CoordinatorRuntimeApp(
                 Settings(
                     feishu_app_id="app-id",
@@ -320,7 +328,7 @@ class RequirementWorkflowV12Test(unittest.TestCase):
                     state_store_path=str(Path(temp_dir) / "state.json"),
                 ),
                 service=runtime_service,
-                gateway=FakeGateway(),
+                gateway=gateway,
             )
 
             status, payload = app.handle_openclaw_review_result_callback(
@@ -342,6 +350,67 @@ class RequirementWorkflowV12Test(unittest.TestCase):
             self.assertEqual(refreshed.status, WorkflowStatus.DISCUSSING)
             self.assertEqual(refreshed.latest_question, "AI review 认为仍需继续修改需求文档。")
             self.assertEqual(refreshed.latest_review_summary, "AI review 认为仍需继续修改需求文档。")
+            self.assertTrue(any("已退回修改" in text for _, _, text in gateway.text_messages))
+
+    def test_author_callback_sends_follow_up_for_reviewer_handoff(self) -> None:
+        class FakeGateway:
+            def __init__(self) -> None:
+                self.text_messages = []
+
+            def sync_requirement_document(self, requirement) -> None:
+                return None
+
+            def update_requirement_record(self, requirement) -> None:
+                return None
+
+            def send_text(self, receive_id, text, receive_id_type="chat_id") -> None:
+                self.text_messages.append((receive_id, receive_id_type, text))
+
+        with TemporaryDirectory() as temp_dir:
+            runtime_service = CoordinatorService()
+            response = runtime_service.create_requirement_from_group(
+                CreationRequest(
+                    project="HARNESS",
+                    name="author callback follow-up 测试",
+                    summary="验证进入 AI Review 时会发 reviewer 接手通知。",
+                    creator="tester",
+                    creator_user_id="user-1",
+                    creation_chat_id="chat-1",
+                )
+            )
+            requirement = runtime_service.get_requirement(response.req_id)
+            assert requirement is not None
+            requirement.project_group_id = "oc_group_1"
+
+            gateway = FakeGateway()
+            app = CoordinatorRuntimeApp(
+                Settings(
+                    feishu_app_id="app-id",
+                    feishu_app_secret="app-secret",
+                    openclaw_reviewer_agent_name="需求审查助手",
+                    state_store_path=str(Path(temp_dir) / "state.json"),
+                ),
+                service=runtime_service,
+                gateway=gateway,
+            )
+
+            status, payload = app.handle_openclaw_author_turn_callback(
+                json.dumps(
+                    {
+                        "req_id": response.req_id,
+                        "event": "author_ready_for_ai_review",
+                        "summary": "需求文档已完成当前轮撰写。",
+                        "document_url": "https://example.com/doc/reviewer-handoff",
+                        "iteration_round": 1,
+                    },
+                    ensure_ascii=False,
+                ).encode()
+            )
+
+            self.assertEqual(status, 200)
+            self.assertTrue(payload["ok"])
+            self.assertTrue(any("进入 AI Review" in text for _, _, text in gateway.text_messages))
+            self.assertTrue(any("需求审查助手" in text for _, _, text in gateway.text_messages))
 
     def test_openclaw_review_result_callback_accepts_valid_signature(self) -> None:
         class FakeGateway:
