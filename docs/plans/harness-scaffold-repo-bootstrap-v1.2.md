@@ -16,12 +16,12 @@
 
 已提供脚本：
 
-- [bootstrap_repo_from_harness_scaffold.sh](/Users/daxin/work/requirement-workflow-feishu/scripts/bootstrap_repo_from_harness_scaffold.sh)
+- [bootstrap_repo_from_harness_scaffold.sh](../../scripts/bootstrap_repo_from_harness_scaffold.sh)
 
 用法：
 
 ```bash
-bash /Users/daxin/work/requirement-workflow-feishu/scripts/bootstrap_repo_from_harness_scaffold.sh \
+bash ./scripts/bootstrap_repo_from_harness_scaffold.sh \
   /path/to/harness-scaffold \
   /path/to/new-repo
 ```

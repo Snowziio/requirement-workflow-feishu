@@ -18,8 +18,8 @@
 
 推荐直接复用仓库脚本：
 
-- [send_openclaw_callback.py](/Users/daxin/work/requirement-workflow-feishu/scripts/send_openclaw_callback.py)
-- [run_openclaw_smoke.py](/Users/daxin/work/requirement-workflow-feishu/scripts/run_openclaw_smoke.py)
+- [send_openclaw_callback.py](../../scripts/send_openclaw_callback.py)
+- [run_openclaw_smoke.py](../../scripts/run_openclaw_smoke.py)
 
 这样 OpenClaw skill 不需要自己实现：
 
@@ -31,12 +31,12 @@
 默认情况下，如果不显式传 `--base-url`，helper 会按以下顺序选择：
 
 - `$COORDINATOR_BASE_URL`
-- `http://127.0.0.1:8004`
+- 本机 Coordinator 服务地址
 
 在真实联调前，也可以先用 smoke 脚本串一次最小闭环：
 
 ```bash
-python3 /Users/daxin/work/requirement-workflow-feishu/scripts/run_openclaw_smoke.py \
+python3 ./scripts/run_openclaw_smoke.py \
   --base-url "$COORDINATOR_BASE_URL" \
   --secret "$OPENCLAW_CALLBACK_SECRET" \
   --req-id "$REQ_ID" \

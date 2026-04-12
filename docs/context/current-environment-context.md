@@ -6,24 +6,24 @@
 
 ## 1. OpenClaw 部署环境
 
-- OpenClaw 机器：`admin@47.251.81.45`
-- OpenClaw 服务：`openclaw-gateway.service`
+- OpenClaw 主机：`<openclaw-host>`
+- OpenClaw 服务：`<openclaw-service>`
 - 运行要求：配置修改后统一使用进程重启，不使用热更新
 
 ## 2. 当前飞书资源
 
 ### Bitable
 
-- 名称：`OpenClaw 项目生命周期表`
-- URL：`https://my.feishu.cn/base/RGBbbeTPTafgtCsrm89cxP9Mncg`
-- `app_token`：`RGBbbeTPTafgtCsrm89cxP9Mncg`
-- `table_id`：`tbl0npgebbogMaT1`
+- 名称：`<bitable-name>`
+- URL：`<bitable-url>`
+- `app_token`：`<bitable-app-token>`
+- `table_id`：`<bitable-table-id>`
 
 ### 模板文档
 
-- 需求文档模板：`https://www.feishu.cn/docx/J3WxdaBAYo1nT1x3QrccLVBVnEf`
-- UI 设计简报模板：`https://www.feishu.cn/docx/C71Qdjh8lo3G4IxUfhqcq8GdnIc`
-- 需求审查报告模板：`https://www.feishu.cn/docx/UdDLdJOvTo7SUhxx4tAcheeKnGe`
+- 需求文档模板：`<requirement-doc-template-url>`
+- UI 设计简报模板：`<ui-brief-template-url>`
+- 需求审查报告模板：`<review-report-template-url>`
 
 ## 3. Bitable 设计现状
 

@@ -113,8 +113,8 @@
 
 建议你提供：
 
-- 主机地址：`47.251.81.45`
-- 登录方式：`admin@47.251.81.45`
+- 主机地址：`<staging-host>`
+- 登录方式：`<staging-user>@<staging-host>`
 - 运行目录
 - Python 版本
 - 是否有反向代理/Nginx
@@ -177,7 +177,7 @@
 
 当前已确认：
 
-- OpenClaw 实例：`admin@47.251.81.45`
+- OpenClaw 实例：`<openclaw-user>@<openclaw-host>`
 - 可复用 agent：
   - `ai-founder-brief`
   - `ai-meeting-closeout`

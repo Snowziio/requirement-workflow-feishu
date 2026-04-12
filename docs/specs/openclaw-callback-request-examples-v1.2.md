@@ -11,8 +11,8 @@
 
 相关正式契约见：
 
-- [openclaw-callback-contracts-v1.2.md](/Users/daxin/work/requirement-workflow-feishu/docs/specs/openclaw-callback-contracts-v1.2.md)
-- [openclaw-context-query-contract-v1.2.md](/Users/daxin/work/requirement-workflow-feishu/docs/specs/openclaw-context-query-contract-v1.2.md)
+- [openclaw-callback-contracts-v1.2.md](openclaw-callback-contracts-v1.2.md)
+- [openclaw-context-query-contract-v1.2.md](openclaw-context-query-contract-v1.2.md)
 
 ## 2. 公共配置
 
@@ -20,13 +20,13 @@ OpenClaw skill 侧至少需要以下配置：
 
 - `COORDINATOR_BASE_URL`
   - 例如 `https://coordinator.example.com`
-  - 若与 Coordinator Service 同机部署，可直接使用 `http://127.0.0.1:8004`
+  - 若与 Coordinator Service 同机部署，可使用本机服务地址
 - `OPENCLAW_CALLBACK_SECRET`
   - 若 Coordinator 启用了 callback 签名校验，则这里必须保持一致
 
 仓库内也提供了一个可直接复用的 helper 脚本：
 
-- [send_openclaw_callback.py](/Users/daxin/work/requirement-workflow-feishu/scripts/send_openclaw_callback.py)
+- [send_openclaw_callback.py](../../scripts/send_openclaw_callback.py)
   - 适合先做本地联调、网关 smoke test，或直接被 OpenClaw skill 包装调用
 
 ## 3. 签名生成
@@ -85,7 +85,7 @@ curl -X POST "$COORDINATOR_BASE_URL/callbacks/openclaw/author-turn" \
 在 author / reviewer 开始推进某个 `req_id` 前，建议先拉一次当前只读上下文：
 
 ```bash
-python3 /Users/daxin/work/requirement-workflow-feishu/scripts/send_openclaw_callback.py \
+python3 ./scripts/send_openclaw_callback.py \
   --base-url "$COORDINATOR_BASE_URL" \
   --secret "$OPENCLAW_CALLBACK_SECRET" \
   --req-id "REQ-HARNESS-001" \
@@ -150,7 +150,7 @@ print(response.json())
 ### 5.4 Helper 脚本示例
 
 ```bash
-python3 /Users/daxin/work/requirement-workflow-feishu/scripts/send_openclaw_callback.py \
+python3 ./scripts/send_openclaw_callback.py \
   --base-url "$COORDINATOR_BASE_URL" \
   --secret "$OPENCLAW_CALLBACK_SECRET" \
   --req-id "REQ-HARNESS-001" \
@@ -315,7 +315,7 @@ print(response.json())
 ### 8.1 退回修改
 
 ```bash
-python3 /Users/daxin/work/requirement-workflow-feishu/scripts/send_openclaw_callback.py \
+python3 ./scripts/send_openclaw_callback.py \
   --base-url "$COORDINATOR_BASE_URL" \
   --secret "$OPENCLAW_CALLBACK_SECRET" \
   --req-id "REQ-HARNESS-001" \
@@ -330,7 +330,7 @@ python3 /Users/daxin/work/requirement-workflow-feishu/scripts/send_openclaw_call
 ### 8.2 进入人工确认
 
 ```bash
-python3 /Users/daxin/work/requirement-workflow-feishu/scripts/send_openclaw_callback.py \
+python3 ./scripts/send_openclaw_callback.py \
   --base-url "$COORDINATOR_BASE_URL" \
   --secret "$OPENCLAW_CALLBACK_SECRET" \
   --req-id "REQ-HARNESS-001" \
