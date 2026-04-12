@@ -44,6 +44,7 @@ FIELD_SPECS: list[FieldSpec] = [
     FieldSpec("AI Ready", FIELD_TYPE_CHECKBOX),
     FieldSpec("Human Confirmed", FIELD_TYPE_CHECKBOX),
     FieldSpec("需求文档链接", FIELD_TYPE_TEXT),
+    FieldSpec("最近一次写回时间", FIELD_TYPE_TEXT),
 ]
 
 
