@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 
 from .compiler import RequirementDocumentCompiler
 from .models import DISCUSSION_FIELDS, DiscussionTurn, HumanReviewResult, Requirement, ReviewResult, WorkflowStatus, utc_now
@@ -14,6 +15,9 @@ from .protocols import (
     CreationResponse,
 )
 from .state_machine import Event, apply_event
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -51,12 +55,14 @@ class CoordinatorService:
         requirement.project_group_id = project_group_id
         self.project_groups[requirement.project] = project_group_id
         requirement.touch()
+        LOGGER.info("Assigned project group req_id=%s project_group_id=%s", req_id, project_group_id)
         return requirement
 
     def attach_bitable_record(self, req_id: str, record_id: str) -> Requirement:
         requirement = self.requirements[req_id]
         requirement.bitable_record_id = record_id
         requirement.touch()
+        LOGGER.info("Attached bitable record req_id=%s record_id=%s", req_id, record_id)
         return requirement
 
     def attach_document(self, req_id: str, document_id: str, document_url: str) -> Requirement:
@@ -64,6 +70,7 @@ class CoordinatorService:
         requirement.document_id = document_id
         requirement.document_url = document_url
         requirement.touch()
+        LOGGER.info("Attached document req_id=%s document_id=%s document_url=%s", req_id, document_id, document_url)
         return requirement
 
     def create_requirement_from_group(self, request: CreationRequest) -> CreationResponse:
@@ -81,6 +88,13 @@ class CoordinatorService:
         )
         requirement = self.initialize_requirement(requirement)
         self.requirements[req_id] = requirement
+        LOGGER.info(
+            "Created requirement req_id=%s project=%s status=%s creator_user_id=%s",
+            req_id,
+            request.project,
+            requirement.status.value,
+            request.creator_user_id,
+        )
 
         start_command = f"开始需求构造 {req_id}"
         creation_message = (
@@ -123,6 +137,13 @@ class CoordinatorService:
             requirement.current_owner = "author"
             requirement.current_role_label = "需求构造Agent"
             requirement.touch()
+        LOGGER.info(
+            "Started author private session req_id=%s user_id=%s chat_id=%s status=%s",
+            requirement.req_id,
+            binding.user_id,
+            binding.author_dm_chat_id,
+            requirement.status.value,
+        )
         return AuthorStartResponse(
             accepted=True,
             active_req_id=requirement.req_id,
@@ -149,6 +170,7 @@ class CoordinatorService:
         requirement.active_private_binding_confirmed = True
         requirement.latest_question = "请先说明这个需求当前要解决的核心问题，以及不解决会造成什么影响。"
         requirement.touch()
+        LOGGER.info("Confirmed author private binding req_id=%s user_id=%s", requirement.req_id, user_id)
         return AuthorStartResponse(
             accepted=True,
             active_req_id=req_id,
@@ -167,6 +189,7 @@ class CoordinatorService:
         self.active_req_by_user[user_id] = req_id
         requirement.active_private_binding_confirmed = True
         requirement.touch()
+        LOGGER.info("Switched active requirement user_id=%s req_id=%s", user_id, req_id)
         return AuthorStartResponse(
             accepted=True,
             active_req_id=req_id,
@@ -193,6 +216,7 @@ class CoordinatorService:
         requirement.document = self.compiler.create_document(requirement)
         requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
+        LOGGER.info("Initialized requirement req_id=%s status=%s phase=%s", requirement.req_id, requirement.status.value, requirement.current_phase)
         return requirement
 
     def handoff_to_author(self, requirement: Requirement) -> Requirement:
@@ -203,6 +227,7 @@ class CoordinatorService:
         requirement.current_owner = "author"
         requirement.current_role_label = "需求构造Agent"
         requirement.touch()
+        LOGGER.info("Handed off to author req_id=%s status=%s", requirement.req_id, requirement.status.value)
         return requirement
 
     def handle_author_turn(self, requirement: Requirement, turn: AuthorTurnResult) -> Requirement:
@@ -238,6 +263,15 @@ class CoordinatorService:
         requirement.current_role_label = "审查Agent"
         requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
+        LOGGER.info(
+            "Handled author turn req_id=%s round=%s status=%s next_field=%s completed=%s pending=%s",
+            requirement.req_id,
+            requirement.current_round,
+            requirement.status.value,
+            requirement.current_discussion_field,
+            len(requirement.completed_fields),
+            len(requirement.pending_fields),
+        )
         return requirement
 
     def submit_author_turn_payload(self, payload) -> Requirement:
@@ -313,6 +347,14 @@ class CoordinatorService:
             requirement.current_round = payload.iteration_round
         requirement.latest_writeback_at = utc_now()
         requirement.touch()
+        LOGGER.info(
+            "Accepted author event req_id=%s event=%s status=%s round=%s document_url=%s",
+            requirement.req_id,
+            payload.event,
+            requirement.status.value,
+            requirement.current_round,
+            requirement.document_url,
+        )
         return requirement
 
     def submit_review_event_payload(self, payload: AgentReviewEventPayload) -> Requirement:
@@ -368,12 +410,29 @@ class CoordinatorService:
             raise ValueError(f"不支持的 review 事件：{payload.event}")
 
         requirement.touch()
+        LOGGER.info(
+            "Accepted review event req_id=%s event=%s status=%s phase=%s ai_ready=%s human_confirmed=%s",
+            requirement.req_id,
+            payload.event,
+            requirement.status.value,
+            requirement.current_phase,
+            requirement.ai_ready,
+            requirement.human_confirmed,
+        )
         return requirement
 
     def get_agent_requirement_context(self, payload: AgentRequirementContextQuery) -> dict[str, object]:
         requirement = self.requirements.get(payload.req_id)
         if requirement is None:
             raise ValueError(f"未知需求：{payload.req_id}")
+        LOGGER.info(
+            "Served requirement context req_id=%s status=%s phase=%s round=%s document_url=%s",
+            requirement.req_id,
+            requirement.status.value,
+            requirement.current_phase,
+            requirement.current_round,
+            requirement.document_url,
+        )
 
         return {
             "req_id": requirement.req_id,
@@ -451,6 +510,13 @@ class CoordinatorService:
 
         requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
+        LOGGER.info(
+            "Handled human confirmation req_id=%s approved=%s status=%s phase=%s",
+            requirement.req_id,
+            approved,
+            requirement.status.value,
+            requirement.current_phase,
+        )
         return requirement
 
     def approve_requirement(self, requirement: Requirement) -> Requirement:
@@ -469,6 +535,7 @@ class CoordinatorService:
         requirement.latest_question = f"需求已批准，建议后续分支名为 spec/{requirement.req_id}。"
         requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
+        LOGGER.info("Approved requirement req_id=%s status=%s", requirement.req_id, requirement.status.value)
         return requirement
 
     def request_changes_after_review(self, requirement: Requirement, summary: str | None = None) -> Requirement:
@@ -484,6 +551,12 @@ class CoordinatorService:
         requirement.latest_question = "正式审查未通过，请根据审查意见继续补充，然后再发起下一轮 AI review。"
         requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
+        LOGGER.info(
+            "Requested changes after review req_id=%s status=%s summary=%s",
+            requirement.req_id,
+            requirement.status.value,
+            requirement.latest_review_summary,
+        )
         return requirement
 
     def _next_req_id(self, project: str) -> str:

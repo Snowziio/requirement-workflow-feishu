@@ -257,6 +257,15 @@ class CoordinatorRuntimeApp:
                     LOGGER.warning("Failed to refresh bitable record for %s: %s", requirement.req_id, exc)
 
         self._save_state()
+        if requirement is not None:
+            LOGGER.info(
+                "Created requirement from form req_id=%s status=%s project_group_id=%s bitable_record_id=%s document_url=%s",
+                requirement.req_id,
+                requirement.status.value,
+                requirement.project_group_id,
+                requirement.bitable_record_id,
+                requirement.document_url,
+            )
         requirement = self.service.get_requirement(response.req_id)
         creation_text = response.message_to_creation_group
         if requirement and requirement.document_url:
@@ -278,6 +287,7 @@ class CoordinatorRuntimeApp:
 
     def _handle_author_private_message(self, context: MessageContext) -> list[OutboundMessage]:
         text = context.text.strip()
+        LOGGER.info("Handling p2p command user_id=%s chat_id=%s text=%s", context.user_id, context.chat_id, text)
         if text.startswith("开始需求构造 "):
             req_id = text.replace("开始需求构造 ", "", 1).strip()
             response = self.service.start_author_private_session(
@@ -498,6 +508,14 @@ class CoordinatorRuntimeApp:
         if iteration_round is not None and not isinstance(iteration_round, int):
             return 400, {"error": "invalid_payload", "message": "iteration_round 必须是整数。"}
 
+        LOGGER.info(
+            "Received author callback req_id=%s event=%s iteration_round=%s document_url=%s",
+            req_id,
+            event,
+            iteration_round,
+            document_url,
+        )
+
         try:
             requirement = self.service.submit_author_event_payload(
                 AgentAuthorEventPayload(
@@ -516,6 +534,14 @@ class CoordinatorRuntimeApp:
         except Exception as exc:
             LOGGER.exception("Failed handling OpenClaw author turn callback for %s", req_id)
             return 500, {"error": "author_turn_failed", "message": str(exc)}
+
+        LOGGER.info(
+            "Author callback applied req_id=%s status=%s phase=%s owner=%s",
+            requirement.req_id,
+            requirement.status.value,
+            requirement.current_phase,
+            requirement.current_owner,
+        )
 
         return 200, {
             "ok": True,
@@ -561,6 +587,14 @@ class CoordinatorRuntimeApp:
         if event not in supported_events:
             return 400, {"error": "invalid_payload", "message": f"不支持的 review 事件：{event}。"}
 
+        LOGGER.info(
+            "Received review callback req_id=%s event=%s document_url=%s review_notes_url=%s",
+            req_id,
+            event,
+            document_url,
+            review_notes_url,
+        )
+
         try:
             requirement = self.service.submit_review_event_payload(
                 AgentReviewEventPayload(
@@ -579,6 +613,16 @@ class CoordinatorRuntimeApp:
         except Exception as exc:
             LOGGER.exception("Failed handling OpenClaw review result callback for %s", req_id)
             return 500, {"error": "review_result_failed", "message": str(exc)}
+
+        LOGGER.info(
+            "Review callback applied req_id=%s status=%s phase=%s owner=%s ai_ready=%s human_confirmed=%s",
+            requirement.req_id,
+            requirement.status.value,
+            requirement.current_phase,
+            requirement.current_owner,
+            requirement.ai_ready,
+            requirement.human_confirmed,
+        )
 
         return 200, {
             "ok": True,
@@ -608,6 +652,8 @@ class CoordinatorRuntimeApp:
         if not req_id:
             return 400, {"error": "invalid_payload", "message": "req_id 为必填字段。"}
 
+        LOGGER.info("Received requirement context query req_id=%s", req_id)
+
         try:
             context_payload = self.service.get_agent_requirement_context(AgentRequirementContextQuery(req_id=req_id))
         except ValueError as exc:
@@ -619,6 +665,14 @@ class CoordinatorRuntimeApp:
         bitable_url = self.gateway.bitable_url()
         if bitable_url:
             context_payload["bitable_url"] = bitable_url
+
+        LOGGER.info(
+            "Requirement context query served req_id=%s status=%s phase=%s owner=%s",
+            context_payload["req_id"],
+            context_payload["status"],
+            context_payload["current_phase"],
+            context_payload["current_owner"],
+        )
 
         return 200, {
             "ok": True,
@@ -1112,6 +1166,15 @@ class CoordinatorRuntimeApp:
         return prompts.get(field, "请继续补充当前需求。")
 
     def _sync_requirement_outputs(self, requirement) -> None:
+        LOGGER.info(
+            "Syncing requirement outputs req_id=%s status=%s phase=%s owner=%s bitable_record_id=%s document_url=%s",
+            requirement.req_id,
+            requirement.status.value,
+            requirement.current_phase,
+            requirement.current_owner,
+            requirement.bitable_record_id,
+            requirement.document_url,
+        )
         if requirement.bitable_record_id:
             try:
                 self.gateway.update_requirement_record(requirement)

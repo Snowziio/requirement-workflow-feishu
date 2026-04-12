@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -47,6 +48,9 @@ from .config import Settings
 from .models import Requirement
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 @dataclass
 class CreatedChat:
     chat_id: str
@@ -76,6 +80,7 @@ class FeishuGateway:
         self.client = lark.Client.builder().app_id(settings.feishu_app_id).app_secret(settings.feishu_app_secret).build()
 
     def send_text(self, receive_id: str, text: str, receive_id_type: str = "chat_id") -> None:
+        LOGGER.info("Feishu send_text receive_id=%s receive_id_type=%s text_preview=%s", receive_id, receive_id_type, text[:120])
         request = (
             CreateMessageRequest.builder()
             .receive_id_type(receive_id_type)
@@ -92,6 +97,18 @@ class FeishuGateway:
         self._ensure_success(response, "send text message")
 
     def send_card(self, receive_id: str, card: dict[str, object], receive_id_type: str = "chat_id") -> None:
+        card_title = ""
+        header = card.get("header")
+        if isinstance(header, dict):
+            title = header.get("title")
+            if isinstance(title, dict):
+                card_title = str(title.get("content", ""))
+        LOGGER.info(
+            "Feishu send_card receive_id=%s receive_id_type=%s card_title=%s",
+            receive_id,
+            receive_id_type,
+            card_title,
+        )
         request = (
             CreateMessageRequest.builder()
             .receive_id_type(receive_id_type)
@@ -109,6 +126,7 @@ class FeishuGateway:
 
     def create_project_group(self, project: str, owner_user_id: str, member_user_ids: list[str] | None = None) -> CreatedChat:
         member_user_ids = member_user_ids or []
+        LOGGER.info("Feishu create_project_group project=%s owner_user_id=%s member_count=%s", project, owner_user_id, len(member_user_ids))
         request = (
             CreateChatRequest.builder()
             .user_id_type(self.settings.feishu_user_id_type)
@@ -129,11 +147,13 @@ class FeishuGateway:
         response = self.client.im.v1.chat.create(request)
         self._ensure_success(response, "create project group")
         body = response.data
+        LOGGER.info("Feishu created project group project=%s chat_id=%s", project, body.chat_id)
         return CreatedChat(chat_id=body.chat_id, name=body.name or "")
 
     def create_requirement_record(self, requirement: Requirement) -> CreatedRecord | None:
         if not self.settings.feishu_bitable_app_token or not self.settings.feishu_bitable_table_id:
             return None
+        LOGGER.info("Feishu create_requirement_record req_id=%s", requirement.req_id)
         request = (
             CreateAppTableRecordRequest.builder()
             .app_token(self.settings.feishu_bitable_app_token)
@@ -148,11 +168,20 @@ class FeishuGateway:
         )
         response = self.client.bitable.v1.app_table_record.create(request)
         self._ensure_success(response, "create bitable record")
+        LOGGER.info("Feishu created bitable record req_id=%s record_id=%s", requirement.req_id, response.data.record.record_id)
         return CreatedRecord(record_id=response.data.record.record_id)
 
     def update_requirement_record(self, requirement: Requirement) -> None:
         if not requirement.bitable_record_id:
             return
+        LOGGER.info(
+            "Feishu update_requirement_record req_id=%s record_id=%s status=%s phase=%s owner=%s",
+            requirement.req_id,
+            requirement.bitable_record_id,
+            requirement.status.value,
+            requirement.current_phase,
+            requirement.current_owner,
+        )
         request = (
             UpdateAppTableRecordRequest.builder()
             .app_token(self.settings.feishu_bitable_app_token)
@@ -168,10 +197,12 @@ class FeishuGateway:
         )
         response = self.client.bitable.v1.app_table_record.update(request)
         self._ensure_success(response, "update bitable record")
+        LOGGER.info("Feishu updated bitable record req_id=%s record_id=%s", requirement.req_id, requirement.bitable_record_id)
 
     def create_requirement_document(self, requirement: Requirement) -> CreatedDocument | None:
         if not self.settings.feishu_doc_folder_token:
             return None
+        LOGGER.info("Feishu create_requirement_document req_id=%s title=%s", requirement.req_id, requirement.name)
         request = (
             CreateDocumentRequest.builder()
             .request_body(
@@ -185,6 +216,7 @@ class FeishuGateway:
         response = self.client.docx.v1.document.create(request)
         self._ensure_success(response, "create requirement document")
         document = response.data.document
+        LOGGER.info("Feishu created requirement document req_id=%s document_id=%s", requirement.req_id, document.document_id)
         return CreatedDocument(
             document_id=document.document_id,
             document_url=f"{self.settings.feishu_base_url}/docx/{document.document_id}",
