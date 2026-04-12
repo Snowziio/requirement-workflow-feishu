@@ -284,6 +284,7 @@ class RequirementWorkflowV12Test(unittest.TestCase):
         class FakeGateway:
             def __init__(self) -> None:
                 self.text_messages = []
+                self.card_messages = []
 
             def sync_requirement_document(self, requirement) -> None:
                 return None
@@ -293,6 +294,9 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
             def send_text(self, receive_id, text, receive_id_type="chat_id") -> None:
                 self.text_messages.append((receive_id, receive_id_type, text))
+
+            def send_card(self, receive_id, card, receive_id_type="chat_id") -> None:
+                self.card_messages.append((receive_id, receive_id_type, card))
 
         with TemporaryDirectory() as temp_dir:
             runtime_service = CoordinatorService()
@@ -350,12 +354,15 @@ class RequirementWorkflowV12Test(unittest.TestCase):
             self.assertEqual(refreshed.status, WorkflowStatus.DISCUSSING)
             self.assertEqual(refreshed.latest_question, "AI review 认为仍需继续修改需求文档。")
             self.assertEqual(refreshed.latest_review_summary, "AI review 认为仍需继续修改需求文档。")
-            self.assertTrue(any("已退回修改" in text for _, _, text in gateway.text_messages))
+            self.assertTrue(
+                any("AI Review 未通过" in card["header"]["title"]["content"] for _, _, card in gateway.card_messages)
+            )
 
     def test_author_callback_sends_follow_up_for_reviewer_handoff(self) -> None:
         class FakeGateway:
             def __init__(self) -> None:
                 self.text_messages = []
+                self.card_messages = []
 
             def sync_requirement_document(self, requirement) -> None:
                 return None
@@ -365,6 +372,9 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
             def send_text(self, receive_id, text, receive_id_type="chat_id") -> None:
                 self.text_messages.append((receive_id, receive_id_type, text))
+
+            def send_card(self, receive_id, card, receive_id_type="chat_id") -> None:
+                self.card_messages.append((receive_id, receive_id_type, card))
 
         with TemporaryDirectory() as temp_dir:
             runtime_service = CoordinatorService()
@@ -409,8 +419,12 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
             self.assertEqual(status, 200)
             self.assertTrue(payload["ok"])
-            self.assertTrue(any("进入 AI Review" in text for _, _, text in gateway.text_messages))
-            self.assertTrue(any("需求审查助手" in text for _, _, text in gateway.text_messages))
+            self.assertTrue(
+                any("已进入 AI Review" in card["header"]["title"]["content"] for _, _, card in gateway.card_messages)
+            )
+            self.assertTrue(
+                any("需求审查助手" in json.dumps(card, ensure_ascii=False) for _, _, card in gateway.card_messages)
+            )
 
     def test_openclaw_review_result_callback_accepts_valid_signature(self) -> None:
         class FakeGateway:

@@ -369,6 +369,10 @@ class CoordinatorRuntimeApp:
         requirement = self.service.handle_review_result(requirement, review)
         self._sync_requirement_outputs(requirement)
         self._save_state()
+        if requirement.status == WorkflowStatus.HUMAN_CONFIRMING:
+            self._dispatch_transition_notifications(requirement, trigger="review_ready_for_human_confirmation")
+        else:
+            self._dispatch_transition_notifications(requirement, trigger="review_returned_for_revision")
 
         if requirement.status == WorkflowStatus.HUMAN_CONFIRMING:
             response_text = (
@@ -428,7 +432,7 @@ class CoordinatorRuntimeApp:
 
         self._sync_requirement_outputs(requirement)
         self._save_state()
-        self._dispatch_follow_up_messages(requirement, trigger="human_confirmed" if approved else "human_rejected")
+        self._dispatch_transition_notifications(requirement, trigger="human_confirmed" if approved else "human_rejected")
 
         if approved:
             response_text = (
@@ -471,7 +475,7 @@ class CoordinatorRuntimeApp:
 
         self._sync_requirement_outputs(requirement)
         self._save_state()
-        self._dispatch_follow_up_messages(requirement, trigger="final_review_passed" if approved else "final_review_rejected")
+        self._dispatch_transition_notifications(requirement, trigger="final_review_passed" if approved else "final_review_rejected")
         return [OutboundMessage(receive_id=context.chat_id, text=response_text)]
 
     def handle_card_callback(self, raw_body: bytes) -> tuple[int, dict[str, object]]:
@@ -531,7 +535,7 @@ class CoordinatorRuntimeApp:
             )
             self._sync_requirement_outputs(requirement)
             self._save_state()
-            self._dispatch_follow_up_messages(requirement, trigger="author_ready_for_ai_review")
+            self._dispatch_transition_notifications(requirement, trigger="author_ready_for_ai_review")
         except ValueError as exc:
             return 404, {"error": "not_found", "message": str(exc)}
         except Exception as exc:
@@ -611,7 +615,7 @@ class CoordinatorRuntimeApp:
             )
             self._sync_requirement_outputs(requirement)
             self._save_state()
-            self._dispatch_follow_up_messages(requirement, trigger=event)
+            self._dispatch_transition_notifications(requirement, trigger=event)
         except ValueError as exc:
             return 404, {"error": "not_found", "message": str(exc)}
         except Exception as exc:
@@ -1212,98 +1216,156 @@ class CoordinatorRuntimeApp:
             except Exception as exc:
                 LOGGER.warning("Failed to update bitable record for %s: %s", requirement.req_id, exc)
 
-    def _dispatch_follow_up_messages(self, requirement: Requirement, *, trigger: str) -> None:
-        if not hasattr(self.gateway, "send_text"):
+    def _dispatch_transition_notifications(self, requirement: Requirement, *, trigger: str) -> None:
+        card = self._build_transition_notification_card(requirement, trigger=trigger)
+        text = self._build_transition_notification_text(requirement, trigger=trigger)
+        if card is None and not text:
             return
-        for outbound in self._build_follow_up_messages(requirement, trigger=trigger):
+
+        targets: list[tuple[str, str]] = []
+        if self._is_feishu_chat_id(requirement.project_group_id):
+            targets.append((requirement.project_group_id, "chat_id"))
+        if requirement.creator_user_id:
+            targets.append((requirement.creator_user_id, self.settings.feishu_user_id_type))
+
+        for receive_id, receive_id_type in targets:
             try:
-                self.gateway.send_text(
-                    outbound.receive_id,
-                    outbound.text,
-                    receive_id_type=outbound.receive_id_type,
-                )
+                if card is not None and hasattr(self.gateway, "send_card"):
+                    self.gateway.send_card(receive_id, card, receive_id_type=receive_id_type)
+                elif text and hasattr(self.gateway, "send_text"):
+                    self.gateway.send_text(receive_id, text, receive_id_type=receive_id_type)
             except Exception as exc:
                 LOGGER.warning(
-                    "Failed to send follow-up message req_id=%s trigger=%s receive_id=%s: %s",
+                    "Failed to send transition notification req_id=%s trigger=%s receive_id=%s: %s",
                     requirement.req_id,
                     trigger,
-                    outbound.receive_id,
+                    receive_id,
                     exc,
                 )
 
-    def _build_follow_up_messages(self, requirement: Requirement, *, trigger: str) -> list[OutboundMessage]:
-        text = self._build_follow_up_text(requirement, trigger=trigger)
-        if not text:
-            return []
+    def _build_transition_notification_card(self, requirement: Requirement, *, trigger: str) -> dict[str, object] | None:
+        template, title, reason, result, next_action = self._transition_notification_content(requirement, trigger=trigger)
+        if not title:
+            return None
 
-        messages: list[OutboundMessage] = []
-        if self._is_feishu_chat_id(requirement.project_group_id):
-            messages.append(OutboundMessage(receive_id=requirement.project_group_id, text=text))
-        if requirement.creator_user_id:
-            messages.append(
-                OutboundMessage(
-                    receive_id=requirement.creator_user_id,
-                    text=text,
-                    receive_id_type=self.settings.feishu_user_id_type,
-                )
-            )
-        return messages
+        elements: list[dict[str, object]] = [
+            {
+                "tag": "markdown",
+                "content": (
+                    f"**需求ID**：{requirement.req_id}\n"
+                    f"**当前状态**：{requirement.status.value}\n"
+                    f"**当前阶段**：{requirement.current_phase}\n"
+                    f"**当前接手角色**：{requirement.current_role_label}"
+                ),
+            },
+            {"tag": "hr"},
+            {"tag": "markdown", "content": f"**流转原因**\n{reason}"},
+            {"tag": "markdown", "content": f"**流转结果**\n{result}"},
+            {"tag": "markdown", "content": f"**需要操作**\n{next_action}"},
+        ]
 
-    def _build_follow_up_text(self, requirement: Requirement, *, trigger: str) -> str:
-        document_line = f"需求文档：{requirement.document_url or '待同步'}"
+        links: list[str] = []
+        if requirement.document_url:
+            links.append(f"[查看需求文档]({requirement.document_url})")
+        bitable_url = self.gateway.bitable_url() if hasattr(self.gateway, "bitable_url") else ""
+        if bitable_url:
+            links.append(f"[查看多维表格]({bitable_url})")
+        if links:
+            elements.append({"tag": "markdown", "content": " | ".join(links)})
+
+        return {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": template,
+                "title": {"tag": "plain_text", "content": title},
+            },
+            "elements": elements,
+        }
+
+    def _build_transition_notification_text(self, requirement: Requirement, *, trigger: str) -> str:
+        _, title, reason, result, next_action = self._transition_notification_content(requirement, trigger=trigger)
+        if not title:
+            return ""
+        return (
+            f"{title}\n"
+            f"需求ID：{requirement.req_id}\n"
+            f"当前状态：{requirement.status.value}\n"
+            f"流转原因：{reason}\n"
+            f"流转结果：{result}\n"
+            f"需要操作：{next_action}\n"
+            f"需求文档：{requirement.document_url or '待同步'}"
+        )
+
+    def _transition_notification_content(self, requirement: Requirement, *, trigger: str) -> tuple[str, str, str, str, str]:
         reviewer_name = self.settings.openclaw_reviewer_agent_name
         author_name = self.settings.openclaw_author_agent_name
+        latest_review = requirement.latest_review_summary or "暂无"
 
         if trigger == "author_ready_for_ai_review":
             return (
-                f"{requirement.req_id} 已完成本轮需求构造，并进入 AI Review。\n"
-                f"当前状态：{requirement.status.value}\n"
-                f"{document_line}\n"
-                f"下一步：请由 {reviewer_name} 接手审查当前文档。"
+                "indigo",
+                f"{requirement.req_id} 已进入 AI Review",
+                "author 已确认当前轮需求文档达到可审查门槛。",
+                "状态已切换到 AI Review，reviewer 可以开始正式审查当前文档。",
+                f"请由 {reviewer_name} 接手审查；若审查不通过，请明确给出退回原因。",
             )
         if trigger == "review_returned_for_revision":
             return (
-                f"{requirement.req_id} 的 AI Review 已退回修改。\n"
-                f"当前状态：{requirement.status.value}\n"
-                f"{document_line}\n"
-                f"审查意见：{requirement.latest_review_summary}\n"
-                f"下一步：请由 {author_name} 继续修改需求文档后再发起下一轮 AI Review。"
+                "orange",
+                f"{requirement.req_id} AI Review 未通过",
+                latest_review,
+                "reviewer 判定当前文档尚未达到 AI Review 标准，流程已退回需求构造阶段。",
+                f"请由 {author_name} 根据审查意见继续修改文档后，再发起下一轮 AI Review。",
             )
         if trigger == "review_ready_for_human_confirmation":
             return (
-                f"{requirement.req_id} 已通过 AI Review，进入人工确认。\n"
-                f"当前状态：{requirement.status.value}\n"
-                f"{document_line}\n"
-                "下一步：请需求提出者确认当前文档是否准确表达需求。"
+                "green",
+                f"{requirement.req_id} AI Review 已通过",
+                latest_review,
+                "reviewer 已确认文档达到 AI Ready，流程进入人工确认。",
+                "请需求提出者确认当前文档是否准确表达需求；如不准确，请明确指出继续修改的内容。",
             )
         if trigger == "human_confirmed":
             return (
-                f"{requirement.req_id} 已完成人工确认，进入正式审查。\n"
-                f"当前状态：{requirement.status.value}\n"
-                f"{document_line}\n"
-                "下一步：请执行正式审查结论。"
+                "green",
+                f"{requirement.req_id} 已进入正式审查",
+                "需求提出者已完成人工确认。",
+                "流程已进入正式审查阶段。",
+                "请执行正式审查，并给出“确认通过”或“需要修改”的结论。",
             )
         if trigger == "human_rejected":
             return (
-                f"{requirement.req_id} 被人工确认退回修改。\n"
-                f"当前状态：{requirement.status.value}\n"
-                f"{document_line}\n"
-                f"下一步：{requirement.latest_question}"
+                "orange",
+                f"{requirement.req_id} 被人工确认退回",
+                latest_review,
+                "人工确认未通过，流程已退回需求构造阶段。",
+                f"请由 {author_name} 根据反馈继续修改，并准备下一轮 AI Review。",
             )
         if trigger == "final_review_passed":
             return (
-                f"{requirement.req_id} 已完成正式审查并批准通过。\n"
-                f"当前状态：{requirement.status.value}\n"
-                f"{document_line}"
+                "green",
+                f"{requirement.req_id} 已批准通过",
+                latest_review,
+                "正式审查已通过，当前需求进入批准完成状态。",
+                "无需进一步介入，可按后续规格/实现流程继续推进。",
             )
         if trigger == "final_review_rejected":
             return (
-                f"{requirement.req_id} 在正式审查阶段被退回。\n"
-                f"当前状态：{requirement.status.value}\n"
-                f"{document_line}\n"
-                f"下一步：{requirement.latest_question}"
+                "orange",
+                f"{requirement.req_id} 正式审查退回",
+                latest_review,
+                "正式审查未通过，流程已退回需求构造阶段。",
+                f"请由 {author_name} 继续补充修改后，再发起新一轮 AI Review。",
             )
-        return ""
+        if trigger == "handoff_to_author":
+            return (
+                "blue",
+                f"{requirement.req_id} 已交由需求构造",
+                "需求已创建并完成 author 接手。",
+                "当前需求进入需求构造阶段，由需求构造助手继续推进文档。",
+                f"请需求提出者继续与 {author_name} 私聊完成多轮需求构造。",
+            )
+        return ("grey", "", "", "", "")
 
     def _save_state(self) -> None:
         self.store.save_snapshot(
