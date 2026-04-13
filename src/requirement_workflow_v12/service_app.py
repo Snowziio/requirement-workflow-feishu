@@ -5,6 +5,7 @@ import hmac
 import hashlib
 import json
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from .config import Settings, load_settings
 from .coordinator_service import AuthorTurnResult, CoordinatorService
 from .feishu_gateway import FeishuGateway
 from .models import DISCUSSION_FIELDS, Requirement, ReviewFinding, ReviewResult, WorkflowStatus
+from .project_bootstrapper import ProjectBootstrapper
+from .project_config import OnboardingState, ProjectConfig
 from .protocols import (
     AgentAuthorEventPayload,
     AgentRequirementContextQuery,
@@ -96,6 +99,8 @@ class CoordinatorRuntimeApp:
             self.service.restore_snapshot(requirements, active_req_by_user, project_groups, project_configs)
         self._health_server: HTTPServer | None = None
         self._observed_creation_group_chat_id = settings.creation_group_chat_id
+        self._pending_onboarding_project: dict[str, str] = {}   # user_id → project
+        self._pending_requirement_info: dict[str, dict] = {}    # user_id → creation args
 
     def build_event_dispatcher(self):
         self._require_lark()
@@ -203,15 +208,243 @@ class CoordinatorRuntimeApp:
         return []
 
     def _handle_creation_group_message(self, context: MessageContext) -> list[OutboundMessage | OutboundCard]:
-        if "创建需求" not in context.text:
+        # If user is mid-onboarding, route their reply to the onboarding handler
+        pending_project = self._pending_onboarding_project.get(context.user_id)
+        if pending_project:
+            return self._handle_onboarding_reply(context, pending_project)
+
+        if "创建需求" not in context.text and "新建需求" not in context.text:
             return []
+
         self._observed_creation_group_chat_id = context.chat_id
-        return [
-            OutboundCard(
+        parsed = self._parse_creation_command(context.text)
+        if parsed is None:
+            return [OutboundMessage(
                 receive_id=context.chat_id,
-                card=self._build_requirement_creation_card(context),
+                text="格式：新建需求 [项目名] [需求名] [简述]（可加 --ui 标记表示需要UI设计）",
+            )]
+
+        project, name, summary, needs_ui = parsed
+
+        if self.service.is_new_project(project):
+            self._pending_onboarding_project[context.user_id] = project
+            self._pending_requirement_info[context.user_id] = {
+                "project": project,
+                "name": name,
+                "summary": summary,
+                "needs_ui": needs_ui,
+                "creator": context.sender_name,
+                "creator_user_id": context.user_id,
+                "creation_chat_id": context.chat_id,
+            }
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text=(
+                    f"检测到 {project} 是新项目，需要先完成项目初始化（3 个问题）。\n\n"
+                    "问题 1/3：GitHub 仓库地址？\n（格式：https://github.com/org/repo）"
+                ),
+            )]
+
+        # Existing project → normal card-based creation flow
+        return [OutboundCard(receive_id=context.chat_id, card=self._build_requirement_creation_card(context))]
+
+    # ── Onboarding conversation ───────────────────────────────────────────────
+
+    @staticmethod
+    def _parse_creation_command(text: str) -> tuple[str, str, str, bool] | None:
+        needs_ui = "--ui" in text
+        clean = text.replace("--ui", "").strip()
+        m = re.match(r"(?:新建需求|创建需求)\s+(\S+)\s+(\S+)\s+(.+)", clean)
+        if not m:
+            return None
+        return m.group(1), m.group(2), m.group(3).strip(), needs_ui
+
+    @staticmethod
+    def _parse_tech_stack(text: str) -> dict[str, str]:
+        parts = [p.strip() for p in re.split(r"[/,；;、]", text) if p.strip()]
+        keys = ["language", "framework", "database", "test_framework"]
+        return {keys[i]: parts[i] for i in range(min(len(keys), len(parts)))}
+
+    def _handle_onboarding_reply(self, context: MessageContext, project: str) -> list[OutboundMessage]:
+        cfg = self.service.project_configs.get(project)
+        state = cfg.onboarding_state if cfg else OnboardingState.COLLECTING_REPO
+        text = context.text.strip()
+
+        if state == OnboardingState.COLLECTING_REPO or cfg is None:
+            return self._onboarding_collect_repo(context, project, text)
+        if state == OnboardingState.COLLECTING_PROJECT_TYPE:
+            return self._onboarding_collect_project_type(context, project, text)
+        if state == OnboardingState.COLLECTING_TECH_STACK:
+            return self._onboarding_collect_tech_stack(context, project, text)
+        if state == OnboardingState.WAITING_ARCH_CONFIRMATION:
+            return self._onboarding_wait_arch_confirmation(context, project, text)
+        return []
+
+    def _onboarding_collect_repo(self, context: MessageContext, project: str, text: str) -> list[OutboundMessage]:
+        if not re.match(r"https://github\.com/[\w.\-]+/[\w.\-]+", text):
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text="格式不正确，请提供 GitHub 仓库地址（https://github.com/org/repo）",
+            )]
+        self.service.register_project_config(project, text, True, {})
+        return [OutboundMessage(
+            receive_id=context.chat_id,
+            text=(
+                "问题 2/3：全新项目还是已有代码库？\n"
+                "A. 全新项目（从零开始，无现有代码）\n"
+                "B. 已有代码库（需先运行初始化脚本生成 ARCHITECTURE.yaml）"
+            ),
+        )]
+
+    def _onboarding_collect_project_type(self, context: MessageContext, project: str, text: str) -> list[OutboundMessage]:
+        upper = text.upper()
+        if "A" in upper or "全新" in upper:
+            self.service.set_project_type(project, is_new_project=True)
+        elif "B" in upper or "已有" in upper or "代码" in upper:
+            self.service.set_project_type(project, is_new_project=False)
+        else:
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text="请回复 A（全新项目）或 B（已有代码库）",
+            )]
+        self.service.advance_onboarding_state(project, OnboardingState.COLLECTING_TECH_STACK)
+        return [OutboundMessage(
+            receive_id=context.chat_id,
+            text="问题 3/3：技术栈？\n（如：Python/FastAPI/PostgreSQL/pytest）",
+        )]
+
+    def _onboarding_collect_tech_stack(self, context: MessageContext, project: str, text: str) -> list[OutboundMessage]:
+        tech_stack = self._parse_tech_stack(text)
+        self.service.set_tech_stack(project, tech_stack)
+        cfg = self.service.project_configs[project]
+
+        if not cfg.is_new_project:
+            self.service.advance_onboarding_state(project, OnboardingState.WAITING_ARCH_CONFIRMATION)
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text=(
+                    "已有代码库需先生成架构快照，请运行：\n\n"
+                    f"  python scripts/bootstrap_architecture.py --repo {cfg.github_repo_url}\n\n"
+                    "完成后回复「初始化完成」继续。"
+                ),
+            )]
+
+        # Path C: new project → async bootstrap
+        self.service.advance_onboarding_state(project, OnboardingState.BOOTSTRAPPING)
+        threading.Thread(
+            target=self._run_bootstrap_new_project,
+            args=(context, project),
+            daemon=True,
+        ).start()
+        return [OutboundMessage(
+            receive_id=context.chat_id,
+            text="信息收集完成，正在初始化项目上下文，请稍候…",
+        )]
+
+    def _onboarding_wait_arch_confirmation(self, context: MessageContext, project: str, text: str) -> list[OutboundMessage]:
+        if "完成" not in text:
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text="请运行完脚本后回复「初始化完成」",
+            )]
+        cfg = self.service.project_configs[project]
+        bootstrapper = self._make_bootstrapper()
+        if not bootstrapper.verify_architecture_yaml_exists(cfg.github_repo_url):
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text="未检测到 ARCHITECTURE.yaml，请确认脚本运行成功后重试。",
+            )]
+        self.service.advance_onboarding_state(project, OnboardingState.BOOTSTRAPPING)
+        threading.Thread(
+            target=self._run_bootstrap_existing_project,
+            args=(context, project),
+            daemon=True,
+        ).start()
+        return [OutboundMessage(
+            receive_id=context.chat_id,
+            text="已确认，正在完成剩余初始化（ACM 注册表）…",
+        )]
+
+    def _run_bootstrap_new_project(self, context: MessageContext, project: str) -> None:
+        cfg = self.service.project_configs[project]
+        try:
+            bootstrapper = self._make_bootstrapper()
+            bootstrapper.bootstrap_new_project(
+                repo_url=cfg.github_repo_url,
+                project=project,
+                tech_stack=cfg.tech_stack,
             )
-        ]
+            self.service.complete_onboarding(project, architecture_initialized=True, acm_initialized=True)
+        except Exception as exc:
+            LOGGER.error("Bootstrap failed for project=%s: %s", project, exc)
+            self.gateway.send_text(context.chat_id, f"项目初始化失败：{exc}\n请检查 GitHub Token 权限后重试。")
+            return
+        finally:
+            self._save_state()
+            self._pending_onboarding_project.pop(context.user_id, None)
+        self._finish_onboarding(context, project)
+
+    def _run_bootstrap_existing_project(self, context: MessageContext, project: str) -> None:
+        cfg = self.service.project_configs[project]
+        try:
+            bootstrapper = self._make_bootstrapper()
+            from github import Github
+            repo_path = bootstrapper._repo_path_from_url(cfg.github_repo_url)
+            g = Github(self.settings.github_token)
+            repo = g.get_repo(repo_path)
+            acm_yaml = bootstrapper.render_acm_registry_yaml()
+            bootstrapper._create_file_if_missing(
+                repo,
+                path="spec/registry/consolidated.yaml",
+                content=acm_yaml,
+                commit_message="chore: initialize ACM registry",
+            )
+            self.service.complete_onboarding(project, architecture_initialized=True, acm_initialized=True)
+        except Exception as exc:
+            LOGGER.error("Bootstrap (existing) failed for project=%s: %s", project, exc)
+            self.gateway.send_text(context.chat_id, f"ACM 注册表初始化失败：{exc}")
+            return
+        finally:
+            self._save_state()
+            self._pending_onboarding_project.pop(context.user_id, None)
+        self._finish_onboarding(context, project)
+
+    def _finish_onboarding(self, context: MessageContext, project: str) -> None:
+        req_info = self._pending_requirement_info.pop(context.user_id, None)
+        self.gateway.send_text(
+            context.chat_id,
+            f"{project} 初始化完成 ✓\n"
+            "· ARCHITECTURE.yaml 已就绪\n"
+            "· ACM 注册表已就绪（spec/registry/consolidated.yaml）\n\n"
+            "正在创建需求，稍后通知 Author 进入讨论…",
+        )
+        if req_info is None:
+            return
+        request = CreationRequest(
+            project=req_info["project"],
+            name=req_info["name"],
+            summary=req_info["summary"],
+            creator=req_info["creator"],
+            creator_user_id=req_info["creator_user_id"],
+            creation_chat_id=req_info["creation_chat_id"],
+        )
+        response = self.service.create_requirement_from_group(request)
+        requirement = self.service.get_requirement(response.req_id)
+        if requirement is not None:
+            requirement.needs_ui = req_info.get("needs_ui", False)
+            requirement.github_repo_url = self.service.project_configs[project].github_repo_url
+        self._save_state()
+        threading.Thread(
+            target=self._provision_requirement_after_creation,
+            args=(request, response.req_id),
+            daemon=True,
+        ).start()
+
+    def _make_bootstrapper(self) -> ProjectBootstrapper:
+        return ProjectBootstrapper(
+            github_token=self.settings.github_token,
+            default_branch=self.settings.github_default_branch,
+        )
 
     def _create_requirement_from_form(
         self,
