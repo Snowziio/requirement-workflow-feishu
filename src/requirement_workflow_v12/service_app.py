@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import hmac
 import hashlib
 import json
@@ -253,23 +254,25 @@ class CoordinatorRuntimeApp:
             except Exception as exc:
                 LOGGER.warning("Failed to create project group for %s: %s", requirement.req_id, exc)
 
-        try:
-            created_record = self.gateway.create_requirement_record(requirement)
-            if created_record:
-                self.service.attach_bitable_record(requirement.req_id, created_record.record_id)
-        except Exception as exc:
-            LOGGER.warning("Failed to create bitable record for %s: %s", requirement.req_id, exc)
-
-        try:
-            created_document = self.gateway.create_requirement_document(requirement)
-            if created_document:
-                self.service.attach_document(
-                    requirement.req_id,
-                    created_document.document_id,
-                    created_document.document_url,
-                )
-        except Exception as exc:
-            LOGGER.warning("Failed to create document for %s: %s", requirement.req_id, exc)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            record_future = executor.submit(self.gateway.create_requirement_record, requirement)
+            document_future = executor.submit(self.gateway.create_requirement_document, requirement)
+            try:
+                created_record = record_future.result()
+                if created_record:
+                    self.service.attach_bitable_record(requirement.req_id, created_record.record_id)
+            except Exception as exc:
+                LOGGER.warning("Failed to create bitable record for %s: %s", requirement.req_id, exc)
+            try:
+                created_document = document_future.result()
+                if created_document:
+                    self.service.attach_document(
+                        requirement.req_id,
+                        created_document.document_id,
+                        created_document.document_url,
+                    )
+            except Exception as exc:
+                LOGGER.warning("Failed to create document for %s: %s", requirement.req_id, exc)
 
         if requirement.bitable_record_id:
             try:
@@ -286,12 +289,6 @@ class CoordinatorRuntimeApp:
             requirement.document_url,
         )
         requirement = self.service.get_requirement(req_id)
-        creation_text = (
-            f"{req_id} 已创建\n"
-            f"项目：{request.project}\n"
-            f"需求文档入口已准备，后续由需求构造 Agent 持续撰写\n"
-            f"请私聊需求构造 Agent，并发送：\n开始需求构造 {req_id}"
-        )
         messages: list[OutboundMessage | OutboundCard] = []
         if requirement:
             messages.append(
@@ -302,6 +299,12 @@ class CoordinatorRuntimeApp:
                 )
             )
         else:
+            creation_text = (
+                f"{req_id} 已创建\n"
+                f"项目：{request.project}\n"
+                f"需求文档入口已准备，后续由需求构造 Agent 持续撰写\n"
+                f"请私聊需求构造 Agent，并发送：\n开始需求构造 {req_id}"
+            )
             bitable_url = self.gateway.bitable_url()
             if bitable_url:
                 creation_text += f"\n多维表格：{bitable_url}"
