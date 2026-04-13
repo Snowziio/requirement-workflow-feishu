@@ -15,6 +15,7 @@ from .models import (
     WorkflowStatus,
     utc_now,
 )
+from .project_config import OnboardingState, ProjectConfig
 
 LEGACY_STATUS_ALIASES = {
     "DISCUSSION_ROUTING": WorkflowStatus.DRAFTING.value,
@@ -33,27 +34,43 @@ class JsonStateStore:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    def save_snapshot(self, requirements: dict[str, Requirement], active_req_by_user: dict[str, str], project_groups: dict[str, str]) -> None:
+    def save_snapshot(
+        self,
+        requirements: dict[str, Requirement],
+        active_req_by_user: dict[str, str],
+        project_groups: dict[str, str],
+        project_configs: dict[str, ProjectConfig] | None = None,
+    ) -> None:
         payload = {
             "requirements": {req_id: asdict(req) for req_id, req in requirements.items()},
             "active_req_by_user": active_req_by_user,
             "project_groups": project_groups,
+            "project_configs": {
+                name: asdict(cfg) for name, cfg in (project_configs or {}).items()
+            },
         }
         self.path.write_text(json.dumps(payload, ensure_ascii=False, default=str, indent=2))
 
-    def load_snapshot(self) -> tuple[dict[str, Requirement], dict[str, str], dict[str, str]]:
+    def load_snapshot(
+        self,
+    ) -> tuple[dict[str, Requirement], dict[str, str], dict[str, str], dict[str, ProjectConfig]]:
         if not self.path.exists():
-            return {}, {}, {}
+            return {}, {}, {}, {}
 
         payload = json.loads(self.path.read_text())
         requirements = {
             req_id: self._requirement_from_payload(data)
             for req_id, data in payload.get("requirements", {}).items()
         }
+        project_configs = {
+            name: ProjectConfig.from_dict(data)
+            for name, data in payload.get("project_configs", {}).items()
+        }
         return (
             requirements,
             payload.get("active_req_by_user", {}),
             payload.get("project_groups", {}),
+            project_configs,
         )
 
     def _requirement_from_payload(self, data: dict) -> Requirement:

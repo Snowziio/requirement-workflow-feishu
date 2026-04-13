@@ -91,9 +91,9 @@ class CoordinatorRuntimeApp:
         self.store = store or JsonStateStore(settings.state_store_path)
         self.service = service or CoordinatorService()
         self.gateway = gateway or FeishuGateway(settings)
-        requirements, active_req_by_user, project_groups = self.store.load_snapshot()
+        requirements, active_req_by_user, project_groups, project_configs = self.store.load_snapshot()
         if service is None or requirements or active_req_by_user or project_groups:
-            self.service.restore_snapshot(requirements, active_req_by_user, project_groups)
+            self.service.restore_snapshot(requirements, active_req_by_user, project_groups, project_configs)
         self._health_server: HTTPServer | None = None
         self._observed_creation_group_chat_id = settings.creation_group_chat_id
 
