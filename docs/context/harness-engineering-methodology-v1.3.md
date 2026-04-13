@@ -5,6 +5,12 @@
 > 客户需求：在租赁业务平台中，使用大模型自动解读申请人的营业执照与征信信息，生成面向租赁场景的格式化风控报告。
 > 本文所有流程设计均以此案例为锚点进行说明。
 
+> **v1.3.1 参考实现对齐（2026-04-13）**
+> - 状态名与 `Snowziio/requirement-workflow-feishu` 参考实现对齐：方法论概念层保留7态，同时标注参考实现5态简化名称（DRAFTING / AI_REVIEW / HUMAN_CONFIRM / FINAL_REVIEW / APPROVED）
+> - DISCUSSION_ROUTING 状态：确认在参考实现中已合并进创建流程，不单独成状态
+> - §2.1.3 双闸门约束伪代码：事件名统一为参考实现 `Event` 枚举命名
+> - §2.1.7 Bitable 状态枚举：更新为参考实现实际使用的状态值
+>
 > **v1.3 变更摘要**
 > - 新增 §1.3 **层间工作流服务模式**：纵向每层通过 "Workflow Service + Hook 实现 + 能力层" 三层分离的方式落地，作为贯穿全文的顶级架构原则
 > - 需求层架构反转：**Coordinator Service** 取代 OpenClaw 成为真相源与状态机；OpenClaw 降级为 Author/Reviewer Agent
@@ -55,8 +61,9 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：飞书文档 → Bitable → Gi
   ⚡2  质量门（CI通过，合并确认）
   ⚡3  发布门（Staging验收）
 
-需求层状态机（Coordinator Service 驱动，7 状态）：
-  CREATED → DISCUSSING → AI_REVIEWING → HUMAN_CONFIRMING → REVIEWING → REQ_APPROVED
+需求层状态机（Coordinator Service 驱动，参考实现 5 状态）：
+  CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROVED
+  （方法论概念层用 7 态描述，见 §2.1.2；参考实现合并了 DISCUSSION_ROUTING）
 ```
 
 **纵向流程**：从需求到交付的七层流水线（规格层拆分为A/B两个子层），定义"做什么"。
@@ -204,26 +211,32 @@ Coordinator Service（Workflow Service 层）
 
 v1.2 的 5 态模型把"AI 审查"和"人工确认"合并成一件事，导致两者无法独立失败独立重试。v1.3 扩展为 7 态：
 
+**概念层（7 态，完整语义）**：
+
 ```
 CREATED                    ─ 需求刚在创建群里发起
   ↓  create_requirement
 DISCUSSION_ROUTING         ─ 等待 author 发起私聊建立绑定
   ↓  handoff_to_author
-DISCUSSING                 ─ author 私聊多轮字段补全
-  ↓  submit_author_round
-AI_REVIEWING               ─ Reviewer Agent 判定 AI Ready
-  ├─ finish_ai_review_not_ready ──→ DISCUSSING（回炉）
-  └─ finish_ai_review_ready     ──↓
-HUMAN_CONFIRMING           ─ author 人工确认 AI 结论（含 UI 原型，如需）
-  ├─ human_confirm_no ──→ DISCUSSING（回炉）
+DISCUSSING / DRAFTING      ─ author 私聊多轮字段补全
+  ↓  author_submit
+AI_REVIEWING / AI_REVIEW   ─ Reviewer Agent 判定 AI Ready
+  ├─ ai_review_reject ──→ DRAFTING（回炉）
+  └─ ai_review_pass   ──↓
+HUMAN_CONFIRMING / HUMAN_CONFIRM ─ author 人工确认 AI 结论（含 UI 原型，如需）
+  ├─ human_confirm_no  ──→ DRAFTING（回炉）
   └─ human_confirm_yes ──↓
-REVIEWING                  ─ 正式审查（项目群内）
-  ├─ approve_requirement ──→ REQ_APPROVED
-  └─ request_changes    ──→ DISCUSSING（回炉）
-REQ_APPROVED               ─ 终态，进入规格层-A
+REVIEWING / FINAL_REVIEW   ─ 正式审查（项目群内）
+  ├─ final_review_pass    ──→ APPROVED
+  └─ final_review_reject  ──→ DRAFTING（回炉）
+APPROVED / REQ_APPROVED    ─ 终态，进入规格层-A
 ```
 
-**关键原则**：REVIEWING 是一个**独立阶段**，不能被"穿透"。即使 Human Confirmed = true，也要在项目群里显式发送审查卡片，由人点击"通过"才能进 REQ_APPROVED。这一条是首个参考实现的踩坑修复。
+**参考实现（5 态，`Snowziio/requirement-workflow-feishu`）**：
+
+DISCUSSION_ROUTING 阶段被合并进创建流程（Coordinator 创建需求后直接私信 author 发送启动指令，author 在私聊发送「开始需求构造 REQ-ID」后即进入 DRAFTING），不单独成状态。其余状态使用右侧的简化名称（`/` 后），事件名以参考实现为准。
+
+**关键原则**：FINAL_REVIEW 是一个**独立阶段**，不能被"穿透"。即使 Human Confirmed = true，也要显式经过 FINAL_REVIEW 阶段，由人触发 final_review_pass 才能进 APPROVED。这一条在状态机约束层硬编码（见 §2.1.3）。
 
 #### 2.1.3 双闸门（AI Ready + Human Confirmed）
 
@@ -231,20 +244,22 @@ v1.2 只有一道"人工确认"门。v1.3 引入**两道独立的门**：
 
 | 闸门 | 判定者 | 判定依据 | 存储字段 | 进入条件 |
 |---|---|---|---|---|
-| **AI Ready** | Reviewer Agent | 7 个讨论字段全部有实质内容 + 一致性/可测试性通过 | Bitable `AI Ready` (bool) | `AI_REVIEWING → HUMAN_CONFIRMING` |
-| **Human Confirmed** | Author（需求发起人） | 私聊里看到 AI 结论 + UI 原型（如需）后主动确认 | Bitable `Human Confirmed` (bool) | `HUMAN_CONFIRMING → REVIEWING` |
+| **AI Ready** | Reviewer Agent | 7 个讨论字段全部有实质内容 + 一致性/可测试性通过 | Bitable `AI Ready` (bool) | `AI_REVIEW → HUMAN_CONFIRM` |
+| **Human Confirmed** | Author（需求发起人） | 私聊里看到 AI 结论 + UI 原型（如需）后主动确认 | Bitable `Human Confirmed` (bool) | `HUMAN_CONFIRM → FINAL_REVIEW` |
 
 **两道门必须都为 true** 才能进入 REVIEWING 阶段。状态机层面强制以下约束（伪代码）：
 
 ```
 约束 1（AI Ready 前置）：
-  若 event = HUMAN_CONFIRM_YES 且 ai_ready = false：
+  若 event = human_confirm_yes 且 ai_ready = false：
     → 拒绝转移，保持当前状态，原因「AI Ready 未满足，不能进入正式审查」
 
 约束 2（Human Confirmed 前置）：
-  若 event = APPROVE_REQUIREMENT 且 human_confirmed = false：
+  若 event = final_review_pass 且 human_confirmed = false：
     → 拒绝转移，保持当前状态，原因「Human Confirmed 未满足，不能批准需求」
 ```
+
+事件名以参考实现 `state_machine.py` 的 `Event` 枚举为准：`author_submit`、`ai_review_reject`、`ai_review_pass`、`human_confirm_yes`、`human_confirm_no`、`final_review_pass`、`final_review_reject`。
 
 双闸门的意义：AI 和人的判断**独立记录、独立失败、独立追溯**。任何一方觉得不 ready 都能单独回炉，不会互相污染。这两条约束属于 Workflow Service 层的职责，必须在状态机里硬编码，不能下沉到 Hook 层。
 
@@ -319,7 +334,7 @@ v1.2 的 Bitable 只记录**生命周期状态**。v1.3 的 Bitable 同时承担
 | req_id | 文本（主键） | REQ-RISK-001 |
 | 名称 | 文本 | 需求名称 |
 | 项目 | 单选 | 项目代号 |
-| 状态 | 单选 | CREATED / DISCUSSION_ROUTING / DISCUSSING / AI_REVIEWING / HUMAN_CONFIRMING / REVIEWING / REQ_APPROVED / SPEC_DRAFTING / SPEC_LOCKED / HARNESS_GENERATING / HARNESS_READY / IMPLEMENTING / CI_PENDING / STAGING / DEPLOYED |
+| 状态 | 单选 | 需求层（参考实现）：CREATED / DRAFTING / AI_REVIEW / HUMAN_CONFIRM / FINAL_REVIEW / APPROVED ； 规格层→交付层（待建）：SPEC_DRAFTING / SPEC_LOCKED / HARNESS_GENERATING / HARNESS_READY / IMPLEMENTING / CI_PENDING / STAGING / DEPLOYED |
 | 创建人 | 人员 | |
 | 创建时间 | 日期 | |
 | 需求文档 | 链接 | 飞书文档 URL |
@@ -390,7 +405,7 @@ v1.2 的 Bitable 只记录**生命周期状态**。v1.3 的 Bitable 同时承担
 | 操作 | 处理方式 |
 |------|----------|
 | 新需求 | 在创建群发起"创建需求"命令 → 生成新 REQ ID |
-| 需求修改（审查前） | 在 author 私聊里继续补全/修改，状态在 DISCUSSING ↔ AI_REVIEWING ↔ HUMAN_CONFIRMING 之间循环 |
+| 需求修改（审查前） | 在 author 私聊里继续补全/修改，状态在 DRAFTING ↔ AI_REVIEW ↔ HUMAN_CONFIRM 之间循环 |
 | 需求变更（审查后） | 走"打回"分支（REVIEWING → DISCUSSING），状态回到 DISCUSSING；若是大变更则新开 REQ ID 走 v2 |
 | Bug 修复（已上线） | 不走需求层，直接在 GitHub 开 PR |
 
