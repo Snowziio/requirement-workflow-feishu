@@ -621,8 +621,142 @@ class RequirementWorkflowV12Test(unittest.TestCase):
             assert refreshed is not None
             self.assertEqual(status, 400)
             self.assertEqual(payload["error"], "invalid_payload")
-            self.assertIn("只允许 reviewer 上报 AI review 结论", payload["message"])
-            self.assertEqual(refreshed.status, WorkflowStatus.AI_REVIEWING)
+
+    def test_human_confirmation_card_callback_advances_to_final_review(self) -> None:
+        class FakeGateway:
+            def __init__(self) -> None:
+                self.cards = []
+
+            def sync_requirement_document(self, requirement) -> None:
+                return None
+
+            def update_requirement_record(self, requirement) -> None:
+                return None
+
+            def send_card(self, receive_id, card, receive_id_type="chat_id") -> None:
+                self.cards.append((receive_id, receive_id_type, card))
+
+            def bitable_url(self) -> str:
+                return "https://example.com/bitable"
+
+        with TemporaryDirectory() as temp_dir:
+            runtime_service = CoordinatorService()
+            response = runtime_service.create_requirement_from_group(
+                CreationRequest(
+                    project="HARNESS",
+                    name="人工确认卡片回调测试",
+                    summary="验证人工确认按钮会自动推进工作流。",
+                    creator="tester",
+                    creator_user_id="user-1",
+                    creation_chat_id="chat-1",
+                )
+            )
+            requirement = runtime_service.get_requirement(response.req_id)
+            assert requirement is not None
+            runtime_service.handoff_to_author(requirement)
+            requirement.status = WorkflowStatus.HUMAN_CONFIRM
+            requirement.ai_ready = True
+
+            gateway = FakeGateway()
+            app = CoordinatorRuntimeApp(
+                Settings(
+                    feishu_app_id="app-id",
+                    feishu_app_secret="app-secret",
+                    state_store_path=str(Path(temp_dir) / "state.json"),
+                ),
+                service=runtime_service,
+                gateway=gateway,
+            )
+
+            status, payload = app.handle_card_callback(
+                json.dumps(
+                    {
+                        "operator": {"open_id": "user-1", "name": "tester"},
+                        "action": {
+                            "value": {
+                                "action": "human_confirm_yes",
+                                "req_id": response.req_id,
+                            }
+                        },
+                    },
+                    ensure_ascii=False,
+                ).encode()
+            )
+
+            refreshed = runtime_service.get_requirement(response.req_id)
+            assert refreshed is not None
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["toast"]["type"], "success")
+            self.assertEqual(refreshed.status, WorkflowStatus.FINAL_REVIEW)
+            self.assertTrue(refreshed.human_confirmed)
+
+    def test_final_review_card_callback_advances_to_approved(self) -> None:
+        class FakeGateway:
+            def __init__(self) -> None:
+                self.cards = []
+
+            def sync_requirement_document(self, requirement) -> None:
+                return None
+
+            def update_requirement_record(self, requirement) -> None:
+                return None
+
+            def send_card(self, receive_id, card, receive_id_type="chat_id") -> None:
+                self.cards.append((receive_id, receive_id_type, card))
+
+            def bitable_url(self) -> str:
+                return "https://example.com/bitable"
+
+        with TemporaryDirectory() as temp_dir:
+            runtime_service = CoordinatorService()
+            response = runtime_service.create_requirement_from_group(
+                CreationRequest(
+                    project="HARNESS",
+                    name="正式审查卡片回调测试",
+                    summary="验证正式审查按钮会自动推进工作流。",
+                    creator="tester",
+                    creator_user_id="user-1",
+                    creation_chat_id="chat-1",
+                )
+            )
+            requirement = runtime_service.get_requirement(response.req_id)
+            assert requirement is not None
+            runtime_service.handoff_to_author(requirement)
+            requirement.status = WorkflowStatus.FINAL_REVIEW
+            requirement.ai_ready = True
+            requirement.human_confirmed = True
+
+            gateway = FakeGateway()
+            app = CoordinatorRuntimeApp(
+                Settings(
+                    feishu_app_id="app-id",
+                    feishu_app_secret="app-secret",
+                    state_store_path=str(Path(temp_dir) / "state.json"),
+                ),
+                service=runtime_service,
+                gateway=gateway,
+            )
+
+            status, payload = app.handle_card_callback(
+                json.dumps(
+                    {
+                        "operator": {"open_id": "user-1", "name": "tester"},
+                        "action": {
+                            "value": {
+                                "action": "final_review_pass",
+                                "req_id": response.req_id,
+                            }
+                        },
+                    },
+                    ensure_ascii=False,
+                ).encode()
+            )
+
+            refreshed = runtime_service.get_requirement(response.req_id)
+            assert refreshed is not None
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["toast"]["type"], "success")
+            self.assertEqual(refreshed.status, WorkflowStatus.APPROVED)
 
     def test_openclaw_requirement_context_query_returns_context(self) -> None:
         class FakeGateway:

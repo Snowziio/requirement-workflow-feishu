@@ -93,9 +93,11 @@
 - 上述私聊入口当前仍保留用于兼容联调，但不再是推荐的长期主路径
 - 当前推荐主路径是：agent 私聊完成文档构造/审查，再通过 callback 仅上报流程事件
 - 在人工确认阶段处理：
+  - 卡片 callback：`human_confirm_yes` / `human_confirm_no`
   - `确认需求`
   - `继续修改`
 - 在正式审查阶段处理：
+  - 卡片 callback：`final_review_pass` / `final_review_reject`
   - `确认通过`
   - `需要修改`
 - 通过本地 JSON 快照恢复运行状态

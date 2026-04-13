@@ -755,6 +755,67 @@ class CoordinatorRuntimeApp:
             )
             return 200, {"toast": {"type": "success", "content": "已将启动指令私发给你。"}}
 
+        if action_name in {"human_confirm_yes", "human_confirm_no"}:
+            req_id = value.get("req_id", "")
+            if not req_id:
+                return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            requirement = self.service.get_requirement(req_id)
+            if requirement is None:
+                return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
+            if requirement.creator_user_id and requirement.creator_user_id != user_id:
+                return 200, {"toast": {"type": "error", "content": "只有需求提出者可以执行人工确认。"}}
+            if requirement.status != WorkflowStatus.HUMAN_CONFIRM:
+                return 200, {"toast": {"type": "error", "content": "当前需求不处于人工确认阶段。"}}
+
+            approved = action_name == "human_confirm_yes"
+            requirement = self.service.handle_human_confirmation(requirement, approved=approved)
+            self._sync_requirement_outputs(requirement)
+            self._save_state()
+            self._dispatch_transition_notifications(
+                requirement,
+                trigger="human_confirmed" if approved else "human_rejected",
+            )
+            return 200, {
+                "toast": {
+                    "type": "success",
+                    "content": "人工确认已更新。"
+                    if approved
+                    else "已退回需求构造，可继续修改。",
+                }
+            }
+
+        if action_name in {"final_review_pass", "final_review_reject"}:
+            req_id = value.get("req_id", "")
+            if not req_id:
+                return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            requirement = self.service.get_requirement(req_id)
+            if requirement is None:
+                return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
+            if requirement.creator_user_id and requirement.creator_user_id != user_id:
+                return 200, {"toast": {"type": "error", "content": "当前版本仅允许需求提出者执行正式审查操作。"}}
+            if requirement.status != WorkflowStatus.FINAL_REVIEW:
+                return 200, {"toast": {"type": "error", "content": "当前需求不处于正式审查阶段。"}}
+
+            approved = action_name == "final_review_pass"
+            if approved:
+                requirement = self.service.approve_requirement(requirement)
+            else:
+                requirement = self.service.request_changes_after_review(requirement)
+            self._sync_requirement_outputs(requirement)
+            self._save_state()
+            self._dispatch_transition_notifications(
+                requirement,
+                trigger="final_review_passed" if approved else "final_review_rejected",
+            )
+            return 200, {
+                "toast": {
+                    "type": "success",
+                    "content": "正式审查结论已更新。"
+                    if approved
+                    else "正式审查已退回，需求已回到构造阶段。",
+                }
+            }
+
         return 200, {"toast": {"type": "info", "content": "未识别的卡片动作，已忽略。"}}
 
     def _parse_creation_command(self, text: str) -> dict[str, str] | None:
@@ -1298,6 +1359,10 @@ class CoordinatorRuntimeApp:
         if links:
             elements.append({"tag": "markdown", "content": " | ".join(links)})
 
+        actions = self._build_transition_notification_actions(requirement, trigger=trigger)
+        if actions:
+            elements.append({"tag": "action", "actions": actions})
+
         return {
             "config": {"wide_screen_mode": True},
             "header": {
@@ -1320,6 +1385,44 @@ class CoordinatorRuntimeApp:
             f"需要操作：{next_action}\n"
             f"需求文档：{requirement.document_url or '待同步'}"
         )
+
+    def _build_transition_notification_actions(
+        self,
+        requirement: Requirement,
+        *,
+        trigger: str,
+    ) -> list[dict[str, object]]:
+        if trigger == "ai_review_pass":
+            return [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "确认需求"},
+                    "type": "primary",
+                    "value": {"action": "human_confirm_yes", "req_id": requirement.req_id},
+                },
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "继续修改"},
+                    "type": "default",
+                    "value": {"action": "human_confirm_no", "req_id": requirement.req_id},
+                },
+            ]
+        if trigger == "human_confirmed":
+            return [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "确认通过"},
+                    "type": "primary",
+                    "value": {"action": "final_review_pass", "req_id": requirement.req_id},
+                },
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "需要修改"},
+                    "type": "default",
+                    "value": {"action": "final_review_reject", "req_id": requirement.req_id},
+                },
+            ]
+        return []
 
     def _transition_notification_content(self, requirement: Requirement, *, trigger: str) -> tuple[str, str, str, str, str]:
         reviewer_name = self.settings.openclaw_reviewer_agent_name
