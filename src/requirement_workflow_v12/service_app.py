@@ -216,83 +216,113 @@ class CoordinatorRuntimeApp:
     def _create_requirement_from_form(
         self,
         payload: CreationFormPayload,
-    ) -> tuple[list[OutboundMessage | OutboundCard], Requirement | None]:
-        response = self.service.create_requirement_from_group(
-            CreationRequest(
-                project=payload.project,
-                name=payload.name,
-                summary=payload.summary,
-                creator=payload.creator,
-                creator_user_id=payload.creator_user_id,
-                creation_chat_id=payload.creation_chat_id,
-            )
+    ) -> tuple[CreationRequest, Requirement | None, str]:
+        request = CreationRequest(
+            project=payload.project,
+            name=payload.name,
+            summary=payload.summary,
+            creator=payload.creator,
+            creator_user_id=payload.creator_user_id,
+            creation_chat_id=payload.creation_chat_id,
         )
+        response = self.service.create_requirement_from_group(request)
         requirement = self.service.get_requirement(response.req_id)
-        if requirement is not None:
-            if not self._is_feishu_chat_id(requirement.project_group_id):
-                try:
-                    project_group = self.gateway.create_project_group(
-                        project=requirement.project,
-                        owner_user_id=payload.creator_user_id,
-                        member_user_ids=[payload.creator_user_id],
-                    )
-                    self.service.assign_project_group(requirement.req_id, project_group.chat_id)
-                    response.project_group_id = project_group.chat_id
-                except Exception as exc:
-                    LOGGER.warning("Failed to create project group for %s: %s", requirement.req_id, exc)
-
-            try:
-                created_record = self.gateway.create_requirement_record(requirement)
-                if created_record:
-                    self.service.attach_bitable_record(requirement.req_id, created_record.record_id)
-            except Exception as exc:
-                LOGGER.warning("Failed to create bitable record for %s: %s", requirement.req_id, exc)
-
-            try:
-                created_document = self.gateway.create_requirement_document(requirement)
-                if created_document:
-                    self.service.attach_document(
-                        requirement.req_id,
-                        created_document.document_id,
-                        created_document.document_url,
-                    )
-            except Exception as exc:
-                LOGGER.warning("Failed to create document for %s: %s", requirement.req_id, exc)
-
-            if requirement and requirement.bitable_record_id:
-                try:
-                    self.gateway.update_requirement_record(requirement)
-                except Exception as exc:
-                    LOGGER.warning("Failed to refresh bitable record for %s: %s", requirement.req_id, exc)
-
         self._save_state()
         if requirement is not None:
             LOGGER.info(
-                "Created requirement from form req_id=%s status=%s project_group_id=%s bitable_record_id=%s document_url=%s",
+                "Accepted requirement creation from form req_id=%s status=%s project=%s creator_user_id=%s",
                 requirement.req_id,
                 requirement.status.value,
-                requirement.project_group_id,
-                requirement.bitable_record_id,
-                requirement.document_url,
+                requirement.project,
+                requirement.creator_user_id,
             )
-        requirement = self.service.get_requirement(response.req_id)
-        creation_text = response.message_to_creation_group
+        return request, requirement, response.req_id
+
+    def _provision_requirement_after_creation(self, request: CreationRequest, req_id: str) -> None:
+        requirement = self.service.get_requirement(req_id)
+        if requirement is None:
+            LOGGER.warning("Skipped provisioning because requirement disappeared req_id=%s", req_id)
+            return
+        if not self._is_feishu_chat_id(requirement.project_group_id):
+            try:
+                project_group = self.gateway.create_project_group(
+                    project=requirement.project,
+                    owner_user_id=request.creator_user_id,
+                    member_user_ids=[request.creator_user_id],
+                )
+                self.service.assign_project_group(requirement.req_id, project_group.chat_id)
+            except Exception as exc:
+                LOGGER.warning("Failed to create project group for %s: %s", requirement.req_id, exc)
+
+        try:
+            created_record = self.gateway.create_requirement_record(requirement)
+            if created_record:
+                self.service.attach_bitable_record(requirement.req_id, created_record.record_id)
+        except Exception as exc:
+            LOGGER.warning("Failed to create bitable record for %s: %s", requirement.req_id, exc)
+
+        try:
+            created_document = self.gateway.create_requirement_document(requirement)
+            if created_document:
+                self.service.attach_document(
+                    requirement.req_id,
+                    created_document.document_id,
+                    created_document.document_url,
+                )
+        except Exception as exc:
+            LOGGER.warning("Failed to create document for %s: %s", requirement.req_id, exc)
+
+        if requirement.bitable_record_id:
+            try:
+                self.gateway.update_requirement_record(requirement)
+            except Exception as exc:
+                LOGGER.warning("Failed to refresh bitable record for %s: %s", requirement.req_id, exc)
+
+        LOGGER.info(
+            "Provisioned requirement from form req_id=%s status=%s project_group_id=%s bitable_record_id=%s document_url=%s",
+            requirement.req_id,
+            requirement.status.value,
+            requirement.project_group_id,
+            requirement.bitable_record_id,
+            requirement.document_url,
+        )
+        requirement = self.service.get_requirement(req_id)
+        creation_text = (
+            f"{req_id} 已创建\n"
+            f"项目：{request.project}\n"
+            f"需求文档入口已准备，后续由需求构造 Agent 持续撰写\n"
+            f"请私聊需求构造 Agent，并发送：\n开始需求构造 {req_id}"
+        )
         if requirement and requirement.document_url:
             creation_text += f"\n需求文档：{requirement.document_url}"
         bitable_url = self.gateway.bitable_url()
         if bitable_url:
             creation_text += f"\n多维表格：{bitable_url}"
         messages: list[OutboundMessage | OutboundCard] = [
-            OutboundMessage(receive_id=payload.creation_chat_id, text=creation_text)
+            OutboundMessage(receive_id=request.creation_chat_id, text=creation_text)
         ]
-        if self._is_feishu_chat_id(response.project_group_id):
+        if requirement and self._is_feishu_chat_id(requirement.project_group_id):
             messages.append(
                 OutboundCard(
-                    receive_id=response.project_group_id,
+                    receive_id=requirement.project_group_id,
                     card=self._build_project_group_card(requirement),
                 )
             )
-        return messages, requirement
+        for outbound in messages:
+            try:
+                if isinstance(outbound, OutboundCard):
+                    self.gateway.send_card(outbound.receive_id, outbound.card, receive_id_type=outbound.receive_id_type)
+                else:
+                    self.gateway.send_text(outbound.receive_id, outbound.text, receive_id_type=outbound.receive_id_type)
+            except Exception as exc:
+                LOGGER.warning(
+                    "Failed to send post-create outbound req_id=%s receive_id=%s kind=%s: %s",
+                    response.req_id,
+                    outbound.receive_id,
+                    "card" if isinstance(outbound, OutboundCard) else "text",
+                    exc,
+                )
+        self._save_state()
 
     def _handle_author_private_message(self, context: MessageContext) -> list[OutboundMessage]:
         text = context.text.strip()
@@ -729,19 +759,19 @@ class CoordinatorRuntimeApp:
             form_payload = self._extract_creation_form_payload(payload, user_id=user_id, user_name=user_name)
             if form_payload is None:
                 return 200, {"toast": {"type": "error", "content": "创建表单字段不完整，请补充项目、名称和简述。"}}
-            messages, created_requirement = self._create_requirement_from_form(form_payload)
-            for outbound in messages:
-                if isinstance(outbound, OutboundCard):
-                    self.gateway.send_card(outbound.receive_id, outbound.card, receive_id_type=outbound.receive_id_type)
-                else:
-                    self.gateway.send_text(outbound.receive_id, outbound.text, receive_id_type=outbound.receive_id_type)
+            request, created_requirement, req_id = self._create_requirement_from_form(form_payload)
+            threading.Thread(
+                target=self._provision_requirement_after_creation,
+                args=(request, req_id),
+                daemon=True,
+            ).start()
             response_payload: dict[str, object] = {
-                "toast": {"type": "success", "content": "需求已创建，项目群同步已开始。"}
+                "toast": {"type": "success", "content": "需求已受理，正在同步文档、表格和项目群。"}
             }
             if created_requirement is not None:
                 response_payload["card"] = {
                     "type": "raw",
-                    "data": self._build_requirement_created_result_card(created_requirement),
+                    "data": self._build_requirement_created_result_card(created_requirement, syncing=True),
                 }
             return 200, response_payload
 
@@ -1178,7 +1208,7 @@ class CoordinatorRuntimeApp:
             },
         }
 
-    def _build_requirement_created_result_card(self, requirement: Requirement) -> dict[str, object]:
+    def _build_requirement_created_result_card(self, requirement: Requirement, *, syncing: bool = False) -> dict[str, object]:
         bitable_url = self.gateway.bitable_url()
         actions: list[dict[str, object]] = []
         if requirement.document_url:
@@ -1226,11 +1256,15 @@ class CoordinatorRuntimeApp:
                         "elements": [
                             {
                                 "tag": "plain_text",
-                                "content": "项目群和需求构造接手卡片已同步发送；接下来请在项目群里继续推进需求构造。",
+                                "content": (
+                                    "项目群和需求构造接手卡片正在同步发送，请稍候查看项目群消息。"
+                                    if syncing
+                                    else "项目群和需求构造接手卡片已同步发送；接下来请在项目群里继续推进需求构造。"
+                                ),
                             }
                         ],
                     },
-                    {"tag": "action", "actions": actions} if actions else {"tag": "hr"},
+                    self._build_button_columns(actions) if actions else {"tag": "hr"},
                 ],
             },
         }
@@ -1330,7 +1364,7 @@ class CoordinatorRuntimeApp:
             },
         ]
         if top_actions:
-            body_elements.append({"tag": "action", "actions": top_actions})
+            body_elements.append(self._build_button_columns(top_actions))
         body_elements.extend(
             [
                 {"tag": "hr"},
@@ -1346,7 +1380,7 @@ class CoordinatorRuntimeApp:
                         ),
                     },
                 },
-                {"tag": "action", "actions": primary_actions},
+                self._build_button_columns(primary_actions),
                 {
                     "tag": "note",
                     "elements": [
@@ -1559,7 +1593,7 @@ class CoordinatorRuntimeApp:
 
         actions = self._build_transition_notification_actions(requirement, trigger=trigger)
         if actions:
-            elements.append({"tag": "action", "actions": actions})
+            elements.append(self._build_button_columns(actions))
 
         return {
             "config": {"wide_screen_mode": True},
@@ -1583,6 +1617,21 @@ class CoordinatorRuntimeApp:
             f"需要操作：{next_action}\n"
             f"需求文档：{requirement.document_url or '待同步'}"
         )
+
+    def _build_button_columns(self, actions: list[dict[str, object]]) -> dict[str, object]:
+        return {
+            "tag": "column_set",
+            "horizontal_spacing": "12px",
+            "columns": [
+                {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "elements": [action],
+                }
+                for action in actions
+            ],
+        }
 
     def _build_transition_notification_actions(
         self,
