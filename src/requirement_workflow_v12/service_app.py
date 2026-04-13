@@ -4,7 +4,6 @@ import hmac
 import hashlib
 import json
 import logging
-import re
 import threading
 import time
 from dataclasses import dataclass
@@ -877,41 +876,6 @@ class CoordinatorRuntimeApp:
 
         return 200, {"toast": {"type": "info", "content": "未识别的卡片动作，已忽略。"}}
 
-    def _parse_creation_command(self, text: str) -> dict[str, str] | None:
-        fields: dict[str, str] = {}
-        aliases = {"项目": "project", "名称": "name", "简述": "summary", "背景": "summary"}
-        for raw_line in text.splitlines():
-            line = raw_line.strip()
-            if "：" in line:
-                key, value = line.split("：", 1)
-            elif ":" in line:
-                key, value = line.split(":", 1)
-            else:
-                continue
-            normalized = aliases.get(key.strip())
-            if normalized and value.strip():
-                fields[normalized] = value.strip()
-
-        # Allow one-line freeform messages like:
-        # 创建需求 项目: HARNESS 名称: xxx 简述: yyy
-        if "project" not in fields:
-            matched = re.search(r"项目\s*[:：]\s*([^\n]+?)(?=\s+名称\s*[:：]|$)", text)
-            if matched:
-                fields["project"] = matched.group(1).strip()
-        if "name" not in fields:
-            matched = re.search(r"名称\s*[:：]\s*([^\n]+?)(?=\s+简述\s*[:：]|\s+背景\s*[:：]|$)", text)
-            if matched:
-                fields["name"] = matched.group(1).strip()
-        if "summary" not in fields:
-            matched = re.search(r"(?:简述|背景)\s*[:：]\s*([^\n]+)", text)
-            if matched:
-                fields["summary"] = matched.group(1).strip()
-
-        required = {"project", "name", "summary"}
-        if not required.issubset(fields):
-            return None
-        return fields
-
     def _extract_creation_form_payload(
         self,
         payload: dict[str, object],
@@ -1011,41 +975,6 @@ class CoordinatorRuntimeApp:
                 if isinstance(item, dict) and item.get("type") == "callback" and isinstance(item.get("value"), dict):
                     return item["value"]
         return {}
-
-    def _review_result_from_payload(self, payload: dict[str, object]) -> ReviewResult:
-        findings_payload = payload.get("findings", [])
-        findings: list[ReviewFinding] = []
-        if isinstance(findings_payload, list):
-            for item in findings_payload:
-                if not isinstance(item, dict):
-                    continue
-                severity = str(item.get("severity", "")).strip() or "medium"
-                if severity not in {"high", "medium", "low"}:
-                    severity = "medium"
-                findings.append(
-                    ReviewFinding(
-                        dimension=str(item.get("dimension", "")).strip(),
-                        summary=str(item.get("summary", "")).strip(),
-                        severity=severity,
-                    )
-                )
-        return ReviewResult(
-            ready_for_human_confirmation=bool(payload.get("ready_for_human_confirmation", False)),
-            summary=str(payload.get("summary", "")).strip(),
-            findings=findings,
-            weak_fields=[
-                str(item).strip() for item in payload.get("weak_fields", []) if str(item).strip()
-            ] if isinstance(payload.get("weak_fields", []), list) else [],
-            conflicts=[
-                str(item).strip() for item in payload.get("conflicts", []) if str(item).strip()
-            ] if isinstance(payload.get("conflicts", []), list) else [],
-            non_testable_acceptance_criteria=[
-                str(item).strip()
-                for item in payload.get("non_testable_acceptance_criteria", [])
-                if str(item).strip()
-            ] if isinstance(payload.get("non_testable_acceptance_criteria", []), list) else [],
-            next_focus=str(payload.get("next_focus", "")).strip() or None,
-        )
 
     def _validate_openclaw_callback_auth(
         self,

@@ -271,18 +271,6 @@ class CoordinatorService:
         )
         return requirement
 
-    def submit_author_turn_payload(self, payload) -> Requirement:
-        requirement = self.requirements.get(payload.req_id)
-        if requirement is None:
-            raise ValueError(f"未知需求：{payload.req_id}")
-        turn = AuthorTurnResult(
-            updates=payload.updates,
-            next_question=payload.next_question,
-            current_field_completed=payload.current_field_completed,
-            next_field=payload.next_field,
-        )
-        return self.handle_author_turn(requirement, turn)
-
     def handle_review_result(self, requirement: Requirement, result: ReviewResult) -> Requirement:
         if requirement.status == WorkflowStatus.DRAFTING:
             author_submit = apply_event(requirement.status, Event.AUTHOR_SUBMIT)
@@ -319,12 +307,6 @@ class CoordinatorService:
         requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
         return requirement
-
-    def submit_review_payload(self, payload) -> Requirement:
-        requirement = self.requirements.get(payload.req_id)
-        if requirement is None:
-            raise ValueError(f"未知需求：{payload.req_id}")
-        return self.handle_review_result(requirement, payload.result)
 
     def submit_author_event_payload(self, payload: AgentAuthorEventPayload) -> Requirement:
         requirement = self.requirements.get(payload.req_id)
