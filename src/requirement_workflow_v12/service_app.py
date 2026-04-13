@@ -216,7 +216,7 @@ class CoordinatorRuntimeApp:
     def _create_requirement_from_form(
         self,
         payload: CreationFormPayload,
-    ) -> list[OutboundMessage | OutboundCard]:
+    ) -> tuple[list[OutboundMessage | OutboundCard], Requirement | None]:
         response = self.service.create_requirement_from_group(
             CreationRequest(
                 project=payload.project,
@@ -292,7 +292,7 @@ class CoordinatorRuntimeApp:
                     card=self._build_project_group_card(requirement),
                 )
             )
-        return messages
+        return messages, requirement
 
     def _handle_author_private_message(self, context: MessageContext) -> list[OutboundMessage]:
         text = context.text.strip()
@@ -729,13 +729,21 @@ class CoordinatorRuntimeApp:
             form_payload = self._extract_creation_form_payload(payload, user_id=user_id, user_name=user_name)
             if form_payload is None:
                 return 200, {"toast": {"type": "error", "content": "创建表单字段不完整，请补充项目、名称和简述。"}}
-            messages = self._create_requirement_from_form(form_payload)
+            messages, created_requirement = self._create_requirement_from_form(form_payload)
             for outbound in messages:
                 if isinstance(outbound, OutboundCard):
                     self.gateway.send_card(outbound.receive_id, outbound.card, receive_id_type=outbound.receive_id_type)
                 else:
                     self.gateway.send_text(outbound.receive_id, outbound.text, receive_id_type=outbound.receive_id_type)
-            return 200, {"toast": {"type": "success", "content": "需求已创建，项目群同步已开始。"}}
+            response_payload: dict[str, object] = {
+                "toast": {"type": "success", "content": "需求已创建，项目群同步已开始。"}
+            }
+            if created_requirement is not None:
+                response_payload["card"] = {
+                    "type": "raw",
+                    "data": self._build_requirement_created_result_card(created_requirement),
+                }
+            return 200, response_payload
 
         if action_name == "send_author_start":
             req_id = value.get("req_id", "")
@@ -1049,7 +1057,7 @@ class CoordinatorRuntimeApp:
             "config": {"wide_screen_mode": True},
             "header": {
                 "template": "blue",
-                "title": {"tag": "plain_text", "content": "创建需求"},
+                "title": {"tag": "plain_text", "content": "新建需求"},
             },
             "body": {
                 "elements": [
@@ -1058,16 +1066,24 @@ class CoordinatorRuntimeApp:
                         "text": {
                             "tag": "lark_md",
                             "content": (
-                                "请填写最小需求信息。\n"
-                                "提交后，CoordinatorService 会自动创建 `REQ ID`、多维表格记录、需求文档和项目需求群。"
+                                "**提交后将自动完成以下动作：**\n"
+                                "- 生成 `REQ ID`\n"
+                                "- 创建需求文档\n"
+                                "- 写入多维表格\n"
+                                "- 向项目需求群发送接手卡片"
                             ),
                         },
                     },
+                    {"tag": "hr"},
                     {
                         "tag": "div",
                         "text": {
-                            "tag": "plain_text",
-                            "content": "必填：项目代号、需求名称、需求简述",
+                            "tag": "lark_md",
+                            "content": (
+                                "**请先填写最小信息集**\n"
+                                "必填：项目代号、需求名称、需求简述\n"
+                                "选填：背景链接、优先级、期望完成时间"
+                            ),
                         },
                     },
                     {
@@ -1106,24 +1122,44 @@ class CoordinatorRuntimeApp:
                                 "placeholder": {"tag": "plain_text", "content": "背景材料链接，可选；多个链接请换行"},
                             },
                             {
-                                "tag": "select_static",
-                                "name": "priority",
-                                "placeholder": {"tag": "plain_text", "content": "优先级，可选"},
-                                "options": [
-                                    {"text": {"tag": "plain_text", "content": "P0"}, "value": "P0"},
-                                    {"text": {"tag": "plain_text", "content": "P1"}, "value": "P1"},
-                                    {"text": {"tag": "plain_text", "content": "P2"}, "value": "P2"},
+                                "tag": "column_set",
+                                "horizontal_spacing": "12px",
+                                "columns": [
+                                    {
+                                        "tag": "column",
+                                        "width": "weighted",
+                                        "weight": 1,
+                                        "elements": [
+                                            {
+                                                "tag": "select_static",
+                                                "name": "priority",
+                                                "placeholder": {"tag": "plain_text", "content": "优先级，可选"},
+                                                "options": [
+                                                    {"text": {"tag": "plain_text", "content": "P0"}, "value": "P0"},
+                                                    {"text": {"tag": "plain_text", "content": "P1"}, "value": "P1"},
+                                                    {"text": {"tag": "plain_text", "content": "P2"}, "value": "P2"},
+                                                ],
+                                            }
+                                        ],
+                                    },
+                                    {
+                                        "tag": "column",
+                                        "width": "weighted",
+                                        "weight": 1,
+                                        "elements": [
+                                            {
+                                                "tag": "date_picker",
+                                                "name": "expected_due_date",
+                                                "placeholder": {"tag": "plain_text", "content": "期望完成时间，可选"},
+                                            }
+                                        ],
+                                    },
                                 ],
-                            },
-                            {
-                                "tag": "date_picker",
-                                "name": "expected_due_date",
-                                "placeholder": {"tag": "plain_text", "content": "期望完成时间，可选"},
                             },
                             {
                                 "tag": "button",
                                 "name": "submit_create_requirement",
-                                "text": {"tag": "plain_text", "content": "提交创建"},
+                                "text": {"tag": "plain_text", "content": "创建需求"},
                                 "type": "primary_filled",
                                 "form_action_type": "submit",
                                 "behaviors": [
@@ -1139,6 +1175,63 @@ class CoordinatorRuntimeApp:
                         ],
                     },
                 ]
+            },
+        }
+
+    def _build_requirement_created_result_card(self, requirement: Requirement) -> dict[str, object]:
+        bitable_url = self.gateway.bitable_url()
+        actions: list[dict[str, object]] = []
+        if requirement.document_url:
+            actions.append(
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "查看需求文档"},
+                    "type": "default",
+                    "multi_url": {"url": requirement.document_url},
+                }
+            )
+        if bitable_url:
+            actions.append(
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "查看多维表格"},
+                    "type": "default",
+                    "multi_url": {"url": bitable_url},
+                }
+            )
+
+        return {
+            "schema": "2.0",
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": "green",
+                "title": {"tag": "plain_text", "content": f"{requirement.req_id} 已创建"},
+            },
+            "body": {
+                "elements": [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": (
+                                f"**创建完成**\n"
+                                f"- 需求名称：{requirement.name}\n"
+                                f"- 当前状态：{requirement.status.value}\n"
+                                f"- 当前接手：{requirement.current_role_label}"
+                            ),
+                        },
+                    },
+                    {
+                        "tag": "note",
+                        "elements": [
+                            {
+                                "tag": "plain_text",
+                                "content": "项目群和需求构造接手卡片已同步发送；接下来请在项目群里继续推进需求构造。",
+                            }
+                        ],
+                    },
+                    {"tag": "action", "actions": actions} if actions else {"tag": "hr"},
+                ],
             },
         }
 

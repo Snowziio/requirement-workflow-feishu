@@ -316,6 +316,65 @@ class RequirementWorkflowV12Test(unittest.TestCase):
             self.assertEqual(receive_id_type, "user_id")
             self.assertIn(f"开始需求构造 {response.req_id}", text)
 
+    def test_create_requirement_card_callback_returns_result_card(self) -> None:
+        class FakeGateway:
+            def __init__(self) -> None:
+                self.sent_cards = []
+                self.sent_texts = []
+
+            def create_requirement_record(self, requirement):
+                return None
+
+            def create_requirement_document(self, requirement):
+                return None
+
+            def send_card(self, receive_id, card, receive_id_type="chat_id") -> None:
+                self.sent_cards.append((receive_id, receive_id_type, card))
+
+            def send_text(self, receive_id, text, receive_id_type="chat_id") -> None:
+                self.sent_texts.append((receive_id, receive_id_type, text))
+
+            def bitable_url(self) -> str:
+                return "https://example.com/bitable"
+
+        with TemporaryDirectory() as temp_dir:
+            runtime_service = CoordinatorService()
+            gateway = FakeGateway()
+            app = CoordinatorRuntimeApp(
+                Settings(
+                    feishu_app_id="app-id",
+                    feishu_app_secret="app-secret",
+                    state_store_path=str(Path(temp_dir) / "state.json"),
+                ),
+                service=runtime_service,
+                gateway=gateway,
+            )
+
+            status, payload = app.handle_card_callback(
+                json.dumps(
+                    {
+                        "operator": {"open_id": "user-1", "name": "tester"},
+                        "action": {
+                            "value": {
+                                "action": "submit_create_requirement",
+                                "creation_chat_id": "chat-1",
+                            },
+                            "form_value": {
+                                "project": "HARNESS",
+                                "name": "创建卡刷新测试",
+                                "summary": "验证创建卡提交后切换为结果态。",
+                            },
+                        },
+                    },
+                    ensure_ascii=False,
+                ).encode()
+            )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["toast"]["type"], "success")
+            self.assertIn("card", payload)
+            self.assertEqual(payload["card"]["type"], "raw")
+
     def test_openclaw_author_turn_callback_rejects_missing_signature(self) -> None:
         class FakeGateway:
             def sync_requirement_document(self, requirement) -> None:
