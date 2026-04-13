@@ -30,6 +30,8 @@ class Settings:
     openclaw_callback_ttl_seconds: int = int(os.environ.get("OPENCLAW_CALLBACK_TTL_SECONDS", "300"))
     author_agent_chat_url_template: str = os.environ.get("AUTHOR_AGENT_CHAT_URL_TEMPLATE", "")
     state_store_path: str = os.environ.get("STATE_STORE_PATH", "state/coordinator_state.json")
+    github_token: str = os.environ.get("GITHUB_TOKEN", "")
+    github_default_branch: str = os.environ.get("GITHUB_DEFAULT_BRANCH", "main")
 
     def validate_runtime(self) -> None:
         missing = []

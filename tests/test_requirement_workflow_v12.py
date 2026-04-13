@@ -1100,3 +1100,26 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_requirement_new_fields_default():
+    from requirement_workflow_v12.models import Requirement
+    req = Requirement(req_id="REQ-X-001", name="test", project="X", summary="s", creator="u")
+    assert req.needs_ui is False
+    assert req.github_repo_url == ""
+    assert req.hifi_prototype_url == ""
+    assert req.hifi_prototype_confirmed is False
+
+
+def test_config_github_settings():
+    import os
+    os.environ["GITHUB_TOKEN"] = "ghp_test"
+    os.environ["GITHUB_DEFAULT_BRANCH"] = "develop"
+    from importlib import reload
+    import requirement_workflow_v12.config as cfg_mod
+    reload(cfg_mod)
+    settings = cfg_mod.load_settings()
+    assert settings.github_token == "ghp_test"
+    assert settings.github_default_branch == "develop"
+    del os.environ["GITHUB_TOKEN"]
+    del os.environ["GITHUB_DEFAULT_BRANCH"]

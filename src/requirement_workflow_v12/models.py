@@ -117,6 +117,10 @@ class Requirement:
     discussion_history: list[DiscussionTurn] = field(default_factory=list)
     review_history: list[ReviewResult] = field(default_factory=list)
     human_review_history: list[HumanReviewResult] = field(default_factory=list)
+    needs_ui: bool = False
+    github_repo_url: str = ""
+    hifi_prototype_url: str = ""
+    hifi_prototype_confirmed: bool = False
     updated_at: datetime = field(default_factory=utc_now)
 
     def touch(self) -> None:
