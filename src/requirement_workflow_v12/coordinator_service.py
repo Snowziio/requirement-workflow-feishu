@@ -5,6 +5,7 @@ import logging
 
 from .compiler import RequirementDocumentCompiler
 from .models import DISCUSSION_FIELDS, DiscussionTurn, HumanReviewResult, Requirement, ReviewResult, WorkflowStatus, utc_now
+from .project_config import OnboardingState, ProjectConfig
 from .protocols import (
     AgentAuthorEventPayload,
     AgentRequirementContextQuery,
@@ -45,16 +46,73 @@ class CoordinatorService:
         self.project_groups: dict[str, str] = {}
         self.requirements: dict[str, Requirement] = {}
         self.active_req_by_user: dict[str, str] = {}
+        self.project_configs: dict[str, ProjectConfig] = {}
 
     def restore_snapshot(
         self,
         requirements: dict[str, Requirement],
         active_req_by_user: dict[str, str],
         project_groups: dict[str, str],
+        project_configs: dict[str, ProjectConfig] | None = None,
     ) -> None:
         self.requirements = requirements
         self.active_req_by_user = active_req_by_user
         self.project_groups = project_groups
+        self.project_configs = project_configs or {}
+
+    # ── Project onboarding ────────────────────────────────────────────────
+
+    def is_new_project(self, project: str) -> bool:
+        return project not in self.project_configs
+
+    def get_project_config(self, project: str) -> ProjectConfig | None:
+        return self.project_configs.get(project)
+
+    def register_project_config(
+        self,
+        project: str,
+        github_repo_url: str,
+        is_new_project: bool,
+        tech_stack: dict[str, str],
+    ) -> ProjectConfig:
+        cfg = ProjectConfig(
+            github_repo_url=github_repo_url,
+            is_new_project=is_new_project,
+            tech_stack=tech_stack,
+            onboarding_state=OnboardingState.COLLECTING_PROJECT_TYPE,
+        )
+        self.project_configs[project] = cfg
+        return cfg
+
+    def advance_onboarding_state(self, project: str, state: OnboardingState) -> None:
+        self.project_configs[project].onboarding_state = state
+
+    def set_tech_stack(self, project: str, tech_stack: dict[str, str]) -> None:
+        self.project_configs[project].tech_stack = tech_stack
+
+    def set_project_type(self, project: str, is_new_project: bool) -> None:
+        self.project_configs[project].is_new_project = is_new_project
+
+    def complete_onboarding(
+        self,
+        project: str,
+        architecture_initialized: bool,
+        acm_initialized: bool,
+    ) -> None:
+        cfg = self.project_configs[project]
+        cfg.architecture_yaml_initialized = architecture_initialized
+        cfg.acm_registry_initialized = acm_initialized
+        cfg.onboarding_state = OnboardingState.COMPLETE
+
+    def set_design_system_doc(self, project: str, doc_id: str) -> None:
+        if project in self.project_configs:
+            self.project_configs[project].design_system_doc_id = doc_id
+
+    def should_create_design_system(self, project: str) -> bool:
+        cfg = self.project_configs.get(project)
+        if cfg is None:
+            return False
+        return cfg.design_system_doc_id is None
 
     def get_requirement(self, req_id: str) -> Requirement | None:
         return self.requirements.get(req_id)
