@@ -763,6 +763,20 @@ class CoordinatorRuntimeApp:
             )
 
         self._sync_requirement_outputs(requirement)
+
+        # Create design system document for the first UI requirement that gets APPROVED
+        if approved and requirement.status == WorkflowStatus.APPROVED and requirement.needs_ui:
+            if self.service.should_create_design_system(requirement.project):
+                try:
+                    doc_id = self.gateway.create_design_system_document(requirement.project)
+                    self.service.set_design_system_doc(requirement.project, doc_id)
+                    LOGGER.info(
+                        "Design system document created project=%s doc_id=%s",
+                        requirement.project, doc_id,
+                    )
+                except Exception as exc:
+                    LOGGER.warning("Failed to create design system document: %s", exc)
+
         self._save_state()
         self._dispatch_transition_notifications(requirement, trigger="final_review_passed" if approved else "final_review_rejected")
         return [OutboundMessage(receive_id=context.chat_id, text=response_text)]

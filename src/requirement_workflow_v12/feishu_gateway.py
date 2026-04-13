@@ -322,6 +322,51 @@ class FeishuGateway:
     def _text_element(self, content: str) -> TextElement:
         return TextElement.builder().text_run(TextRun.builder().content(content).build()).build()
 
+    def create_design_system_document(self, project: str) -> str:
+        """Create a Feishu doc for the project design system. Returns doc_id."""
+        title = f"{project} 设计系统"
+        LOGGER.info("Creating design system document project=%s title=%s", project, title)
+        request = (
+            CreateDocumentRequest.builder()
+            .request_body(
+                CreateDocumentRequestBody.builder()
+                .title(title)
+                .folder_token(self.settings.feishu_doc_folder_token)
+                .build()
+            )
+            .build()
+        )
+        response = self.client.docx.v1.document.create(request)
+        self._ensure_success(response, "create design system document")
+        doc_id = response.data.document.document_id
+        LOGGER.info("Created design system document doc_id=%s project=%s", doc_id, project)
+        return doc_id
+
+    def append_design_decision_to_doc(self, doc_id: str, req_id: str, content: str) -> None:
+        """Append a design decision block (text) to the design system document."""
+        LOGGER.info("Appending design decision doc_id=%s req_id=%s", doc_id, req_id)
+        text_content = f"[{req_id}] {content}"
+        block = (
+            Block.builder()
+            .block_type(self.BLOCK_TYPE_TEXT)
+            .text(self._rich_text(text_content))
+            .build()
+        )
+        request = (
+            CreateDocumentBlockChildrenRequest.builder()
+            .document_id(doc_id)
+            .block_id(doc_id)
+            .request_body(
+                CreateDocumentBlockChildrenRequestBody.builder()
+                .children([block])
+                .build()
+            )
+            .build()
+        )
+        response = self.client.docx.v1.document_block_children.create(request)
+        if not response.success():
+            LOGGER.warning("Failed to append design decision: %s", response.msg)
+
     def _ensure_success(self, response, action: str) -> None:
         if not response.success():
             raise RuntimeError(f"Failed to {action}: {response.code} {response.msg}")
