@@ -299,7 +299,7 @@ class CoordinatorRuntimeApp:
                 OutboundCard(
                     receive_id=request.creation_chat_id,
                     receive_id_type="chat_id",
-                    card=self._build_requirement_created_result_card(requirement, syncing=False),
+                    card=self._build_requirement_created_result_card(requirement),
                 )
             )
         else:
@@ -765,7 +765,7 @@ class CoordinatorRuntimeApp:
             form_payload = self._extract_creation_form_payload(payload, user_id=user_id, user_name=user_name)
             if form_payload is None:
                 return 200, {"toast": {"type": "error", "content": "创建表单字段不完整，请补充项目、名称和简述。"}}
-            request, created_requirement, req_id = self._create_requirement_from_form(form_payload)
+            request, _, req_id = self._create_requirement_from_form(form_payload)
             threading.Thread(
                 target=self._provision_requirement_after_creation,
                 args=(request, req_id),
@@ -1206,7 +1206,7 @@ class CoordinatorRuntimeApp:
             },
         }
 
-    def _build_requirement_created_result_card(self, requirement: Requirement, *, syncing: bool = False) -> dict[str, object]:
+    def _build_requirement_created_result_card(self, requirement: Requirement) -> dict[str, object]:
         bitable_url = self.gateway.bitable_url()
         actions: list[dict[str, object]] = []
         if requirement.document_url:
@@ -1253,11 +1253,7 @@ class CoordinatorRuntimeApp:
                         "tag": "div",
                         "text": {
                             "tag": "plain_text",
-                            "content": (
-                                "项目群和需求构造接手卡片正在同步发送，请稍候查看项目群消息。"
-                                if syncing
-                                else "项目群和需求构造接手卡片已同步发送；接下来请在项目群里继续推进需求构造。"
-                            ),
+                            "content": "项目群和需求构造接手卡片已同步发送；接下来请在项目群里继续推进需求构造。",
                         },
                     },
                     self._build_button_columns(actions) if actions else {"tag": "hr"},

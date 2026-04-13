@@ -322,6 +322,13 @@ class RequirementWorkflowV12Test(unittest.TestCase):
                 self.sent_cards = []
                 self.sent_texts = []
 
+            def create_project_group(self, project, owner_user_id, member_user_ids=None):
+                class Chat:
+                    chat_id = "oc_mock_project_group"
+                    name = "mock"
+
+                return Chat()
+
             def create_requirement_record(self, requirement):
                 return None
 
