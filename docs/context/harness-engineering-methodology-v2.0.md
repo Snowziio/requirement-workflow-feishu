@@ -155,11 +155,11 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：
 
 参考 Codified Context 论文（arXiv 2602.20478），AI Coding Agent 按访问频率分层获取上下文：
 
-| 层级 | 内容 | 注入时机 |
-|---|---|---|
+| 层级                    | 内容                                        | 注入时机             |
+| --------------------- | ----------------------------------------- | ---------------- |
 | **热**（每 session 自动加载） | CLAUDE.md；ARCHITECTURE.yaml；当前 REQ 的 Spec | 进入编码 session 即加载 |
-| **温**（按 REQ 加载） | 当前 REQ 的 ACM；技术范围有重叠的历史 ACM | Spec 生成时注入 |
-| **冷**（按需查询） | 完整 ACM 注册表；完整设计系统历史；ADR 归档 | 显式触发时查询 |
+| **温**（按 REQ 加载）       | 当前 REQ 的 ACM；技术范围有重叠的历史 ACM               | Spec 生成时注入       |
+| **冷**（按需查询）           | 完整 ACM 注册表；完整设计系统历史；ADR 归档                | 显式触发时查询          |
 
 ### 3.3 REQ ID 全链路穿透
 
@@ -194,7 +194,18 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：
 
 ## 四、纵向流程各层规格
 
+> **细节文件与层的对应关系**
+>
+> 细节文件的粒度跟随层的**实现成熟度**而变化，不是机械一层一文件：
+> - 已充分设计或实现的层 → 有独立细节文件，内容详实
+> - 仍处于概念阶段的层 → 合并在共享文件中，内容以方法论描述为主
+>
+> 每层头部标注：`[实现状态]` + `细节文件`。
+> 迭代规则：**当某层的设计开始产生可实现的细节时，对应细节文件同步更新**；若多层合并在一个文件中，当任一层成熟到需要独立详细规格时，从共享文件拆出。
+
 ### 4.1 需求层
+
+> **实现状态**：✅ 已上线（Phase 1 完成）｜**细节文件**：[layers/requirement-layer.md](layers/requirement-layer.md)
 
 **驱动者**：Coordinator Service（Workflow Service 层）+ OpenClaw Author/Reviewer Agent（能力层）
 
@@ -234,6 +245,8 @@ CREATED → DISCUSSING → AI_REVIEWING → HUMAN_CONFIRMING → REVIEWING → A
 
 ### 4.2 规格层-A（Spec 子层）
 
+> **实现状态**：⚙️ 设计完成，待实现（Phase 2）｜**细节文件**：[layers/spec-harness-layer.md](layers/spec-harness-layer.md)
+
 **驱动者**：checkpoint-handler（卡点1a 后）+ Spec 转化 Agent（Phase 2 半自动化）
 
 **目标**：将 APPROVED 需求文档转化为 GitHub 中锁定的四层 Spec，为 AI Coding Agent 提供精确技术约定。
@@ -267,6 +280,8 @@ CREATED → DISCUSSING → AI_REVIEWING → HUMAN_CONFIRMING → REVIEWING → A
 
 ### 4.3 规格层-B（Harness 子层）
 
+> **实现状态**：⚙️ 设计完成，待实现（Phase 3）｜**细节文件**：[layers/spec-harness-layer.md](layers/spec-harness-layer.md)
+
 **驱动者**：`spec-to-harness.yml` GitHub Actions workflow
 
 **目标**：基于锁定的 ACM，由 AI 生成完整的可执行 Harness 测试代码，覆盖所有 AC。
@@ -291,6 +306,8 @@ CREATED → DISCUSSING → AI_REVIEWING → HUMAN_CONFIRMING → REVIEWING → A
 
 ### 4.4 生成层
 
+> **实现状态**：📋 概念阶段（Phase 3）｜**细节文件**：[layers/generation-delivery-layers.md](layers/generation-delivery-layers.md)（4.4–4.7 合并，待层成熟时拆分）
+
 **驱动者**：`harness-confirmed.yml` GitHub Actions workflow 触发 Claude Code CLI
 
 **目标**：AI 基于锁定的四层 Spec + Harness 自主生成实现代码，直到所有 P0 Harness 通过。
@@ -311,6 +328,8 @@ CREATED → DISCUSSING → AI_REVIEWING → HUMAN_CONFIRMING → REVIEWING → A
 
 ### 4.5 验证层
 
+> **实现状态**：📋 概念阶段（Phase 3）｜**细节文件**：[layers/generation-delivery-layers.md](layers/generation-delivery-layers.md)（4.4–4.7 合并，待层成熟时拆分）
+
 **驱动者**：GitHub Actions CI（自动）+ checkpoint-handler（卡点2）
 
 **目标**：对实现 PR 全量运行 Harness，给出明确的通过/失败信号，触发卡点2。
@@ -327,6 +346,8 @@ CREATED → DISCUSSING → AI_REVIEWING → HUMAN_CONFIRMING → REVIEWING → A
 
 ### 4.6 集成层
 
+> **实现状态**：📋 概念阶段（Phase 3）｜**细节文件**：[layers/generation-delivery-layers.md](layers/generation-delivery-layers.md)（4.4–4.7 合并，待层成熟时拆分）
+
 **驱动者**：`staging.yml` GitHub Actions workflow（合并后自动触发）
 
 **目标**：合并后自动部署到 Staging 环境，运行 Smoke Test，触发卡点3。
@@ -342,6 +363,8 @@ CREATED → DISCUSSING → AI_REVIEWING → HUMAN_CONFIRMING → REVIEWING → A
 ---
 
 ### 4.7 交付层
+
+> **实现状态**：📋 概念阶段（Phase 3）｜**细节文件**：[layers/generation-delivery-layers.md](layers/generation-delivery-layers.md)（4.4–4.7 合并，待层成熟时拆分）
 
 **驱动者**：`deploy.yml` GitHub Actions workflow（卡点3 后触发）
 
