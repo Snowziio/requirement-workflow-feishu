@@ -244,6 +244,78 @@ class RequirementWorkflowV12Test(unittest.TestCase):
             assert refreshed is not None
             self.assertEqual(refreshed.author_dm_chat_id, "p2p-chat-1")
 
+    def test_send_author_start_card_uses_configured_user_id_type(self) -> None:
+        class FakeGateway:
+            def __init__(self) -> None:
+                self.sent_texts = []
+
+            def sync_requirement_document(self, requirement) -> None:
+                return None
+
+            def update_requirement_record(self, requirement) -> None:
+                return None
+
+            def send_text(self, receive_id, text, receive_id_type="chat_id") -> None:
+                self.sent_texts.append((receive_id, receive_id_type, text))
+
+            def bitable_url(self) -> str:
+                return "https://example.com/bitable"
+
+        with TemporaryDirectory() as temp_dir:
+            runtime_service = CoordinatorService()
+            response = runtime_service.create_requirement_from_group(
+                CreationRequest(
+                    project="HARNESS",
+                    name="私发启动指令测试",
+                    summary="验证卡片按钮会按配置的 user id type 私发。",
+                    creator="tester",
+                    creator_user_id="user-open-1",
+                    creation_chat_id="chat-1",
+                )
+            )
+            requirement = runtime_service.get_requirement(response.req_id)
+            assert requirement is not None
+            requirement.document_url = "https://example.com/doc/start"
+
+            gateway = FakeGateway()
+            app = CoordinatorRuntimeApp(
+                Settings(
+                    feishu_app_id="app-id",
+                    feishu_app_secret="app-secret",
+                    feishu_user_id_type="user_id",
+                    state_store_path=str(Path(temp_dir) / "state.json"),
+                ),
+                service=runtime_service,
+                gateway=gateway,
+            )
+
+            status, payload = app.handle_card_callback(
+                json.dumps(
+                    {
+                        "operator": {
+                            "open_id": "user-open-1",
+                            "user_id": "user-id-1",
+                            "name": "tester",
+                        },
+                        "action": {
+                            "value": {
+                                "action": "send_author_start",
+                                "req_id": response.req_id,
+                            }
+                        },
+                    },
+                    ensure_ascii=False,
+                ).encode()
+            )
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["toast"]["type"], "success")
+            self.assertEqual(len(gateway.sent_texts), 1)
+            receive_id, receive_id_type, text = gateway.sent_texts[0]
+            self.assertEqual(receive_id, "user-id-1")
+            self.assertEqual(receive_id_type, "user_id")
+            self.assertIn(f"开始需求构造 {response.req_id}", text)
+
     def test_openclaw_author_turn_callback_rejects_missing_signature(self) -> None:
         class FakeGateway:
             def sync_requirement_document(self, requirement) -> None:

@@ -744,15 +744,38 @@ class CoordinatorRuntimeApp:
             requirement = self.service.get_requirement(req_id)
             if requirement is None:
                 return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
-            requirement = self.service.ensure_author_handoff(requirement, reason="send_author_start")
+            requirement = self.service.handoff_to_author(requirement)
             self._sync_requirement_outputs(requirement)
             self._save_state()
             agent_name = self.settings.openclaw_author_agent_name
-            self.gateway.send_text(
-                user_id,
-                self._build_author_handoff_text(requirement, agent_name=agent_name),
-                receive_id_type=self.settings.feishu_user_id_type,
-            )
+            target_user_id, receive_id_type = self._resolve_operator_receive_target(operator)
+            if not target_user_id:
+                return 200, {
+                    "toast": {
+                        "type": "error",
+                        "content": "无法识别当前点击人的飞书身份，请改用手动私聊启动。",
+                    }
+                }
+            try:
+                self.gateway.send_text(
+                    target_user_id,
+                    self._build_author_handoff_text(requirement, agent_name=agent_name),
+                    receive_id_type=receive_id_type,
+                )
+            except Exception as exc:
+                LOGGER.warning(
+                    "Failed to send author handoff text req_id=%s target_user_id=%s receive_id_type=%s: %s",
+                    req_id,
+                    target_user_id,
+                    receive_id_type,
+                    exc,
+                )
+                return 200, {
+                    "toast": {
+                        "type": "error",
+                        "content": "私发启动指令失败，请改为手动私聊需求构造助手并发送完整启动消息。",
+                    }
+                }
             return 200, {"toast": {"type": "success", "content": "已将启动指令私发给你。"}}
 
         if action_name in {"human_confirm_yes", "human_confirm_no"}:
@@ -899,6 +922,22 @@ class CoordinatorRuntimeApp:
                     return self._normalize_form_value(value[key])
             return ""
         return str(value).strip()
+
+    def _resolve_operator_receive_target(self, operator: dict[str, object]) -> tuple[str, str]:
+        configured_type = self.settings.feishu_user_id_type
+        configured_value = self._normalize_form_value(operator.get(configured_type))
+        if configured_value:
+            return configured_value, configured_type
+
+        open_id = self._normalize_form_value(operator.get("open_id"))
+        if open_id:
+            return open_id, "open_id"
+
+        user_id = self._normalize_form_value(operator.get("user_id"))
+        if user_id:
+            return user_id, "user_id"
+
+        return "", configured_type
 
     def _card_event_to_payload(self, data: P2CardActionTrigger) -> dict[str, object]:
         event = getattr(data, "event", None)
@@ -1104,43 +1143,42 @@ class CoordinatorRuntimeApp:
         }
 
     def _build_project_group_card(self, requirement) -> dict[str, object]:
-        elements: list[dict[str, object]] = [
-            {
-                "tag": "markdown",
-                "content": (
-                    f"已创建需求 **{requirement.req_id}**\n"
-                    f"- 名称：{requirement.name}\n"
-                    f"- 当前状态：{requirement.status.value}\n"
-                    f"- 当前角色：{requirement.current_role_label}"
-                ),
-            }
-        ]
-
-        links: list[str] = []
-        if requirement.document_url:
-            links.append(f"[查看需求文档]({requirement.document_url})")
         bitable_url = self.gateway.bitable_url()
+        top_actions: list[dict[str, object]] = []
+        if requirement.document_url:
+            top_actions.append(
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "查看需求文档"},
+                    "type": "default",
+                    "multi_url": {"url": requirement.document_url},
+                }
+            )
         if bitable_url:
-            links.append(f"[查看多维表格]({bitable_url})")
-        if links:
-            elements.append({"tag": "markdown", "content": " | ".join(links)})
-        elements.append(
-            {
-                "tag": "markdown",
-                "content": "私聊需求构造助手时，请优先发送包含 `REQ ID`、需求文档链接和多维表格链接的完整启动消息，避免重复创建第二份文档。",
-            }
-        )
+            top_actions.append(
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "查看多维表格"},
+                    "type": "default",
+                    "multi_url": {"url": bitable_url},
+                }
+            )
 
-        actions: list[dict[str, object]] = [
+        primary_actions: list[dict[str, object]] = [
             {
                 "tag": "button",
-                "text": {"tag": "plain_text", "content": "私发启动指令"},
-                "type": "primary",
-                "value": {"action": "send_author_start", "req_id": requirement.req_id},
+                "text": {"tag": "plain_text", "content": "私发启动消息"},
+                "type": "primary_filled",
+                "behaviors": [
+                    {
+                        "type": "callback",
+                        "value": {"action": "send_author_start", "req_id": requirement.req_id},
+                    }
+                ],
             }
         ]
         if self.settings.author_agent_chat_url_template:
-            actions.insert(
+            primary_actions.insert(
                 0,
                 {
                     "tag": "button",
@@ -1151,27 +1189,94 @@ class CoordinatorRuntimeApp:
                     },
                 },
             )
-        elements.append({"tag": "action", "actions": actions})
-        elements.append(
+
+        body_elements: list[dict[str, object]] = [
             {
                 "tag": "div",
                 "text": {
-                    "tag": "plain_text",
+                    "tag": "lark_md",
                     "content": (
-                        f"如果需要手动启动，请私聊 {self.settings.openclaw_author_agent_name}，"
-                        "并发送私发给你的完整启动消息。"
+                        f"**需求已创建成功**\n"
+                        f"当前已进入 **{requirement.status.value}**，由 **{requirement.current_role_label}** 接手。"
                     ),
                 },
-            }
+            },
+            {
+                "tag": "column_set",
+                "horizontal_spacing": "12px",
+                "columns": [
+                    {
+                        "tag": "column",
+                        "width": "weighted",
+                        "weight": 1,
+                        "elements": [
+                            {
+                                "tag": "markdown",
+                                "content": (
+                                    f"**REQ ID**\n`{requirement.req_id}`\n\n"
+                                    f"**名称**\n{requirement.name}"
+                                ),
+                            }
+                        ],
+                    },
+                    {
+                        "tag": "column",
+                        "width": "weighted",
+                        "weight": 1,
+                        "elements": [
+                            {
+                                "tag": "markdown",
+                                "content": (
+                                    f"**状态**\n{requirement.status.value}\n\n"
+                                    f"**当前角色**\n{requirement.current_role_label}"
+                                ),
+                            }
+                        ],
+                    },
+                ],
+            },
+        ]
+        if top_actions:
+            body_elements.append({"tag": "action", "actions": top_actions})
+        body_elements.extend(
+            [
+                {"tag": "hr"},
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": (
+                            "**推荐下一步**\n"
+                            "1. 点击“私发启动消息”\n"
+                            "2. 将收到的完整启动消息原样转发给需求构造助手\n"
+                            "3. 在同一份需求文档里继续多轮构造，不要新建第二份文档"
+                        ),
+                    },
+                },
+                {"tag": "action", "actions": primary_actions},
+                {
+                    "tag": "note",
+                    "elements": [
+                        {
+                            "tag": "plain_text",
+                            "content": (
+                                f"如果自动私发失败，请手动私聊 {self.settings.openclaw_author_agent_name}，"
+                                "并发送完整启动消息。"
+                            ),
+                        }
+                    ],
+                },
+            ]
         )
 
         return {
+            "schema": "2.0",
             "config": {"wide_screen_mode": True},
             "header": {
                 "template": "green",
                 "title": {"tag": "plain_text", "content": f"{requirement.req_id} 已创建"},
             },
-            "elements": elements,
+            "body": {"elements": body_elements},
         }
 
     def _build_author_handoff_text(self, requirement: Requirement, *, agent_name: str) -> str:
