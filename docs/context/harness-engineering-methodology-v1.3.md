@@ -5,6 +5,14 @@
 > 客户需求：在租赁业务平台中，使用大模型自动解读申请人的营业执照与征信信息，生成面向租赁场景的格式化风控报告。
 > 本文所有流程设计均以此案例为锚点进行说明。
 
+> **v1.4 变更摘要（2026-04-14）**
+> - 新增 §1.4 **项目级上下文**：五层内容结构（功能契约/架构快照/视觉规范/规范惯例/需求历史）、双平面存储（飞书+GitHub）、Coordinator Service 作为同步枢纽、冷热内存模型（参考 arXiv 2602.20478）
+> - §2.1.5 需求文档模板升级：输入/输出从纯描述升级为半结构化契约（字段名+类型+约束）；验收标准升级为可测试断言；新增"技术范围声明"section（Spec 生成必需）
+> - §2.1.11 UI 设计方式升级为两阶段模型：低保真线框图（HUMAN_CONFIRMING，验证理解）+ 高保真可运行原型（APPROVED 后，视觉技术合同）
+> - §2.2 规格层-A 重构：四层 Spec 结构（Requirements/Design/ACM/Tasks）；注入三类项目级上下文（ARCHITECTURE.yaml+ACM注册表+设计系统快照）；卡点1a 仅对 Design 层
+> - §2.3 规格层-B 新增视觉回归测试（Playwright），作为 UI 层的 Harness 等价机制
+> - §五 新增工具14-17：设计系统文档管理器、高保真 UI 原型生成 Agent、ACM 注册表维护服务、视觉回归测试生成器
+>
 > **v1.3.1 参考实现对齐（2026-04-13）**
 > - 状态名与 `Snowziio/requirement-workflow-feishu` 参考实现对齐：方法论概念层保留7态，同时标注参考实现5态简化名称（DRAFTING / AI_REVIEW / HUMAN_CONFIRM / FINAL_REVIEW / APPROVED）
 > - DISCUSSION_ROUTING 状态：确认在参考实现中已合并进创建流程，不单独成状态
@@ -139,6 +147,91 @@ v1.2 曾把需求层的主编排交给 OpenClaw。首次部署过程中发现 Op
 | 典型示例 | "需求创建 → 讨论 → 审查 → 确认" | "AI 生成代码 → CI 失败 → 自修复 → 重试" |
 
 两者不冲突：层间工作流服务负责**层之间的衔接**和**层内的结构化阶段**；层内子流程负责**层内部 AI 自主循环**的具体技术细节。举例：规格层→生成层的卡点触发是 checkpoint-handler 的事（层间工作流服务），而生成层内部"AI 写代码 → 失败 → 读 CI → 修 → 重试"是 Coding Agent 按 CLAUDE.md 自主完成的（层内子流程）。
+
+---
+
+### 1.4 项目级上下文
+
+v1.4 引入的贯穿全链路基础概念。
+
+#### 1.4.1 定义
+
+项目级上下文是一个项目在整个生命周期中积累的、**跨 session 持久存在的结构化知识**，使得任何 Agent（对话式或编码式）在任何时刻介入，都能理解"这个项目现在是什么状态、已经做了哪些决定、约束是什么"，而不需要从头推导。
+
+这是防止架构漂移、视觉漂移、功能漂移的根本机制。没有项目级上下文，每次迭代的 AI 都在"失忆"状态下工作，不可避免地与历史决定冲突。
+
+#### 1.4.2 五层内容结构
+
+| 层 | 名称 | 代表产物 | 防止 |
+|---|---|---|---|
+| Layer 1 | 功能契约层 | ACM 注册表（consolidated.yaml）、REQ 索引 | 功能漂移（新 Spec 与已有契约冲突） |
+| Layer 2 | 架构快照层 | ARCHITECTURE.yaml、ADR 归档 | 架构漂移（新实现破坏已有架构约定） |
+| Layer 3 | 视觉规范层 | 项目设计系统文档（飞书）、设计系统快照（GitHub） | 视觉漂移（新 UI 与已有界面风格不一致） |
+| Layer 4 | 规范惯例层 | CLAUDE.md、技术栈声明 | 代码风格漂移（AI 每次 session 自动加载） |
+| Layer 5 | 需求历史层 | 需求文档集（飞书）、UI 原型集（飞书） | — （新需求构造时的历史背景参考） |
+
+#### 1.4.3 双平面存储模型
+
+项目级上下文横跨两个存储平面，由 Coordinator Service 作为同步枢纽：
+
+```
+飞书平面（人工协同轨）
+  ├── 需求文档集（Layer 5）
+  ├── UI 原型集（Layer 5）
+  └── 项目设计系统文档（Layer 3）
+
+         ↕ Coordinator Service（同步枢纽）
+         · 管理飞书侧所有项目级资产
+         · 在 Spec 生成时导出快照到 GitHub
+         · 提供跨 session 的上下文查询接口
+
+GitHub 平面（自动化 Coding 轨）
+  ├── ARCHITECTURE.yaml（Layer 2）
+  ├── ACM 注册表（Layer 1）：specs/registry/consolidated.yaml
+  ├── 设计系统快照（Layer 3 镜像）：specs/design-system-snapshot.yaml
+  └── CLAUDE.md（Layer 4，热加载）
+```
+
+**关键约束**：UI 设计发生在代码仓库建立之前，设计系统文档的主存储必须在飞书平面；GitHub 快照是在 Spec 生成时由 Coordinator 导出，供 AI Coding Agent 在编码轨消费。
+
+#### 1.4.4 管理职责分工
+
+```
+Coordinator Service（人工协同轨管理者）
+  管理：Layer 3 视觉规范（飞书）
+        Layer 5 需求历史（飞书）
+        REQ 状态索引（Bitable + JSON）
+  职责：飞书 → GitHub 快照导出（Spec 生成触发时）
+
+checkpoint-handler（自动化 Coding 轨管理者）
+  管理：Layer 1 功能契约（ACM 注册表，GitHub）
+        Layer 2 架构快照（ARCHITECTURE.yaml，GitHub）
+        Layer 4 规范惯例（CLAUDE.md，人工触发）
+```
+
+#### 1.4.5 事件驱动更新表
+
+| 触发事件 | 更新内容 | 执行者 |
+|---|---|---|
+| REQ 创建 | REQ 索引新增条目 | Coordinator |
+| REQ APPROVED | REQ 索引状态更新 | Coordinator |
+| UI 设计确认 | 设计系统文档 append（飞书） | Coordinator |
+| Spec 生成（卡点1a 通过） | ACM 注册表新增条目；设计系统快照导出 GitHub | Coordinator 触发，checkpoint-handler 执行 |
+| Harness 通过（卡点1b） | ACM 注册表该条目标记 finalized | checkpoint-handler |
+| Impl PR 合并 | ARCHITECTURE.yaml 更新（如有接口变更） | checkpoint-handler Hook |
+| 架构决策发生 | ADR 新增文档 | 人工写入 |
+
+**核心原则：所有更新 append-only，可追溯到触发它的 REQ ID。**
+
+#### 1.4.6 冷热内存模型
+
+参考 Codified Context 论文（arXiv 2602.20478），上下文按访问频率分层注入 AI Coding Agent：
+
+| 层级 | 内容 | 加载时机 |
+|---|---|---|
+| **热**（每次 session 自动加载） | CLAUDE.md；ARCHITECTURE.yaml；当前 REQ 的 Spec（Requirements + Design + Tasks）；design-system-snapshot.yaml（需要UI = true 时） | 进入编码 session 即加载 |
+| **温**（按 REQ 加载） | 当前 REQ 的 ACM；与当前 REQ 技术范围有重叠的历史 ACM 条目 | Spec 生成时注入 |
+| **冷**（按需查询） | 完整 ACM 注册表（兼容性检查时）；设计系统完整历史（UI 决策追溯时）；ADR 归档（架构决策参考时） | 显式触发时查询 |
 
 ---
 
@@ -278,16 +371,16 @@ Hook 实现层调用能力层时遵循契约化接口，契约与具体 Agent �
 - 每个契约必须定义**失败语义**：Agent 调用失败时，Hook 层负责重试、回退或记录到 Bitable 追溯字段，状态机不感知失败细节。
 - 契约的具体字段定义以首个参考实现为准。
 
-#### 2.1.5 需求文档模板结构（保留自 v1.2）
+#### 2.1.5 需求文档模板结构（v1.4 升级）
 
-需求文档使用固定的 section 结构，7 个 section 与 §2.1.2 状态机中的 7 个讨论字段一一对应，是 §2.1.6 section-level 幂等重写的目标对象。
+需求文档使用固定的 section 结构，是 §2.1.6 section-level 幂等重写的目标对象。v1.4 在原有 7 个讨论字段基础上，升级了**输入/输出格式要求**并新增了**技术范围声明** section，为 Spec 生成提供必要的技术输入。
 
 ```markdown
 # REQ-{ID} {需求名称}
 > 创建人: {人员} | 创建时间: {日期} | 状态: {状态}
 
 ## 历史约束参考（只读，系统注入）
-[AI 从 GitHub 历史 ACM 拉取，列出可能受影响的历史验收标准]
+[AI 从 GitHub ACM 注册表拉取，列出可能受影响的历史验收标准]
 
 ## 问题描述
 这个功能解决什么业务问题？
@@ -295,22 +388,42 @@ Hook 实现层调用能力层时遵循契约化接口，契约与具体 Agent �
 ## 使用场景
 用户在什么情况下触发，期望得到什么结果？
 
-## 输入
-明确列出所有输入数据及其格式。
+## 输入（v1.4：升级为半结构化契约）
+列出所有输入字段，每条包含：字段名 + 类型 + 主要约束。
+示例：
+  - license_image: 图片文件，支持 jpg/png，最大 5MB
+  - credit_report: JSON 对象，包含 applicant_id（string）和 credit_score（number）
 
-## 输出
-明确列出输出内容、格式、交付方式。
+## 输出（v1.4：升级为半结构化契约）
+列出输出字段，每条包含：字段名 + 类型 + 可能的枚举值。
+示例：
+  - risk_level: enum（low / medium / high）
+  - score: integer（0-100）
+  - report_id: string（UUID）
 
 ## 边界（不包含什么）
 明确排除的功能范围。
 
-## 验收标准（不可省略，每条必须可量化验证）
-- [ ] 标准1
-- [ ] 标准2
+## 验收标准（v1.4：升级为可测试断言，不可省略）
+每条必须能回答：给定什么输入 → 期望什么输出 → 怎么判断通过。
+示例：
+- 给定完整营业执照和征信数据，返回的 risk_level 字段必须存在且为 low/medium/high 之一
+- 给定缺失 credit_score 的输入，系统返回 422 + error_code: MISSING_CREDIT_SCORE
 
 ## 非功能要求
-性能、安全、合规等约束。
+性能、安全、合规等约束（含具体数值，如"P99 响应时间 < 3s"）。
+
+## 技术范围声明（v1.4 新增，Spec 生成必需）
+  - 涉及现有模块：[从 ARCHITECTURE.yaml 选取，或填"无"]
+  - 操作类型：新增接口 / 修改现有接口 / 纯数据处理（选填）
+  - 数据持久化：是否需要新增/修改数据表（是/否）
+  - 对外依赖：调用哪些第三方服务（无则填"无"）
 ```
+
+**Author Agent 引导策略变更**：
+- 引导用户将输入/输出补全到"字段名 + 类型 + 主要约束"粒度（不需要完整 OpenAPI schema）
+- 从 ARCHITECTURE.yaml 拉取现有模块列表供用户勾选，降低技术范围声明的填写成本
+- Reviewer Agent 新增两个退回条件：①输入/输出仍为纯描述（无字段名）；②技术范围声明为空
 
 #### 2.1.6 正式文档 section-rewrite 规则
 
@@ -409,33 +522,42 @@ v1.2 的 Bitable 只记录**生命周期状态**。v1.3 的 Bitable 同时承担
 | 需求变更（审查后） | 走"打回"分支（REVIEWING → DISCUSSING），状态回到 DISCUSSING；若是大变更则新开 REQ ID 走 v2 |
 | Bug 修复（已上线） | 不走需求层，直接在 GitHub 开 PR |
 
-#### 2.1.11 UI 设计的嵌入方式
+#### 2.1.11 UI 设计的嵌入方式（v1.4 更新：两阶段模型）
 
-v1.2 曾把 UI 设计建模为独立的 `UI_DESIGNING` 状态。v1.3 改为**挂在 HUMAN_CONFIRMING 阶段的 Hook 实现层**，不独立成状态。
+v1.4 正式定义 UI 设计的**两阶段模型**，区分两个目的不同、不可合并的阶段：
 
-**动机**：UI 设计对"非专业开发者"有不可替代的价值——它让需求发起人用"看得见的原型"而不是"纯逻辑描述"来判断 AI 是否理解对了需求。这是剔除伪需求和推动需求迭代的关键手段。但 UI 设计并不适合独立成状态，因为：
+| 阶段 | 形态 | 时机 | 目的 | 受众 |
+|---|---|---|---|---|
+| **第一阶段：低保真线框图** | 组件树 + 交互说明 | `onEnter(HUMAN_CONFIRMING)`（Hook 层生成） | 验证 AI 是否理解了需求方向，辅助 author 判断 | 需求发起人 |
+| **第二阶段：高保真可运行原型** | 可在浏览器运行的前端代码 | REQ APPROVED 后、Spec 生成前（独立阶段） | 视觉/交互全貌确认；产出 UI 技术合同供 Coding Agent 使用 | 产品/设计负责人 + Coding Agent |
 
-1. 并非所有需求都需要 UI（纯后端 / 数据处理 / API 需求）。
-2. UI 是"呈现给人类的判断材料"，和 AI 审查结论是**同一个判断动作**的两种输入，应该一起呈现给 author。
-3. 独立成状态会让 7 态状态机变复杂，并产生"UI 门"和"Human Confirmed 门"谁先谁后的问题。
-
-**具体机制**：
+**第一阶段（低保真，HUMAN_CONFIRMING）**：
 
 1. 需求创建或首轮讨论时确定 `需要UI = true/false`（由 author 声明或 Author Agent 判定）。
-2. 当状态从 `AI_REVIEWING` 迁移到 `HUMAN_CONFIRMING` 时，`onEnter(HUMAN_CONFIRMING)` Hook 执行以下动作：
+2. 状态从 `AI_REVIEWING` 迁移到 `HUMAN_CONFIRMING` 时，`onEnter(HUMAN_CONFIRMING)` Hook：
    - 组装 AI 审查结论（结构化文字）。
-   - 若 `需要UI = true`，调 UI 设计 Agent 生成原型（组件树 + 样式 + 交互 + 线框图），写入飞书文档并更新 `UI设计稿链接`。
-   - 把「审查结论 + UI 原型链接」一起推送到 author 私聊。
-3. Author 的判断同时基于两份材料：
-   - 认可 → `human_confirm_yes` → 进入 REVIEWING。
-   - 不认可（包括"文字看起来对但 UI 不对"）→ `human_confirm_no` → 回 DISCUSSING。
-4. 打回后，author 在 DISCUSSING 里继续补字段。下一次再进入 HUMAN_CONFIRMING 时，UI 原型会**重新生成**，与更新后的需求保持一致。
+   - 若 `需要UI = true`，调 UI 设计 Agent 生成低保真线框图（组件树 + 主要交互逻辑 + 线框图说明），写入飞书文档并更新 `UI设计稿链接`。
+   - 把「审查结论 + 线框图链接」一起推送到 author 私聊。
+3. Author 判断：认可 → `human_confirm_yes`；不认可（包括"文字对但 UI 方向不对"）→ `human_confirm_no` → 回 DISCUSSING，下次进入 HUMAN_CONFIRMING 时线框图重新生成。
+4. `需要UI = false` 时跳过线框图生成，流程不受影响。
 
-**与 REVIEWING 阶段的关系**：正式审查（REVIEWING）在项目群里发送的审查卡片，也应该携带 UI 原型链接，供项目相关人一起审查。
+**第二阶段（高保真，APPROVED 后）**：
 
-**纯后端需求的处理**：`需要UI = false` 时，`onEnter(HUMAN_CONFIRMING)` Hook 跳过 UI 原型生成步骤，只推送审查结论。流程完全不受影响。
+1. **触发条件**：REQ APPROVED 且 `需要UI = true`
+2. **输入**：需求文档 7 字段 + 第一阶段低保真线框图 + 项目设计系统文档（Coordinator 从飞书读取）
+3. **AI 生成内容**（以可运行前端代码为交付形式）：
+   - 所有关键页面/视图的可交互原型（React/Vue 组件，可在浏览器中运行）
+   - 核心状态的完整展示：空状态、加载态、错误态、成功态
+   - 完整用户流程：主路径 + 主要异常路径
+   - 设计决策说明：每个关键视觉/交互选择的依据
+4. **人工 review**：视觉是否符合预期；交互是否符合习惯；风格是否与已有界面一致（对照设计系统文档）
+5. **迭代**：AI 根据 review 意见修改原型，直到产品/设计负责人确认通过
+6. **确认后**：Coordinator 将设计决策 append 进项目设计系统文档（飞书，append-only），更新 `UI设计稿链接`
+7. **产物流向**：进入 Spec 生成时，AI 从高保真原型直接提取 UI 技术规格（组件树/接口/状态机）→ `design-ui.md`，无需凭空推导
 
-**与分层工作流服务模式的契合**：UI 设计 Agent 属于能力层，是可替换的（今天是 design.md / UIUX ProMax，明天可以换 v0 / Figma Make / 其他）。Workflow Service 不感知 UI，UI 的生成时机由 Hook 实现层控制。符合 §1.3 的三层分离原则。
+**`需要UI = false` 的需求**：跳过两个阶段的 UI 生成，状态机和 Spec 生成流程完全不受影响。
+
+**与分层工作流服务模式的契合**：UI 设计 Agent 属于能力层，是可替换的（今天是 design.md / UIUX ProMax，明天可以换 v0 / Figma Make / 其他）。Workflow Service 不感知 UI 工具，生成时机由 Hook 实现层控制。符合 §1.3 的三层分离原则。
 
 ---
 
@@ -445,14 +567,12 @@ v1.2 曾把 UI 设计建模为独立的 `UI_DESIGNING` 状态。v1.3 改为**挂
 
 ### 2.2 规格层-A（Spec 子层）—— 需求层→GitHub 桥接
 
-**目标**：将飞书中经审查的需求文档转化为 GitHub 中锁定的结构化 Spec + ACM。
+**目标**：将飞书中经审查的需求文档转化为 GitHub 中锁定的四层 Spec，为 AI Coding Agent 提供精确的技术约定。
 
 > **设计原理：单向转化门**
 >
 > 需求写作（发散、频繁交互、飞书原生）和后续自动化（确定性、事件驱动、GitHub 管道）需要不同的工具。
-> 强行统一会让写作阶段僵硬，或让自动化管道不可靠。
->
-> 解决方案：飞书和 GitHub 不需要天然匹配，只需要一个**单向转化门**：
+> 解决方案：一个**单向转化门**：
 > - 飞书 = 需求空间（自由、发散、OpenClaw 驱动协作）
 > - GitHub = 锁定空间（结构化、确定性、自动化管道）
 > - 转化门 = 卡点1a，由人工桥接或半自动完成
@@ -460,260 +580,219 @@ v1.2 曾把 UI 设计建模为独立的 `UI_DESIGNING` 状态。v1.3 改为**挂
 
 | 项目 | 内容 |
 |---|---|
-| 输入 | 经审查的飞书需求文档 + UI 设计稿（状态 = REQ_APPROVED） |
-| 输出 | 结构化 Spec（Markdown）+ ACM（YAML）+ API 契约（YAML，如有） |
-| 人的工作 | 创建 spec 分支 → 将需求文档作为上下文 → 审核 AI 转化结果 |
-| AI 的工作 | 将需求文档转化为结构化 Spec + ACM + 兼容性检查报告 |
-| 自动化 | 卡点1a 确认后自动提交 GitHub |
-| 索引 | 分支名: `spec/REQ-{PROJECT}-{NNN}`，Spec/ACM metadata 含 `req_id` |
+| 输入 | APPROVED 需求文档（含技术范围声明）+ 高保真 UI 原型（需要UI = true 时）+ 项目级上下文（ARCHITECTURE.yaml + ACM 注册表 + 设计系统快照） |
+| 输出 | 四层 Spec（requirements.md + design.md + acceptance.yaml + tasks.md）+ 可选 design-ui.md |
+| 人工介入 | 仅 Design 层 review（卡点1a）——这是整个链路唯一需要深度人工判断的环节 |
+| AI 的工作 | 从需求文档和注入的项目上下文，生成四层 Spec + 兼容性检查报告 |
+| 索引 | 目录：`spec/REQ-{PROJECT}-{NNN}/`，所有文件含 `req_id` metadata |
 
-#### 桥接流程（人工桥接 → 半自动化演进）
+#### 四层 Spec 结构
 
-**Phase 1：人工桥接（当前实施）**
-
-```
-1. OpenClaw 通知: "REQ-XXX-001 需求审查通过，可进入规格层"
-2. 开发者:
-   → git checkout -b spec/REQ-XXX-001
-   → 从飞书文档复制需求内容
-   → 使用 Claude Code / AI 工具转化为:
-     · docs/specs/{feature}-v{N}.md（结构化 Spec，metadata 含 req_id）
-     · docs/specs/{feature}-v{N}-acceptance.yaml（ACM）
-     · docs/specs/{feature}-v{N}-api.yaml（API 契约，如有）
-   → git push → 创建 PR
-3. 开发者通知: @OpenClaw spec已提交 REQ-XXX-001 PR#{N}
-   → OpenClaw: Bitable 状态 → SPEC_DRAFTING，记录 PR 链接
-   → 触发卡点1a 飞书卡片
-```
-
-**Phase 2：半自动化（后续实施）**
+Spec 存储于 GitHub `spec/REQ-{PROJECT}-{NNN}/` 目录：
 
 ```
-1. 人: @OpenClaw 创建Spec REQ-XXX-001
-2. OpenClaw:
-   → GitHub API: 创建分支 spec/REQ-XXX-001
-   → 飞书 API: 读取需求文档 + UI 设计稿内容
-   → 调用 Spec 转化 Agent: 需求文档 → Spec + ACM + API 契约
-   → 读取 GitHub 历史 ACM → 兼容性检查报告
-   → GitHub API: commit files + 创建 PR
-   → Bitable: 状态 → SPEC_DRAFTING，记录 PR 链接
-   → 触发卡点1a 飞书卡片
+spec/REQ-PROJECT-001/
+  requirements.md       ← Layer 1（自动生成，无需人工 review）
+  design.md             ← Layer 2（AI 生成 + 卡点1a 人工 review，唯一卡点）
+  design-ui.md          ← Layer 2 UI 技术规格（需要UI = true 时自动生成）
+  acceptance.yaml       ← Layer 3 ACM（自动生成，人可在卡点1a 否决）
+  tasks.md              ← Layer 4（自动生成，按依赖排序）
 ```
 
-#### Spec 产物清单
+##### Layer 1：Requirements（自动生成）
 
-规格层-A 产出以下文件，全部提交到 GitHub `docs/specs/`：
-
-| 产物 | 文件名 | 用途 |
-|------|--------|------|
-| 结构化 Spec | `{feature}-v{N}.md` | 自然语言业务描述，解释"为什么和如何" |
-| ACM（验收标准矩阵） | `{feature}-v{N}-acceptance.yaml` | 机器可读的验收标准，Harness 生成的直接输入 |
-| API 契约 | `{feature}-v{N}-api.yaml` | OpenAPI 接口定义（如涉及接口） |
-
-#### Spec 模板结构（`docs/specs/{feature}-v{N}.md`）
+从需求文档 7 字段自动转换为 EARS 格式用户故事。**无需人工 review**，仅作 AI 生成 Design 层的格式化中间产物。
 
 ```markdown
-## 问题描述
-这个功能解决什么业务问题？
+## 功能场景
 
-## 使用场景
-用户在什么情况下触发，期望得到什么结果？
+### UC-001：提交风控报告
+**When** 用户提交有效的营业执照和征信数据
+**The system shall** 在 3 秒内返回包含 risk_level 的结构化风控报告
 
-## 输入
-明确列出所有输入数据及其格式。
+**When** 用户提交缺失 credit_score 的数据
+**The system shall** 返回 422 错误，error_code 为 MISSING_CREDIT_SCORE
 
-## 输出
-明确列出输出内容、格式、交付方式。
-
-## 边界（不包含什么）
-明确排除的功能范围。
-
-## 验收标准（人工填写，不可省略）
-- [ ] 标准1
-- [ ] 标准2
-（注：此处的文字版验收标准会由 AI 转化为 ACM YAML，两者必须一致）
-
-## 非功能要求
-性能、安全、合规等约束。
-
-## 版本信息
-- 版本：v{N}
-- 基于版本：v{N-1}（如适用）
-- Breaking Changes：无 / 列表
+## 非功能约束
+- 响应时间：P99 < 3s
+- 可用性：99.9%
 ```
 
-#### ACM（验收标准矩阵）完整 Schema
+##### Layer 2：Design（AI 生成 + ⚡卡点1a 人工 review）
 
-ACM 是连接"自然语言 Spec"和"可执行 Harness 测试"的结构化桥梁。它解决三个问题：
+**这是整个链路唯一需要深度人工判断的层。** AI 注入三类上下文后生成：
+
+**注入的项目级上下文**：
+- `ARCHITECTURE.yaml`（现有服务/模块/接口）
+- ACM 注册表（历史验收约束，用于兼容性检查）
+- 技术范围声明（从需求文档读取，指定涉及的模块和操作类型）
+
+```markdown
+## 接口契约
+POST /api/v1/risk-report
+  Request:  { license_image: File, credit_report: CreditReport }
+  Response: { risk_level: "low"|"medium"|"high", score: number, report_id: string }
+  Errors:   422 MISSING_CREDIT_SCORE | 422 INVALID_LICENSE | 500 ANALYSIS_FAILED
+
+## 数据模型变更
+新增表：risk_reports
+  - id: UUID（主键）
+  - applicant_id: string（外键 → users.id）
+  - risk_level: enum("low","medium","high")
+  - created_at: timestamp
+
+## 架构接合点
+- 在 risk-assessment-service 新增 /api/v1/risk-report 路由
+- 复用 license-parser 模块（已有，无需新建）
+- 调用 CreditDataGateway（已有封装）
+
+## 兼容性影响
+[由 ACM 注册表兼容性检查自动生成]
+- 无影响：该接口为全新接口，不修改现有接口
+```
+
+若 `需要UI = true`，同时生成 `design-ui.md`（从高保真原型直接提取，无需 AI 凭空推导）：
+
+```markdown
+## UI 技术规格
+
+### 组件树
+RiskReportPage
+  ├── UploadSection（license_image + credit_report 上传）
+  │   ├── FileUploader（复用现有组件）
+  │   └── UploadProgress
+  ├── SubmitButton（复用 PrimaryButton，loading 状态）
+  └── ReportResult（条件渲染，提交成功后显示）
+      ├── RiskBadge（risk_level 对应颜色标签）
+      └── ScoreDisplay
+
+### 组件接口
+RiskBadge:
+  props: { level: "low"|"medium"|"high" }
+  states: low（绿色）/ medium（橙色）/ high（红色）
+
+### 关键交互状态机
+idle → uploading → submitted → success | error
+```
+
+##### Layer 3：ACM（验收标准矩阵，自动生成）
+
+ACM 是连接"需求层约定"和"可执行 Harness 测试"的结构化桥梁，解决三个问题：
 1. **消除歧义**：自然语言验收标准 → 机器可读的量化指标
 2. **追溯链**：每个验收标准 ↔ 每个测试函数，一一对应
 3. **版本兼容**：明确记录历史 AC 的继承和变更
 
 ```yaml
-# docs/specs/{feature}-v{N}-acceptance.yaml
+# spec/REQ-PROJECT-001/acceptance.yaml
 
-feature: risk-report           # 功能标识
-version: 1                     # Spec 版本号
-created_at: 2026-04-08         # 创建时间
-locked_at: 2026-04-09          # 卡点1a 确认时自动填充
-
-# ===== 核心验收标准 =====
-acceptance_criteria:
-  - id: AC-001                 # 全局唯一编号，跨版本不变
-    title: "营业执照字段识别准确率"
-    description: |
-      系统应能从营业执照图片中准确提取以下字段：
-      公司名称、注册号、成立日期。
-      准确率 = 正确提取数 / 总字段数。
-
-    # 量化标准（必须机器可验证）
-    acceptance_metric: "准确率 >= 95%"
-    measurement_unit: "percentage"
-    baseline: 95               # 数字化通过线，Harness 生成 assert 的依据
-
-    # 分类（用于 Harness 生成和 CI 调度）
-    type: accuracy             # accuracy / performance / functional / security
-    test_category: unit        # unit / integration / e2e
-    environment: standard      # standard / production-like
-    ci_enabled: true           # 是否在轻量 CI 中运行
-
-    # 优先级和依赖
-    priority: P0               # P0(必须) / P1(重要) / P2(次要)
-    depends_on: []             # 依赖其他 AC，如 ["AC-002"]
-
-    # 历史兼容性标记
-    source_version: 1          # 本 AC 首次出现在哪个版本
-    breaking_change: false     # 相对上一版本是否有破坏性变更
-
-    # Harness 映射（卡点1b 后填充）
-    test_file: ""              # 由规格层-B 生成后回填
-    test_function: ""          # 由规格层-B 生成后回填
-
-  - id: AC-002
-    title: "报告生成时间性能"
-    description: "完整风控报告从接收输入到返回 JSON 响应不超过 30 秒"
-    acceptance_metric: "响应时间 <= 30秒"
-    measurement_unit: "milliseconds"
-    baseline: 30000
-    type: performance
-    test_category: integration
-    environment: production-like   # 性能测试需要稳定环境
-    ci_enabled: false              # 不在轻量 CI 跑，仅 Staging 验收
-    priority: P0
-    depends_on: []
-    source_version: 1
-    breaking_change: false
-    test_file: ""
-    test_function: ""
-
-  - id: AC-003
-    title: "输出格式标准化"
-    description: |
-      生成的风控报告（JSON）必须符合 risk-report-schema-v1.json。
-      包含字段：risk_level (HIGH/MEDIUM/LOW)、key_risks (array)、
-      recommendation (APPROVE/REJECT/MANUAL_REVIEW)
-    acceptance_metric: "Schema 验证通过率 100%"
-    measurement_unit: "percentage"
-    baseline: 100
-    type: functional
-    test_category: integration
-    environment: standard
-    ci_enabled: true
-    priority: P0
-    depends_on: []
-    source_version: 1
-    breaking_change: false
-    test_file: ""
-    test_function: ""
-
-  - id: AC-004
-    title: "错误处理与降级"
-    description: |
-      OCR 识别失败或 LLM 分析异常时，返回有意义的错误信息。
-      允许的失败场景：图片模糊(OCR_QUALITY_LOW)、
-      无法识别(IDENTITY_EXTRACTION_FAILED)
-    acceptance_metric: "所有预定义错误场景有正确的错误响应"
-    measurement_unit: "count"
-    baseline: 0    # 0 个未覆盖的错误场景
-    type: functional
-    test_category: unit
-    environment: standard
-    ci_enabled: true
-    priority: P1
-    depends_on: ["AC-001"]
-    source_version: 1
-    breaking_change: false
-    test_file: ""
-    test_function: ""
-
-# ===== 历史兼容性声明 =====
-compatibility:
-  inherits_from: []            # 本版本基于哪些历史版本（新功能为空）
-  breaking_changes: []         # 本版本的破坏性变更列表
-  impact_analysis: |           # AI 生成，人在卡点1a 确认时审核
-    本次是新功能首次发布，无历史版本约束。
-    后续 v2 需确保：AC-001 准确率不降低，AC-002 响应时间不增加。
-  cross_feature_dependencies: []   # 与其他功能的交叉依赖
-
-# ===== 元数据 =====
-metadata:
-  owner: "@daxin"
-  business_context: "租赁风控"
-  customer_impact: high
-  compliance_requirements: ["数据隐私", "审计日志"]
-  tags: ["风险管理", "OCR", "LLM集成"]
-```
-
-#### ACM 版本演进示例
-
-当需求变更时（如 v2 改进性能要求并新增多语言支持）：
-
-```yaml
-# docs/specs/risk-report-v2-acceptance.yaml
-feature: risk-report
-version: 2
+req_id: REQ-PROJECT-001
+spec_version: 1
+created_at: 2026-04-08
+locked_at: ""          # 卡点1a 确认时自动填充
 
 acceptance_criteria:
-  # --- 继承自 v1（不变）---
   - id: AC-001
-    # ... 同 v1 ...
+    priority: P0       # P0（必须）/ P1（重要）/ P2（次要）
+    title: "有效输入返回风控报告"
+    given:
+      - "营业执照图片有效（jpg/png，< 5MB）"
+      - "credit_report 包含 applicant_id 和 credit_score"
+    input:
+      license_image: "valid.jpg"
+      credit_report: { applicant_id: "u001", credit_score: 720 }
+    expected:
+      status: 200
+      body:
+        risk_level: { enum: ["low", "medium", "high"] }
+        score: { type: integer, min: 0, max: 100 }
+    test_type: integration
+    ci_enabled: true
     source_version: 1
     breaking_change: false
+    test_file: ""      # 由规格层-B 生成后回填
+    test_function: ""
 
-  # --- 继承自 v1（变更）---
   - id: AC-002
-    title: "报告生成时间性能"
-    acceptance_metric: "响应时间 <= 20秒"   # 从 30s 改为 20s
-    baseline: 20000
+    priority: P0
+    title: "缺失 credit_score 返回 422"
+    input:
+      license_image: "valid.jpg"
+      credit_report: { applicant_id: "u001" }
+    expected:
+      status: 422
+      body:
+        error_code: "MISSING_CREDIT_SCORE"
+    test_type: integration
+    ci_enabled: true
     source_version: 1
-    breaking_change: true   # 标记为 breaking
-
-  # --- v2 新增 ---
-  - id: AC-005
-    title: "多语言报告支持"
-    description: "输出报告支持中英文切换"
-    source_version: 2
     breaking_change: false
+    test_file: ""
+    test_function: ""
 
 compatibility:
-  inherits_from: [1]
-  breaking_changes:
-    - ac_id: AC-002
-      description: "响应时间从 30s 降至 20s"
-      mitigation: "已评估，客户网络环境支持"
+  inherits_from: []       # 本版本基于哪些历史版本（新功能为空）
+  breaking_changes: []
+  impact_analysis: |
+    本次为新功能首次发布，无历史版本约束。
+  cross_feature_dependencies: []
 ```
 
-#### Spec 写作阶段的历史上下文注入
+**ACM 版本演进**：当需求变更时（如 v2 收紧性能要求），新版 ACM 继承历史 AC，变更的 AC 标记 `breaking_change: true`，由 ACM 兼容性检查脚本（工具9）自动生成 impact analysis 注入卡点1a 卡片。
 
-为了让写 Spec 的人在飞书草稿阶段就能看到历史约束，飞书文档模板会自动注入只读参考：
+##### Layer 4：Tasks（自动生成，按依赖排序）
+
+```markdown
+## 实现任务
+
+### Task-1：数据模型
+- 新建 risk_reports 表 migration（见 design.md 数据模型）
+- 依赖：无
+
+### Task-2：接口实现
+- 在 risk-assessment-service 实现 POST /api/v1/risk-report
+- 调用 license-parser 模块和 CreditDataGateway
+- 对应 AC：AC-001
+- 依赖：Task-1
+
+### Task-3：错误处理
+- 实现输入校验和错误返回
+- 对应 AC：AC-002
+- 依赖：Task-2
+
+### Task-4：前端页面（需要UI = true）
+- 实现 RiskReportPage（见 design-ui.md）
+- 基于设计系统快照中现有组件
+- 对应 AC：AC-UI-001
+- 依赖：Task-2
+```
+
+#### Spec 生成流程（人工桥接 → 半自动化演进）
+
+**Phase 1：人工桥接（当前实施）**
 
 ```
-─── 历史约束参考（只读，由系统从 GitHub 拉取注入）───────
-本功能可能影响以下历史验收标准：
-• AC-003（v1）：输出格式必须兼容 risk-report-schema-v1.json
-• AC-007（v2）：API 响应时间 <= 200ms
-注意：以上约束已在 harness 中有覆盖，新 Spec 不得退化。
-──────────────────────────────────────────────────────
+1. Coordinator 通知: "REQ-XXX-001 需求审查通过，可进入规格层"
+2. 开发者:
+   → git checkout -b spec/REQ-XXX-001
+   → 从飞书读取需求文档 + UI 原型（如有）
+   → 从 GitHub 读取 ARCHITECTURE.yaml + ACM 注册表 + 设计系统快照
+   → 使用 Claude Code / AI 工具生成四层 Spec 到 spec/REQ-XXX-001/ 目录
+   → git push → 创建 PR
+3. 开发者触发: Bitable 状态 → SPEC_DRAFTING → 触发卡点1a 飞书卡片
+```
+
+**Phase 2：半自动化（后续实施）**
+
+```
+1. 人: @Coordinator 创建Spec REQ-XXX-001
+2. Coordinator:
+   → 飞书 API: 读取需求文档 + UI 原型内容
+   → GitHub API: 读取 ARCHITECTURE.yaml + ACM 注册表 + 设计系统快照
+   → 调用 Spec 转化 Agent: 需求文档 + 项目上下文 → 四层 Spec
+   → GitHub API: 创建分支 spec/REQ-XXX-001，commit 四层 Spec 文件，创建 PR
+   → 导出设计系统快照到 GitHub（specs/design-system-snapshot.yaml）
+   → Bitable: 状态 → SPEC_DRAFTING，记录 PR 链接
+   → 触发卡点1a 飞书卡片
 ```
 
 #### Spec 版本管理规则
@@ -726,12 +805,12 @@ compatibility:
 | 性能改进 | 新 Spec 版本，ACM 中标记 `breaking_change: true` |
 
 **⚡ 卡点1a（方案门）**：飞书发送确认卡片，包含：
-- 结构化 Spec 全文预览
-- ACM 验收标准清单
-- 兼容性检查报告（与历史 ACM 的冲突点）
+- Design 层全文预览（接口契约 + 数据模型 + 架构接合点）
+- ACM 验收标准清单（优先级 + given/expected 格式）
+- 兼容性检查报告（与历史 ACM 的冲突点，AI 自动生成）
 - 按钮：[确认提交] [返回修改]
 
-确认后，Spec + ACM + API 契约自动提交到 GitHub `docs/specs/`，打 Git tag，进入版本控制。
+确认后，四层 Spec 自动提交 GitHub，ACM 注册表新增条目，设计系统快照导出，Bitable 状态进入 SPEC_LOCKED，自动触发 Harness 生成。
 
 ---
 
@@ -846,6 +925,21 @@ class TestAPIOutput:
 - 按钮：[确认 Harness] [打回重生成]
 
 确认后，harness/tests/ 目录状态冻结。此后进入生成层，AI **严禁修改** harness/tests/。
+
+#### 视觉回归测试（UI 层的 Harness 等价机制）
+
+当 `需要UI = true` 时，Harness 生成阶段同时生成视觉回归测试（与功能性 Harness 共同构成完整测试覆盖）：
+
+**机制**：基于 Playwright 的截图比对
+- 对所有 design-ui.md 中定义的关键视图生成初始截图基线（首次 CI 通过时建立）
+- 后续每次 Impl PR 触发视觉回归测试：当前渲染结果 vs 截图基线
+- 像素差异超过阈值 → PR 自动阻断，防止 Coding Agent 在实现时悄悄改动组件样式
+
+**覆盖范围**：
+- 所有 design-ui.md 中定义的关键视图（含 idle / loading / error / success 状态）
+- 仅 P0 视觉 AC 对应的测试作为 Impl PR 合并门槛（与功能性 Harness 同等权重）
+
+**与功能性 Harness 的关系**：视觉回归测试是 UI 层的"Harness"，两者在卡点1b 的覆盖率矩阵中分别列出；`需要UI = false` 时不生成，CI 流程不受影响。
 
 ---
 
@@ -1497,6 +1591,34 @@ Spec 产物：
 **输出**：GitHub API 操作结果。
 **复杂度**：低，封装 GitHub REST API 调用。
 **说明**：半自动化阶段的关键工具，使 OpenClaw 能直接触发 GitHub 操作。
+
+### 工具14：设计系统文档管理器（v1.4 新增）
+**用途**：管理飞书侧项目设计系统文档的生命周期：创建初始文档、append 新设计决策、导出快照到 GitHub。
+**输入**：项目名称 + 操作类型（create / append / export）+ 内容（Token / 组件记录 / UI 决策日志）。
+**输出**：飞书文档更新结果 + GitHub 快照文件（`specs/design-system-snapshot.yaml`，export 时）。
+**复杂度**：中，飞书 Docx API + GitHub API + append-only 写入逻辑。
+**触发时机**：UI 设计阶段确认时（append）；卡点1a 通过时（export 到 GitHub）。
+
+### 工具15：高保真 UI 原型生成 Agent（v1.4 新增）
+**用途**：APPROVED 后（需要UI = true 时）生成可在浏览器运行的高保真前端原型，供产品/设计负责人做视觉/交互全貌确认。
+**输入**：需求文档 7 字段 + 低保真线框图链接 + 设计系统文档（Coordinator 注入）。
+**输出**：可运行的前端组件代码（覆盖所有关键状态：空态/加载/错误/成功）+ 设计决策说明。
+**复杂度**：高，核心是 AI 生成前端原型代码 + 与设计系统的视觉一致性保障。
+**注意**：属于能力层，可替换（v0 / Figma Make / design.md / UIUX ProMax 等）。Workflow Service 不感知具体工具。
+
+### 工具16：ACM 注册表维护服务（v1.4 新增）
+**用途**：维护 GitHub 侧 ACM 注册表（`specs/registry/consolidated.yaml`）：新条目追加、状态更新（finalized）、兼容性查询接口。
+**输入**：操作类型（append / finalize / query）+ 新 ACM 文件路径 / REQ ID。
+**输出**：更新后的 consolidated.yaml + 兼容性报告（query 时）。
+**复杂度**：中，YAML 解析 + append-only 写入 + 兼容性比对逻辑（与工具9 ACM 兼容性检查脚本合并或复用）。
+**触发时机**：卡点1a 通过时（append）；卡点1b 通过时（finalize）。
+
+### 工具17：视觉回归测试生成器（v1.4 新增）
+**用途**：基于 design-ui.md 自动生成 Playwright 视觉回归测试代码（UI 层的 Harness 等价机制）。
+**输入**：design-ui.md（组件树 + 关键视图定义）+ 高保真原型代码（作为截图基线来源）。
+**输出**：`harness/tests/REQ-{PROJECT}-{NNN}/visual/` 下的 Playwright 测试脚本 + 初始截图基线。
+**复杂度**：中，Playwright 脚本生成 + 基线截图捕获 + CI 集成配置。
+**触发时机**：Harness 生成阶段（需要UI = true 时与功能性 Harness 同步生成）。
 
 ---
 
