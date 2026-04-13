@@ -316,7 +316,7 @@ class RequirementWorkflowV12Test(unittest.TestCase):
             self.assertEqual(receive_id_type, "user_id")
             self.assertIn(f"开始需求构造 {response.req_id}", text)
 
-    def test_create_requirement_card_callback_returns_result_card(self) -> None:
+    def test_create_requirement_card_callback_returns_fast_success_toast(self) -> None:
         class FakeGateway:
             def __init__(self) -> None:
                 self.sent_cards = []
@@ -372,8 +372,7 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
             self.assertEqual(status, 200)
             self.assertEqual(payload["toast"]["type"], "success")
-            self.assertIn("card", payload)
-            self.assertEqual(payload["card"]["type"], "raw")
+            self.assertNotIn("card", payload)
 
     def test_openclaw_author_turn_callback_rejects_missing_signature(self) -> None:
         class FakeGateway:

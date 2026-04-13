@@ -293,14 +293,20 @@ class CoordinatorRuntimeApp:
             f"需求文档入口已准备，后续由需求构造 Agent 持续撰写\n"
             f"请私聊需求构造 Agent，并发送：\n开始需求构造 {req_id}"
         )
-        if requirement and requirement.document_url:
-            creation_text += f"\n需求文档：{requirement.document_url}"
-        bitable_url = self.gateway.bitable_url()
-        if bitable_url:
-            creation_text += f"\n多维表格：{bitable_url}"
-        messages: list[OutboundMessage | OutboundCard] = [
-            OutboundMessage(receive_id=request.creation_chat_id, text=creation_text)
-        ]
+        messages: list[OutboundMessage | OutboundCard] = []
+        if requirement:
+            messages.append(
+                OutboundCard(
+                    receive_id=request.creation_chat_id,
+                    receive_id_type="chat_id",
+                    card=self._build_requirement_created_result_card(requirement, syncing=False),
+                )
+            )
+        else:
+            bitable_url = self.gateway.bitable_url()
+            if bitable_url:
+                creation_text += f"\n多维表格：{bitable_url}"
+            messages.append(OutboundMessage(receive_id=request.creation_chat_id, text=creation_text))
         if requirement and self._is_feishu_chat_id(requirement.project_group_id):
             messages.append(
                 OutboundCard(
@@ -317,7 +323,7 @@ class CoordinatorRuntimeApp:
             except Exception as exc:
                 LOGGER.warning(
                     "Failed to send post-create outbound req_id=%s receive_id=%s kind=%s: %s",
-                    response.req_id,
+                    req_id,
                     outbound.receive_id,
                     "card" if isinstance(outbound, OutboundCard) else "text",
                     exc,
@@ -765,15 +771,7 @@ class CoordinatorRuntimeApp:
                 args=(request, req_id),
                 daemon=True,
             ).start()
-            response_payload: dict[str, object] = {
-                "toast": {"type": "success", "content": "需求已受理，正在同步文档、表格和项目群。"}
-            }
-            if created_requirement is not None:
-                response_payload["card"] = {
-                    "type": "raw",
-                    "data": self._build_requirement_created_result_card(created_requirement, syncing=True),
-                }
-            return 200, response_payload
+            return 200, {"toast": {"type": "success", "content": "需求已受理，正在同步文档、表格和项目群。"}}
 
         if action_name == "send_author_start":
             req_id = value.get("req_id", "")
@@ -1252,17 +1250,15 @@ class CoordinatorRuntimeApp:
                         },
                     },
                     {
-                        "tag": "note",
-                        "elements": [
-                            {
-                                "tag": "plain_text",
-                                "content": (
-                                    "项目群和需求构造接手卡片正在同步发送，请稍候查看项目群消息。"
-                                    if syncing
-                                    else "项目群和需求构造接手卡片已同步发送；接下来请在项目群里继续推进需求构造。"
-                                ),
-                            }
-                        ],
+                        "tag": "div",
+                        "text": {
+                            "tag": "plain_text",
+                            "content": (
+                                "项目群和需求构造接手卡片正在同步发送，请稍候查看项目群消息。"
+                                if syncing
+                                else "项目群和需求构造接手卡片已同步发送；接下来请在项目群里继续推进需求构造。"
+                            ),
+                        },
                     },
                     self._build_button_columns(actions) if actions else {"tag": "hr"},
                 ],
@@ -1382,16 +1378,14 @@ class CoordinatorRuntimeApp:
                 },
                 self._build_button_columns(primary_actions),
                 {
-                    "tag": "note",
-                    "elements": [
-                        {
-                            "tag": "plain_text",
-                            "content": (
-                                f"如果自动私发失败，请手动私聊 {self.settings.openclaw_author_agent_name}，"
-                                "并发送完整启动消息。"
-                            ),
-                        }
-                    ],
+                    "tag": "div",
+                    "text": {
+                        "tag": "plain_text",
+                        "content": (
+                            f"如果自动私发失败，请手动私聊 {self.settings.openclaw_author_agent_name}，"
+                            "并发送完整启动消息。"
+                        ),
+                    },
                 },
             ]
         )
