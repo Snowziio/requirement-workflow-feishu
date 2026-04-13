@@ -103,8 +103,9 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
     def test_formal_review_is_not_skipped_after_human_confirmation(self) -> None:
         requirement = self.requirement
-        for index, field in enumerate(["问题描述", "使用场景", "输入", "输出", "边界", "验收标准", "非功能要求"]):
-            next_field = ["问题描述", "使用场景", "输入", "输出", "边界", "验收标准", "非功能要求"][index + 1] if index < 6 else None
+        all_fields = ["问题描述", "使用场景", "输入", "输出", "边界", "验收标准", "非功能要求", "技术范围声明"]
+        for index, field in enumerate(all_fields):
+            next_field = all_fields[index + 1] if index < len(all_fields) - 1 else None
             requirement = self.service.handle_author_turn(
                 requirement,
                 AuthorTurnResult(
