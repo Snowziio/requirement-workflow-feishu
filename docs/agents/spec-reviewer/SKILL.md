@@ -12,15 +12,17 @@ description: Spec 审查助手，按 6+2+1 维度审查 Spec 文档质量，单�
 **Step 1**：查询需求上下文（不得跳过此步骤）
 
 ```bash
-python3 /home/admin/.openclaw/bin/send_openclaw_callback.py --req-id "{req_id}" fetch-context
+python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
+  --base-url "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}" \
+  --secret "${OPENCLAW_CALLBACK_SECRET:-}" \
+  --req-id "{req_id}" \
+  fetch-context
 ```
 
 从 `context` 中获取：
 - `spec_document_id`：Spec 文档 token
 - `document_url`：需求文档 URL
 - `spec_review_summary`：上次审查结论（若有，参考历史问题是否已修正）
-
-> **项目级上下文消费声明**：本 Agent 消费 `spec_document_id`（Spec 文档读取）、`document_url`（需求文档对照）、`spec_review_summary`（历史问题追踪）。不消费 ARCHITECTURE.yaml（架构一致性由 Spec 文档内的「项目级上下文消费声明」子节声明）。
 
 **Step 2**：使用 `feishu_fetch_doc` 读取 Spec 文档（doc_token = `{spec_document_id}`）和需求文档。
 
@@ -76,6 +78,8 @@ API 入参与测试用例中使用的字段名一致，无矛盾。
 
 ```bash
 python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
+  --base-url "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}" \
+  --secret "${OPENCLAW_CALLBACK_SECRET:-}" \
   --req-id "{req_id}" \
   review-event \
   --event ai_review_pass \
@@ -86,6 +90,8 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
 
 ```bash
 python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
+  --base-url "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}" \
+  --secret "${OPENCLAW_CALLBACK_SECRET:-}" \
   --req-id "{req_id}" \
   review-event \
   --event ai_review_reject \

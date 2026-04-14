@@ -13,6 +13,8 @@ description: Spec 撰写助手，按 9 节模板撰写技术规格文档，完�
 
 ```bash
 python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
+  --base-url "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}" \
+  --secret "${OPENCLAW_CALLBACK_SECRET:-}" \
   --req-id "{req_id}" \
   spec-start \
   --summary "开始 Spec 撰写"
@@ -25,11 +27,9 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
 - `spec_document_url`：Spec 文档 URL
 - `requirement_document_url`：需求文档 URL（用于读取 8 字段）
 
-> **项目级上下文消费声明**：本 Agent 消费 `spec_document_id`（Spec 文档写入）、`requirement_document_url`（需求 8 字段来源）。ARCHITECTURE.yaml 通过 fetch-context 返回的 `architecture_yaml_url` 获取，用于「架构设计」节的项目级上下文消费声明。
+**Step 2**：使用 `feishu_fetch_doc` 读取需求文档（通过 `requirement_document_url` 中的 token），提取 8 个字段内容。
 
-**Step 2**：使用 `feishu_fetch_doc` 读取需求文档（doc_token = `{requirement_document_url 中的 token}`），提取 8 个字段内容。
-
-**Step 3**：逐节撰写 Spec（每节完成后 `feishu_update_doc` 写入完整文档）：
+**Step 3**：逐节撰写 Spec（每节完成后 `feishu_update_doc` 写入完整文档，doc_token = `spec_document_id`）：
 
 按以下 9 节顺序逐节填写：
 1. 背景与目标（对应需求：问题描述 + 使用场景）
@@ -44,7 +44,7 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
 
 ### 架构设计节（第 8 节）必须包含以下 4 个子节：
 
-**8.1 顶层架构背景**：参考 ARCHITECTURE.yaml，说明本需求涉及哪些已有服务/模块，变更属于新增/扩展/改造。
+**8.1 顶层架构背景**：说明本需求涉及哪些已有服务/模块，变更属于新增/扩展/改造。
 
 **8.2 项目级上下文消费声明**（必填，不得为空）：
 
@@ -61,6 +61,8 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
 
 ```bash
 python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
+  --base-url "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}" \
+  --secret "${OPENCLAW_CALLBACK_SECRET:-}" \
   --req-id "{req_id}" \
   spec-submit \
   --summary "Spec 初稿完成，9节均已填写" \
