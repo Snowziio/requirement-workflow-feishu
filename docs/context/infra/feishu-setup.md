@@ -30,23 +30,23 @@ checkpoint-handler 使用的飞书应用（可复用同一应用）：
 
 ### Agent 挂载清单
 
-| OpenClaw Agent | 当前使用角色 | 挂载的 Skills |
-|---|---|---|
-| ai-ops-router | 需求协调器（coordinator） | requirement-coordinator Skill（路由逻辑） |
-| ai-founder-brief | 需求撰写 Agent（author） | requirement-writer Skill |
-| ai-meeting-closeout | 设计审查 Agent（reviewer） | requirement-reviewer Skill |
+| OpenClaw Agent      | 当前使用角色               | 挂载的 Skills                          |
+| ------------------- | -------------------- | ----------------------------------- |
+| ai-ops-router       | 需求协调器（coordinator）   | requirement-coordinator Skill（路由逻辑） |
+| ai-founder-brief    | 需求撰写 Agent（author）   | requirement-writer Skill            |
+| ai-meeting-closeout | 设计审查 Agent（reviewer） | requirement-reviewer Skill          |
 
 ### Skills 安装清单
 
-| Skill 名 | 类型 | 用途 |
-|---|---|---|
-| feishu-doc | 官方 | 读写飞书文档，Markdown ↔ 飞书格式转换 |
-| feishu-bitable-creator | 官方 | 创建和管理 Bitable 表 |
-| feishu-automation | 官方 | 文档模板操作、变更通知 |
-| requirement-writer | 自定义 | 需求模板引导、完整度检查 |
-| requirement-reviewer | 自定义 | 五维度需求审查 |
-| ui-design-bridge | 自定义 | UI 设计工具桥接（低保真线框图） |
-| github-bridge | 自定义 | GitHub API 封装 |
+| Skill 名                | 类型  | 用途                       |
+| ---------------------- | --- | ------------------------ |
+| feishu-doc             | 官方  | 读写飞书文档，Markdown ↔ 飞书格式转换 |
+| feishu-bitable-creator | 官方  | 创建和管理 Bitable 表          |
+| feishu-automation      | 官方  | 文档模板操作、变更通知              |
+| requirement-writer     | 自定义 | 需求模板引导、完整度检查             |
+| requirement-reviewer   | 自定义 | 五维度需求审查                  |
+| ui-design-bridge       | 自定义 | UI 设计工具桥接（低保真线框图）        |
+| github-bridge          | 自定义 | GitHub API 封装            |
 
 ---
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 
-from .compiler import RequirementDocumentCompiler
 from .models import DISCUSSION_FIELDS, DiscussionTurn, HumanReviewResult, Requirement, ReviewResult, WorkflowStatus, utc_now
 from .project_config import OnboardingState, ProjectConfig
 from .protocols import (
@@ -37,19 +36,10 @@ REVIEW_EVENT_ALIASES = {
 }
 
 
-@dataclass
-class AuthorTurnResult:
-    updates: dict[str, str]
-    next_question: str
-    current_field_completed: bool = True
-    next_field: str | None = None
-
-
 class CoordinatorService:
     """Independent backend coordinator for Feishu events and workflow state."""
 
-    def __init__(self, compiler: RequirementDocumentCompiler | None = None) -> None:
-        self.compiler = compiler or RequirementDocumentCompiler()
+    def __init__(self) -> None:
         self.project_groups: dict[str, str] = {}
         self.requirements: dict[str, Requirement] = {}
         self.active_req_by_user: dict[str, str] = {}
@@ -284,8 +274,6 @@ class CoordinatorService:
         requirement.human_confirmed = False
         requirement.latest_review_summary = ""
         requirement.latest_question = "请先澄清问题本质，我们会逐轮完成需求构造。"
-        requirement.document = self.compiler.create_document(requirement)
-        requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
         LOGGER.info("Initialized requirement req_id=%s status=%s phase=%s", requirement.req_id, requirement.status.value, requirement.current_phase)
         return requirement
@@ -295,45 +283,6 @@ class CoordinatorService:
         requirement.current_role_label = "需求构造Agent"
         requirement.touch()
         LOGGER.info("Prepared author ownership req_id=%s status=%s", requirement.req_id, requirement.status.value)
-        return requirement
-
-    def handle_author_turn(self, requirement: Requirement, turn: AuthorTurnResult) -> Requirement:
-        requirement.current_round += 1
-        requirement.document = self.compiler.rewrite_sections(requirement, turn.updates)
-        requirement.latest_writeback_at = requirement.document.updated_at
-        requirement.discussion_history.append(
-            DiscussionTurn(
-                round_number=requirement.current_round,
-                focused_field=requirement.current_discussion_field,
-                user_input=turn.updates.get(requirement.current_discussion_field, ""),
-                normalized_updates=turn.updates,
-                next_question=turn.next_question,
-            )
-        )
-
-        for field in turn.updates:
-            if field not in requirement.completed_fields:
-                requirement.completed_fields.append(field)
-
-        requirement.pending_fields = [field for field in DISCUSSION_FIELDS if field not in requirement.completed_fields]
-        requirement.current_discussion_field = turn.next_field or (
-            requirement.pending_fields[0] if requirement.pending_fields else DISCUSSION_FIELDS[-1]
-        )
-        requirement.latest_question = turn.next_question
-        requirement.current_phase = "需求构造"
-        requirement.current_owner = "author"
-        requirement.current_role_label = "需求构造Agent"
-        requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
-        requirement.touch()
-        LOGGER.info(
-            "Handled author turn req_id=%s round=%s status=%s next_field=%s completed=%s pending=%s",
-            requirement.req_id,
-            requirement.current_round,
-            requirement.status.value,
-            requirement.current_discussion_field,
-            len(requirement.completed_fields),
-            len(requirement.pending_fields),
-        )
         return requirement
 
     def handle_review_result(self, requirement: Requirement, result: ReviewResult) -> Requirement:
@@ -369,7 +318,6 @@ class CoordinatorService:
             requirement.current_role_label = "需求构造Agent"
             requirement.latest_question = result.next_focus or requirement.latest_question
 
-        requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
         return requirement
 
@@ -561,7 +509,6 @@ class CoordinatorService:
             requirement.ai_ready = False
             requirement.latest_question = "请继续补充或修正需求内容，然后我们会再进行一轮 AI review。"
 
-        requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
         LOGGER.info(
             "Handled human confirmation req_id=%s approved=%s status=%s phase=%s",
@@ -586,7 +533,6 @@ class CoordinatorService:
         requirement.current_owner = "coordinator-service"
         requirement.current_role_label = "需求协调服务"
         requirement.latest_question = f"需求已批准，建议后续分支名为 spec/{requirement.req_id}。"
-        requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
         LOGGER.info("Approved requirement req_id=%s status=%s", requirement.req_id, requirement.status.value)
         return requirement
@@ -604,7 +550,6 @@ class CoordinatorService:
         requirement.ai_ready = False
         requirement.human_confirmed = False
         requirement.latest_question = "正式审查未通过，请根据审查意见继续补充，然后再发起下一轮 AI review。"
-        requirement.document = self.compiler.refresh_derived_sections(requirement, requirement.document)
         requirement.touch()
         LOGGER.info(
             "Requested changes after review req_id=%s status=%s summary=%s",

@@ -1,12 +1,10 @@
-from .compiler import RequirementDocumentCompiler
-from .coordinator_service import AuthorTurnResult, CoordinatorService
+from .coordinator_service import CoordinatorService
 from .config import Settings, load_settings
 from .models import (
     DISCUSSION_FIELDS,
     DiscussionTurn,
     HumanReviewResult,
     Requirement,
-    RequirementDocument,
     ReviewFinding,
     ReviewResult,
     WorkflowStatus,
@@ -30,7 +28,6 @@ except Exception:  # pragma: no cover - allow core imports before runtime deps a
     create_runtime_app = None
 
 __all__ = [
-    "AuthorTurnResult",
     "AgentAuthorEventPayload",
     "AgentRequirementContextQuery",
     "AgentReviewEventPayload",
@@ -45,8 +42,6 @@ __all__ = [
     "HumanReviewResult",
     "JsonStateStore",
     "Requirement",
-    "RequirementDocument",
-    "RequirementDocumentCompiler",
     "ReviewFinding",
     "ReviewResult",
     "Settings",

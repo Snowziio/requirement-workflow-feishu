@@ -11,7 +11,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from requirement_workflow_v12 import (
     AgentAuthorEventPayload,
-    AuthorTurnResult,
     CoordinatorService,
     CreationRequest,
     ReviewResult,
@@ -39,90 +38,75 @@ class RequirementWorkflowV12Test(unittest.TestCase):
         assert self.requirement is not None
         self.service.handoff_to_author(self.requirement)
 
-    def test_discussion_history_is_written_to_document(self) -> None:
-        requirement = self.service.handle_author_turn(
-            self.requirement,
-            AuthorTurnResult(
-                updates={"问题描述": "目前创建完需求后，后续多轮讨论产物不会沉淀到正式文档，导致 review 难以追踪。"},
-                next_question="请补充使用场景。",
-                next_field="使用场景",
-            ),
-        )
-        requirement = self.service.handle_review_result(
-            requirement,
-            ReviewResult(
-                ready_for_human_confirmation=False,
+    def test_discussion_history_is_recorded_in_state(self) -> None:
+        """Author Agent 写文档；Coordinator 只记录 completed_fields 状态。"""
+        self.service.submit_author_event_payload(
+            AgentAuthorEventPayload(
+                req_id=self.req_id,
+                event="author_submit",
                 summary="问题描述已明确，但仍需补充使用场景。",
-                next_focus="请补充谁会在什么情况下使用它。",
-            ),
+                completed_fields=["问题描述"],
+                iteration_round=1,
+            )
         )
-
-        self.assertEqual(requirement.current_round, 1)
-        self.assertEqual(len(requirement.discussion_history), 1)
-        self.assertIn("第1轮", requirement.document.sections["多轮讨论纪要"])
-        self.assertIn("问题描述", requirement.document.sections["多轮讨论纪要"])
-        self.assertIn("问题描述已明确", requirement.document.sections["AI Review结论"])
+        req = self.service.get_requirement(self.req_id)
+        assert req is not None
+        self.assertEqual(req.current_round, 1)
+        self.assertIn("问题描述", req.completed_fields)
+        self.assertNotIn("问题描述", req.pending_fields)
 
     def test_human_review_history_records_dual_review(self) -> None:
-        requirement = self.requirement
-        fields = {
-            "问题描述": "需求创建后，需要把多轮讨论沉淀为正式需求文档，并让后续评审可追踪。",
-            "使用场景": "产品经理在飞书私聊中逐轮回答 author agent 的问题，协调服务持续写回正式文档。",
-            "输入": "输入包括需求简述、每轮用户补充、历史 review 结论和当前文档草稿。",
-            "输出": "输出包括结构化需求文档、AI review 结论、人工 review 决策和最终批准状态。",
-            "边界": "本次不包含规格层转化、不做 GitHub PR 自动生成，也不覆盖部署流水线。",
-            "验收标准": "系统必须保留每轮讨论摘要；AI review 必须给出明确结论；人工确认通过后状态应进入 FINAL_REVIEW。",
-            "非功能要求": "单轮状态写回应保持幂等，服务重启后仍可恢复会话状态。",
-        }
-        ordered_fields = list(fields.items())
-        for index, (field, content) in enumerate(ordered_fields):
-            remaining_fields = [name for name, _ in ordered_fields[index + 1 :]]
-            requirement = self.service.handle_author_turn(
-                requirement,
-                AuthorTurnResult(
-                    updates={field: content},
-                    next_question="done" if not remaining_fields else f"请补充{remaining_fields[0]}。",
-                    next_field=remaining_fields[0] if remaining_fields else None,
-                ),
+        from requirement_workflow_v12.protocols import AgentReviewEventPayload
+        # Author submits → AI_REVIEWING
+        self.service.submit_author_event_payload(
+            AgentAuthorEventPayload(
+                req_id=self.req_id,
+                event="author_submit",
+                summary="全部字段已完成。",
+                completed_fields=["问题描述", "使用场景", "输入", "输出", "边界", "验收标准", "非功能要求", "技术范围声明"],
+                iteration_round=1,
             )
-            requirement = self.service.handle_review_result(
-                requirement,
-                ReviewResult(
-                    ready_for_human_confirmation=not remaining_fields,
-                    summary="当前草稿可继续推进。" if remaining_fields else "AI review 通过，可以进入人工确认。",
-                    next_focus=None if not remaining_fields else f"请补充{remaining_fields[0]}。",
-                ),
+        )
+        # Reviewer passes → HUMAN_CONFIRM
+        self.service.submit_review_event_payload(
+            AgentReviewEventPayload(
+                req_id=self.req_id,
+                event="ai_review_pass",
+                review_summary="AI review 通过，可以进入人工确认。",
             )
-
+        )
+        requirement = self.service.get_requirement(self.req_id)
+        assert requirement is not None
         self.assertEqual(requirement.status, WorkflowStatus.HUMAN_CONFIRM)
 
         requirement = self.service.handle_human_confirmation(requirement, approved=True)
         self.assertEqual(requirement.status, WorkflowStatus.FINAL_REVIEW)
         self.assertEqual(len(requirement.human_review_history), 1)
-        self.assertIn("人工确认通过", requirement.document.sections["人工Review结论"])
+        self.assertTrue(len(requirement.human_review_history) > 0)
+        self.assertTrue(requirement.human_review_history[-1].approved)
 
     def test_formal_review_is_not_skipped_after_human_confirmation(self) -> None:
-        requirement = self.requirement
-        all_fields = ["问题描述", "使用场景", "输入", "输出", "边界", "验收标准", "非功能要求", "技术范围声明"]
-        for index, field in enumerate(all_fields):
-            next_field = all_fields[index + 1] if index < len(all_fields) - 1 else None
-            requirement = self.service.handle_author_turn(
-                requirement,
-                AuthorTurnResult(
-                    updates={field: f"{field} 的内容足够详细，满足当前轮需求构造与后续审查的基本要求。"},
-                    next_question="done" if next_field is None else f"请补充{next_field}",
-                    next_field=next_field,
-                ),
+        from requirement_workflow_v12.protocols import AgentReviewEventPayload
+        # Author submits → AI_REVIEWING
+        self.service.submit_author_event_payload(
+            AgentAuthorEventPayload(
+                req_id=self.req_id,
+                event="author_submit",
+                summary="全部字段已完成。",
+                completed_fields=["问题描述", "使用场景", "输入", "输出", "边界", "验收标准", "非功能要求", "技术范围声明"],
+                iteration_round=1,
             )
-            requirement = self.service.handle_review_result(
-                requirement,
-                ReviewResult(
-                    ready_for_human_confirmation=next_field is None,
-                    summary="继续完善。" if next_field else "AI review 通过，可以进入人工确认。",
-                    next_focus=None if next_field is None else f"请补充{next_field}",
-                ),
+        )
+        # Reviewer passes → HUMAN_CONFIRM
+        self.service.submit_review_event_payload(
+            AgentReviewEventPayload(
+                req_id=self.req_id,
+                event="ai_review_pass",
+                review_summary="AI review 通过，可以进入人工确认。",
             )
-
+        )
+        requirement = self.service.get_requirement(self.req_id)
+        assert requirement is not None
         requirement = self.service.handle_human_confirmation(requirement, approved=True)
         self.assertEqual(requirement.status, WorkflowStatus.FINAL_REVIEW)
 

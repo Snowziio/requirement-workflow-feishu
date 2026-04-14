@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
 from .config import Settings, load_settings
-from .coordinator_service import AuthorTurnResult, CoordinatorService
+from .coordinator_service import CoordinatorService
 from .feishu_gateway import FeishuGateway
 from .models import DISCUSSION_FIELDS, Requirement, ReviewFinding, ReviewResult, WorkflowStatus
 from .project_bootstrapper import ProjectBootstrapper
