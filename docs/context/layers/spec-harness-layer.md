@@ -5,6 +5,68 @@
 
 ---
 
+## 项目级上下文契约
+
+> 遵循 [infra/context-chain-principle.md](../infra/context-chain-principle.md) 规定的五问格式。
+
+### Spec 子层消费（来自需求层）
+
+| 上下文产物 | 来源 | 读取机制 |
+|-----------|------|---------|
+| 需求文档 8 字段 | 飞书文档（document_id） | feishu_fetch_doc(document_id) |
+| latest_review_summary | Coordinator state | fetch-context 接口 |
+| ARCHITECTURE.yaml | GitHub 仓库 | GitHub API |
+| tech_stack（技术栈） | Coordinator state（project_config） | fetch-context 接口 |
+| 设计系统快照 | GitHub 仓库（needs_ui = true 时） | GitHub API |
+| 高保真 UI 原型链接 | Bitable（needs_ui = true 时） | fetch-context 接口 |
+
+### Spec 子层产出（传递给 Harness 子层）
+
+| 上下文产物 | 内容 | 存储位置 | 更新策略 |
+|-----------|------|---------|---------|
+| design.md | 接口契约 + 数据模型 + 架构接合点 + 上下文消费声明 | GitHub PR（spec/REQ-xxx/） | SPEC_LOCKED 后不可修改 |
+| requirements.md | EARS 格式用户故事 | GitHub PR（spec/REQ-xxx/） | 同上 |
+| acceptance.yaml | 所有 AC 定义（含 source_req_id、source_field 引用） | GitHub PR（spec/REQ-xxx/） | 同上 |
+| tasks.md | 实现任务分解 | GitHub PR（spec/REQ-xxx/） | 同上 |
+| spec_document_url | Spec PR URL | Coordinator state | 卡点1a 确认时写入 |
+| spec_review_summary | Spec 审查结论 | Coordinator state | 每次 Spec 审查完成后更新 |
+
+### Harness 子层消费（来自 Spec 子层）
+
+| 上下文产物 | 来源 | 读取机制 |
+|-----------|------|---------|
+| acceptance.yaml（全部 AC） | GitHub 仓库 spec/ 目录 | GitHub API |
+| design.md（数据模型 + 接口定义） | GitHub 仓库 spec/ 目录 | GitHub API |
+| 设计系统快照（AC-UI 类） | GitHub 仓库（needs_ui = true 时） | GitHub API |
+
+### Harness 子层产出
+
+| 上下文产物 | 内容 | 存储位置 | 更新策略 |
+|-----------|------|---------|---------|
+| 测试用例代码 | 按 AC 组织的 Harness 测试 | GitHub PR（harness/tests/REQ-xxx/） | 卡点1b 确认后只读 |
+| 覆盖率矩阵 | AC 与测试文件的对应关系 | GitHub PR | 同上 |
+| ACM 注册表（finalized） | acceptance.yaml status 更新为 finalized | GitHub 仓库 | 卡点1b 确认时写入 |
+
+### 终止
+
+| 上下文产物 | 终止原因 |
+|-----------|---------|
+| discussion_history（需求讨论记录） | 需求层内部记录，Spec 只需要最终 8 字段 |
+| design.md 架构叙述（Harness 层） | Harness 只依赖接口契约，不依赖实现架构 |
+
+### 防漂移验证
+
+| Review 维度 | 验证内容 | 层次 | 类型 |
+|------------|---------|------|------|
+| 需求字段全覆盖 | Spec 各节与需求文档 8 字段一一对应，无遗漏 | Spec | 阻断 |
+| 上下文消费声明完整性 | design.md 中「项目级上下文消费声明」子节非空 | Spec | 阻断 |
+| API 具体性 | 入参/出参有字段名+类型，无模糊描述 | Spec | 阻断 |
+| AC 对齐 | 每条需求验收标准有对应测试用例 | Spec | 阻断 |
+| P0 AC 全覆盖 | 所有 P0 AC 在覆盖率矩阵中均有对应测试文件 | Harness | 阻断 |
+| 字段一致性 | 测试用例使用的字段名与 acceptance.yaml 定义一致 | Harness | 阻断 |
+
+---
+
 ## 一、规格层-A：四层 Spec 完整格式
 
 Spec 存储于 GitHub `spec/REQ-{PROJECT}-{NNN}/` 目录：

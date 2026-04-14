@@ -9,13 +9,19 @@ description: 需求审查助手，按 8 项维度审查需求文档质量，单�
 
 收到包含 `req_id` 和文档信息的审查请求时启动。
 
-**Step 1**：查询需求上下文
+**Step 1**：查询需求上下文（不得跳过此步骤）
 
 ```bash
 python3 /home/admin/.openclaw/bin/send_openclaw_callback.py --req-id "{req_id}" fetch-context
 ```
 
-从 `context` 中获取 `document_id`、`completed_fields`、`pending_fields`、`latest_review_summary`。
+从 `context` 中获取：
+- `document_id`：飞书文档 token
+- `completed_fields`：已完成字段列表（用于确认审查范围）
+- `pending_fields`：未完成字段列表（若非空，直接 reject 并注明哪些字段缺失）
+- `latest_review_summary`：上次审查结论（若有，参考历史问题是否已修正）
+
+> **项目级上下文消费声明**：本 Agent 消费 `document_id`（飞书文档读取）、`completed_fields`/`pending_fields`（字段完整性预检）、`latest_review_summary`（历史问题追踪）。不消费 ARCHITECTURE.yaml（需求审查不验证技术架构）。
 
 **Step 2**：使用 `feishu_fetch_doc` 读取文档内容（doc_token = `{document_id}`）
 

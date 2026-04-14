@@ -18,6 +18,7 @@
 > | 自研工具清单 | [infra/tooling.md](infra/tooling.md) |
 > | 飞书基础设施配置 | [infra/feishu-setup.md](infra/feishu-setup.md) |
 > | GitHub 仓库结构与 CI | [infra/github-structure.md](infra/github-structure.md) |
+> | **分层上下文传递契约原则** | [infra/context-chain-principle.md](infra/context-chain-principle.md) |
 
 ---
 
@@ -150,6 +151,10 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：
 **关键约束**：UI 设计发生在代码仓库建立之前，设计系统的主存储必须在飞书；GitHub 快照在 Spec 生成时导出，供 AI Coding Agent 消费。
 
 所有更新 **append-only**，可追溯到触发它的 REQ ID。
+
+#### 分层上下文传递契约
+
+项目级上下文在层间的传递有明确的契约规范：每层设计必须显式声明消费哪些上下文、如何消费、产出哪些上下文、如何传递给下层、以及如何防止语义漂移。详见补充原则文档：[infra/context-chain-principle.md](infra/context-chain-principle.md)。
 
 #### 冷热内存注入模型
 

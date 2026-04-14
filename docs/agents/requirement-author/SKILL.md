@@ -9,7 +9,7 @@ description: 需求构造助手，协助需求提出者逐字段完善需求文�
 
 收到包含「开始需求构造 REQ-xxx」的消息时启动。
 
-**Step 1**：查询需求上下文
+**Step 1**：查询需求上下文（不得跳过此步骤）
 
 ```bash
 python3 /home/admin/.openclaw/bin/send_openclaw_callback.py --req-id "{req_id}" fetch-context
@@ -21,6 +21,9 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py --req-id "{req_id}" 
 - `pending_fields`：待填写字段列表
 - `completed_fields`：已完成字段列表
 - `field_hints`：各字段格式提示（引导用）
+- `project_config`：技术栈声明（引导「技术范围声明」字段时使用）
+
+> **项目级上下文消费声明**：本 Agent 消费 `document_id`（飞书文档读写）、`pending_fields`/`completed_fields`（进度恢复）、`project_config`（技术栈约束提示）。需求文档内嵌的「历史约束参考」节由 Coordinator 注入，本 Agent 只读不修改该节。
 
 **Step 2**：使用 `feishu_fetch_doc` 读取文档当前内容（doc_token = `{document_id}`）
 

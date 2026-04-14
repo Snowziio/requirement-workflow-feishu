@@ -7,6 +7,47 @@
 
 ---
 
+## 项目级上下文契约
+
+> 遵循 [infra/context-chain-principle.md](../infra/context-chain-principle.md) 规定的五问格式。
+
+### 消费（来自上层 / 基础设施）
+
+| 上下文产物 | 来源 | 读取机制 |
+|-----------|------|---------|
+| project_config（技术栈声明） | Coordinator state | fetch-context 接口 |
+| ARCHITECTURE.yaml（现有模块列表） | GitHub 仓库 | GitHub API（技术范围声明节填写参考） |
+| ACM 注册表（历史验收约束） | GitHub 仓库 | Coordinator 在创建文档时自动注入「历史约束参考」节 |
+
+### 产出（传递给下层）
+
+| 上下文产物 | 内容 | 存储位置 | 更新策略 |
+|-----------|------|---------|---------|
+| 需求文档 8 字段 | 问题描述/使用场景/输入/输出/边界/验收标准/非功能要求/技术范围声明 | 飞书文档（document_id） | 每轮 onExit(DISCUSSING) section-rewrite |
+| req_id | 需求唯一编号 REQ-{PROJECT}-{NNN} | Coordinator state + Bitable | 创建时写入，不可变 |
+| needs_ui | 是否涉及 UI | Coordinator state + Bitable | 创建时写入，APPROVED 前可修改 |
+| latest_review_summary | 最近一次 AI 审查结论 | Coordinator state + Bitable | 每次审查完成后更新 |
+
+### 终止（不向下传递）
+
+| 上下文产物 | 终止原因 |
+|-----------|---------|
+| discussion_history（逐轮讨论记录） | 需求层内部记录，Spec 层只需要最终的 8 字段，不需要讨论过程 |
+| human_confirm_notes（人工确认意见） | 最终产物已经过 review，意见已被吸收进需求文档 |
+
+### 防漂移验证
+
+| Review 维度 | 验证内容 | 类型 |
+|------------|---------|------|
+| 字段完整性 | 8 个字段均非「待补充」且有实质内容 | 阻断 |
+| 输入结构化 | 输入包含字段名 + 类型，非纯自然语言 | 阻断 |
+| 输出结构化 | 输出包含字段名 + 类型，非「返回成功」等模糊描述 | 阻断 |
+| 验收标准可测试 | 每条 AC 为 Given/When/Then 格式，无模糊目标 | 阻断 |
+| 技术范围声明存在性 | 技术范围声明节非空，含具体模块/API/数据表信息 | 阻断 |
+| 内部一致性 | 输入字段与验收标准使用的字段名自洽，无矛盾 | 阻断 |
+
+---
+
 ## 一、状态机完整转移表
 
 ### 概念层（7 态）

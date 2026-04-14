@@ -33,6 +33,44 @@ SPEC_LOCKED  ──► 发卡点1a 通知卡到项目群
 
 ---
 
+## 项目级上下文契约
+
+> 遵循 [context-chain-principle.md](../../context/infra/context-chain-principle.md) 规定的五问格式。
+
+### 消费（来自需求层）
+
+| 上下文产物 | 来源 | 读取机制 |
+|-----------|------|---------|
+| requirement_document_url | Coordinator state（APPROVED 时已存） | spec_start 响应中直接返回 |
+| 需求文档 8 字段 | 飞书需求文档 | Spec Agent 调 feishu_fetch_doc |
+| latest_review_summary | Coordinator state | fetch-context 接口 |
+| ARCHITECTURE.yaml | GitHub 仓库 | Spec Agent 通过 GitHub API 读取 |
+| tech_stack（技术栈） | Coordinator state（project_config） | spec_start 响应或 fetch-context 返回 |
+
+### 产出（传递给下层）
+
+| 上下文产物 | 内容 | 存储位置 | 更新策略 |
+|-----------|------|---------|---------|
+| Spec 文档（9节） | 技术规格，含架构设计节与上下文消费声明 | 飞书文档（spec_document_id） | 逐节覆盖写，SPEC_LOCKED 后不可修改 |
+| spec_document_url | Spec 飞书文档 URL | Coordinator state | spec_start 后写入 |
+| spec_review_summary | 最近一次 Spec 审查结论 | Coordinator state | 每次审查完成后更新 |
+
+### 终止
+
+| 上下文产物 | 终止原因 |
+|-----------|---------|
+| discussion_history（需求讨论记录） | 需求层内部记录，Spec 层不需要 |
+| human_confirm_notes | 已吸收进需求文档，无需再传递 |
+
+### 防漂移验证
+
+| Review 维度 | 验证内容 | 类型 |
+|------------|---------|------|
+| 需求字段全覆盖 | Spec 9节与需求文档 8 字段一一对应 | 阻断 |
+| 上下文消费声明完整性 | 架构设计节中「项目级上下文消费声明」子节非空 | 阻断 |
+
+---
+
 ## Section 1：状态机 & 数据模型
 
 ### 新增 WorkflowStatus
@@ -150,7 +188,7 @@ elif requirement.status == WorkflowStatus.AI_REVIEW:
 
 ## Section 3：Spec 文档模板 & Agent SKILL
 
-### Spec 文档固定模板（8节）
+### Spec 文档固定模板（9节）
 
 ```markdown
 # {req_id} {name} — 技术规格
@@ -180,20 +218,60 @@ elif requirement.status == WorkflowStatus.AI_REVIEW:
 （对应需求：技术范围声明）
 影响模块/API/数据表；明确 in/out of scope
 
+## 架构设计
+
+### 顶层架构背景
+
+（说明本需求在整体系统架构中的位置。参考 ARCHITECTURE.yaml，描述：
+- 涉及哪些已有服务/模块
+- 本次变更在架构上属于新增、扩展还是改造
+- 与相邻系统的交互边界）
+
+### 项目级上下文消费声明
+
+（列出本 Spec 明确消费了哪些项目级上下文，确保下游层可追溯。）
+
+| 上下文产物 | 版本/来源 | 影响本 Spec 的哪些判断 |
+|-----------|---------|----------------------|
+| ARCHITECTURE.yaml | {commit_sha 或 日期} | 架构接合点选择、复用模块确认 |
+| ACM 注册表（历史约束） | {snapshot 日期} | 兼容性分析，是否与已有 AC 冲突 |
+| 设计系统快照 | {snapshot 日期，仅 needs_ui=true} | UI 组件选择、交互规范对齐 |
+
+### 关键架构决策
+
+（记录本次实现中的关键技术判断，说明"为什么这样做"。每条决策至少包含：
+- **决策**：选了什么方案
+- **依据**：为何选这个（来自上层约束、性能要求、历史约束等）
+- **影响**：对 ARCHITECTURE.yaml 的变更，或对未来需求的约束）
+
+示例：
+- **决策**：将 X 逻辑放入现有 Y 服务，而非新建服务
+  **依据**：ARCHITECTURE.yaml 中 Y 服务已有 Z 能力，拆新服务会增加跨服务调用
+  **影响**：Y 服务 ARCHITECTURE.yaml 新增接口 /api/v1/... 需在实现后更新
+
+### 存储与数据流设计
+
+（描述数据的流向和存储：
+- 输入从哪里来（API 参数 / 消息队列 / 定时任务）
+- 处理在哪个层发生（Service / Repository / Gateway）
+- 写入哪些存储（数据表 / 缓存 / 外部 API）
+- 输出如何返回（同步响应 / 异步通知 / Webhook））
+
 ## 数据模型
 新增或变更的表结构 / 数据模型定义
 ```
 
-### Spec Reviewer 6+2 审查维度
+### Spec Reviewer 6+2+1 审查维度
 
 **阻断维度（任一不通过则 reject）**
 
-1. **需求字段全覆盖**：8节均非空，且能与需求文档各字段对应
+1. **需求字段全覆盖**：9节均非空，且能与需求文档各字段对应
 2. **API 具体性**：入参/出参有字段名+类型，无「返回成功」等模糊描述
 3. **测试用例与 AC 对齐**：每条需求验收标准有对应测试用例
 4. **实现范围无歧义**：明确哪些模块改/不改，无「可能涉及」类表述
 5. **数据模型存在性**：涉及存储变更的需求必须有表/模型定义
 6. **内部一致性**：API 入参与测试用例中使用的字段名一致，无矛盾
+7. **上下文消费声明完整性**：架构设计节中「项目级上下文消费声明」子节非空，至少列出 ARCHITECTURE.yaml 消费记录
 
 **警告维度（不通过记入 weak_fields，仍可 pass）**
 
@@ -203,18 +281,18 @@ elif requirement.status == WorkflowStatus.AI_REVIEW:
 ### docs/agents/spec-author/SKILL.md 要点
 
 - 启动触发词：「开始 Spec 撰写 REQ-xxx」
-- Step 1：调 spec_start callback，从返回值拿 spec_document_id 和需求文档 URL
-- Step 2：feishu_fetch_doc 读需求文档，提取 8 个字段内容
-- Step 3：逐节填写 Spec（每节完成后 feishu_update_doc 写入完整文档）
-- Step 4：8节均完成后调 spec_submit callback
-- 约束：不修改需求文档；不跳过任何节；「数据模型」节无数据库变更时填「无」
+- Step 1：调 spec_start callback，从返回值拿 spec_document_id 和需求文档 URL（不得跳过）
+- Step 2：feishu_fetch_doc 读需求文档，提取 8 个字段内容；同时读取 fetch-context 返回的 `architecture_yaml_url`（ARCHITECTURE.yaml 链接）供架构设计节使用
+- Step 3：逐节填写 Spec（每节完成后 feishu_update_doc 写入完整文档）；**架构设计节必须包含「项目级上下文消费声明」子节，填写已读取的 ARCHITECTURE.yaml 版本和 ACM 快照信息**
+- Step 4：9节均完成后调 spec_submit callback
+- 约束：不修改需求文档；不跳过任何节；「数据模型」节无数据库变更时填「无」；「项目级上下文消费声明」不得为空
 
 ### docs/agents/spec-reviewer/SKILL.md 要点
 
 - 启动触发词：「开始 Spec 审查 REQ-xxx」
-- Step 1：fetch-context 拿 spec_document_id + requirement_document_url
+- Step 1：fetch-context 拿 spec_document_id + requirement_document_url（不得跳过）
 - Step 2：feishu_fetch_doc 读 Spec 文档 + 需求文档
-- Step 3：按 6+2 维度逐一检查
+- Step 3：按 6+2+1 维度逐一检查（第7条：「项目级上下文消费声明」子节非空 → 阻断）
 - Step 4：单次上报，不与用户多轮沟通
 - 约束：不修改文档；event 只能是 ai_review_pass 或 ai_review_reject
 
