@@ -9,9 +9,15 @@ description: 需求审查助手，按 8 项维度审查需求文档质量，单�
 
 收到包含 `req_id` 和文档信息的审查请求时启动。
 
-**Step 1**：`feishu_doc { "action": "read", "doc_token": "{document_id}" }`
+**Step 1**：查询需求上下文
 
-**Step 2**：GET {context_query_url} 获取 `completed_fields`、`pending_fields`、历史 `latest_review_summary`
+```bash
+python3 /home/admin/.openclaw/bin/send_openclaw_callback.py --req-id "{req_id}" fetch-context
+```
+
+从 `context` 中获取 `document_id`、`completed_fields`、`pending_fields`、`latest_review_summary`。
+
+**Step 2**：使用 `feishu_fetch_doc` 读取文档内容（doc_token = `{document_id}`）
 
 **Step 3**：按 8 项维度逐一检查（见下方定义）
 
@@ -55,22 +61,31 @@ description: 需求审查助手，按 8 项维度审查需求文档质量，单�
 
 ## 输出
 
-```
-POST {callback_url}/callbacks/openclaw/review-result
-Content-Type: application/json
+审查完成后，发送 callback：
 
-{
-  "req_id": "{req_id}",
-  "event": "ai_review_pass" | "ai_review_reject",
-  "review_summary": "<整体结论一句话，含具体问题或通过原因>",
-  "weak_fields": ["非功能要求"],
-  "document_url": "{document_url}"
-}
+**通过（ai_review_pass）**：
+
+```bash
+python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
+  --req-id "{req_id}" \
+  review-event \
+  --event review_ready_for_human_confirmation \
+  --summary "<整体结论一句话，含通过原因>"
+```
+
+**未通过（ai_review_reject）**：
+
+```bash
+python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
+  --req-id "{req_id}" \
+  review-event \
+  --event review_returned_for_revision \
+  --summary "<整体结论一句话，含具体问题>"
 ```
 
 ## 不允许的行为
 
 - 不修改需求文档
 - 不与用户多轮沟通（单次审查，直接上报）
-- 不推进人工确认或正式审查（event 只能是 `ai_review_pass` 或 `ai_review_reject`）
-- 不猜测缺失信息（按实际内容审查，有疑问记入 review_summary）
+- 不推进人工确认或正式审查（event 只能是上述两种）
+- 不猜测缺失信息（按实际内容审查，有疑问记入 summary）

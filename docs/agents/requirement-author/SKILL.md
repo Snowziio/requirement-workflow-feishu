@@ -7,23 +7,24 @@ description: 需求构造助手，协助需求提出者逐字段完善需求文�
 
 ## 启动流程
 
-收到包含「开始需求构造 REQ-xxx」的消息时启动。消息中应包含：
-- `context_query_url`：Coordinator 上下文查询接口
-- `callback_url`：Coordinator callback 接口
-- 飞书文档直接链接
+收到包含「开始需求构造 REQ-xxx」的消息时启动。
 
-**Step 1**：GET {context_query_url}
+**Step 1**：查询需求上下文
 
-响应中获取：
-- `document_id`：飞书文档 token（用于 feishu_doc 工具）
-- `document_url`：文档链接
+```bash
+python3 /home/admin/.openclaw/bin/send_openclaw_callback.py --req-id "{req_id}" fetch-context
+```
+
+响应结构为 `{"ok": true, "context": {...}}`，从 `context` 中获取：
+- `document_id`：飞书文档 token（用于读写文档）
+- `document_url`：文档直接链接
 - `pending_fields`：待填写字段列表
 - `completed_fields`：已完成字段列表
-- `field_hints`：各字段格式提示
+- `field_hints`：各字段格式提示（引导用）
 
-**Step 2**：`feishu_doc { "action": "read", "doc_token": "{document_id}" }`
+**Step 2**：使用 `feishu_fetch_doc` 读取文档当前内容（doc_token = `{document_id}`）
 
-了解当前文档内容，跳过已完成字段。
+了解已有内容，跳过已完成字段。
 
 **Step 3**：从 `pending_fields[0]` 开始，逐字段与用户沟通。
 
@@ -32,11 +33,7 @@ description: 需求构造助手，协助需求提出者逐字段完善需求文�
 1. 每次只聚焦一个字段，明确告知用户「现在我们来完善【字段名】」
 2. 用户回复后，整合内容写入文档：
    ```
-   feishu_doc {
-     "action": "write",
-     "doc_token": "{document_id}",
-     "content": "<完整 9 节 markdown>"
-   }
+   feishu_update_doc(doc_token="{document_id}", content="<完整 9 节 markdown>")
    ```
 3. 向用户确认写入内容，然后进入下一个字段
 4. 不跳过字段，除非用户明确说「先跳过」
@@ -86,24 +83,23 @@ description: 需求构造助手，协助需求提出者逐字段完善需求文�
 
 所有 `pending_fields` 均已填写后，询问用户：「所有字段已完成，是否确认提交审查？」
 
-用户确认后：
+用户确认后，发送 callback：
 
+```bash
+python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
+  --req-id "{req_id}" \
+  author-ready \
+  --summary "<本轮完成字段和要点摘要>" \
+  --document-url "{document_url}" \
+  --completed-fields "问题描述,使用场景,输入,输出,边界,验收标准,非功能要求,技术范围声明" \
+  --iteration-round {current_round}
 ```
-POST {callback_url}/callbacks/openclaw/author-turn
-Content-Type: application/json
 
-{
-  "req_id": "{req_id}",
-  "event": "author_submit",
-  "summary": "<本轮完成字段和要点摘要>",
-  "completed_fields": ["{field1}", "{field2}", ...所有已完成字段],
-  "iteration_round": {current_round}
-}
-```
+> 注：`--completed-fields` 传逗号分隔的已完成字段名列表（仅包含本轮实际完成的字段）
 
 ## 不允许的行为
 
-- 不创建新文档（只操作 context_query 返回的 document_id）
+- 不创建新文档（只操作 context 返回的 document_id）
 - 不修改「需求概览」节的内容（由 Coordinator 写入，保持原样）
 - 不推进审查状态（状态由 Coordinator 管理）
-- 不在 callback 前修改字段 event 名称（必须是 `author_submit`）
+- 不在 callback 前修改事件名称

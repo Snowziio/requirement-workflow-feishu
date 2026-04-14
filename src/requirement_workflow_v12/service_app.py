@@ -783,6 +783,8 @@ class CoordinatorRuntimeApp:
         document_url = str(payload.get("document_url", "")).strip()
         document_version = str(payload.get("document_version", "")).strip()
         iteration_round = payload.get("iteration_round")
+        completed_fields_raw = payload.get("completed_fields", [])
+        completed_fields = [str(f) for f in completed_fields_raw] if isinstance(completed_fields_raw, list) else []
 
         if not req_id or not event or not summary:
             return 400, {"error": "invalid_payload", "message": "req_id、event、summary 为必填字段。"}
@@ -792,11 +794,12 @@ class CoordinatorRuntimeApp:
             return 400, {"error": "invalid_payload", "message": "iteration_round 必须是整数。"}
 
         LOGGER.info(
-            "Received author callback req_id=%s event=%s iteration_round=%s document_url=%s",
+            "Received author callback req_id=%s event=%s iteration_round=%s document_url=%s completed_fields=%s",
             req_id,
             normalized_event,
             iteration_round,
             document_url,
+            completed_fields,
         )
 
         try:
@@ -808,6 +811,7 @@ class CoordinatorRuntimeApp:
                     document_url=document_url,
                     document_version=document_version,
                     iteration_round=iteration_round,
+                    completed_fields=completed_fields,
                 )
             )
             self._sync_requirement_outputs(requirement)
