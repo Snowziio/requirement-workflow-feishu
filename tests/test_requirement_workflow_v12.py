@@ -115,8 +115,6 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
     def test_openclaw_author_turn_callback_updates_requirement(self) -> None:
         class FakeGateway:
-            def sync_requirement_document(self, requirement) -> None:
-                return None
 
             def update_requirement_record(self, requirement) -> None:
                 return None
@@ -170,8 +168,6 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
     def test_author_private_message_accepts_forwarded_handoff_package(self) -> None:
         class FakeGateway:
-            def sync_requirement_document(self, requirement) -> None:
-                return None
 
             def update_requirement_record(self, requirement) -> None:
                 return None
@@ -234,8 +230,6 @@ class RequirementWorkflowV12Test(unittest.TestCase):
             def __init__(self) -> None:
                 self.sent_texts = []
 
-            def sync_requirement_document(self, requirement) -> None:
-                return None
 
             def update_requirement_record(self, requirement) -> None:
                 return None
@@ -368,8 +362,6 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
     def test_openclaw_author_turn_callback_rejects_missing_signature(self) -> None:
         class FakeGateway:
-            def sync_requirement_document(self, requirement) -> None:
-                return None
 
             def update_requirement_record(self, requirement) -> None:
                 return None
@@ -417,8 +409,6 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
     def test_openclaw_author_turn_callback_rejects_unknown_event(self) -> None:
         class FakeGateway:
-            def sync_requirement_document(self, requirement) -> None:
-                return None
 
             def update_requirement_record(self, requirement) -> None:
                 return None
@@ -469,8 +459,6 @@ class RequirementWorkflowV12Test(unittest.TestCase):
                 self.text_messages = []
                 self.card_messages = []
 
-            def sync_requirement_document(self, requirement) -> None:
-                return None
 
             def update_requirement_record(self, requirement) -> None:
                 return None
@@ -547,8 +535,6 @@ class RequirementWorkflowV12Test(unittest.TestCase):
                 self.text_messages = []
                 self.card_messages = []
 
-            def sync_requirement_document(self, requirement) -> None:
-                return None
 
             def update_requirement_record(self, requirement) -> None:
                 return None
@@ -611,8 +597,6 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
     def test_openclaw_review_result_callback_accepts_valid_signature(self) -> None:
         class FakeGateway:
-            def sync_requirement_document(self, requirement) -> None:
-                return None
 
             def update_requirement_record(self, requirement) -> None:
                 return None
@@ -686,8 +670,6 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
     def test_openclaw_review_result_callback_rejects_human_confirmation_event(self) -> None:
         class FakeGateway:
-            def sync_requirement_document(self, requirement) -> None:
-                return None
 
             def update_requirement_record(self, requirement) -> None:
                 return None
@@ -749,8 +731,6 @@ class RequirementWorkflowV12Test(unittest.TestCase):
             def __init__(self) -> None:
                 self.cards = []
 
-            def sync_requirement_document(self, requirement) -> None:
-                return None
 
             def update_requirement_record(self, requirement) -> None:
                 return None
@@ -817,8 +797,6 @@ class RequirementWorkflowV12Test(unittest.TestCase):
             def __init__(self) -> None:
                 self.cards = []
 
-            def sync_requirement_document(self, requirement) -> None:
-                return None
 
             def update_requirement_record(self, requirement) -> None:
                 return None
@@ -882,8 +860,6 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
     def test_openclaw_requirement_context_query_returns_context(self) -> None:
         class FakeGateway:
-            def sync_requirement_document(self, requirement) -> None:
-                return None
 
             def update_requirement_record(self, requirement) -> None:
                 return None
@@ -943,8 +919,6 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
     def test_openclaw_requirement_context_query_auto_handoffs_from_discussion_routing(self) -> None:
         class FakeGateway:
-            def sync_requirement_document(self, requirement) -> None:
-                return None
 
             def update_requirement_record(self, requirement) -> None:
                 return None
@@ -989,8 +963,6 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
     def test_openclaw_author_callback_auto_handoffs_from_discussion_routing(self) -> None:
         class FakeGateway:
-            def sync_requirement_document(self, requirement) -> None:
-                return None
 
             def update_requirement_record(self, requirement) -> None:
                 return None
@@ -1041,8 +1013,6 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
     def test_openclaw_requirement_context_query_rejects_missing_signature(self) -> None:
         class FakeGateway:
-            def sync_requirement_document(self, requirement) -> None:
-                return None
 
             def update_requirement_record(self, requirement) -> None:
                 return None
