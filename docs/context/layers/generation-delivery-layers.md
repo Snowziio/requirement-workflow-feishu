@@ -5,6 +5,44 @@
 
 ---
 
+## 项目级上下文契约
+
+> 遵循 [infra/context-chain-principle.md](../infra/context-chain-principle.md) 规定的五问格式。
+
+### 消费（来自 Harness 层）
+
+| 上下文产物 | 来源 | 读取机制 |
+|-----------|------|---------|
+| design.md（接口契约 + 数据模型 + 架构接合点） | GitHub spec/ 目录 | CLAUDE.md 热加载（温层，session 开始即读） |
+| acceptance.yaml（AC 定义，只读约束） | GitHub harness/tests/ | CI 自动运行 Harness |
+| ARCHITECTURE.yaml（复用模块） | GitHub 仓库根目录 | CLAUDE.md 热加载 |
+| 设计系统快照（needs_ui = true 时） | GitHub 仓库 | CLAUDE.md 热加载 |
+| Harness 测试（作为实现约束） | GitHub harness/ 目录（只读） | CI 强制运行，不直接读取 |
+
+### 产出
+
+| 上下文产物 | 内容 | 存储位置 | 更新策略 |
+|-----------|------|---------|---------|
+| 实现代码 | 通过全量 Harness 的 PR | GitHub Impl PR（src/ 目录） | 每次 CI 通过后可合并 |
+| 更新后的 ARCHITECTURE.yaml | 新增接口/模块/数据表的声明 | GitHub 仓库根目录 | 实现完成后 append-only 更新 |
+
+### 终止
+
+| 上下文产物 | 终止原因 |
+|-----------|---------|
+| 需求文档原文 | 已通过 Spec 结构化转化，生成层不再需要原始需求 |
+| 需求审查历史 | 已吸收进 Spec，无需再传递 |
+
+### 防漂移验证
+
+| Review 维度 | 验证内容 | 类型 |
+|------------|---------|------|
+| CI Harness 全量通过 | P0 Harness 全绿，才能合并 Impl PR | 阻断（自动） |
+| 接口签名一致性 | PR review 检查接口签名与 design.md 一致，无漂移 | 阻断（人工） |
+| ARCHITECTURE.yaml 更新 | 新增接口/模块已在 ARCHITECTURE.yaml 中声明 | 阻断（人工） |
+
+---
+
 ## 一、CLAUDE.md 通用模板结构
 
 每个项目代码仓库的根目录必须有 CLAUDE.md，是 AI Coding Agent 每次 session 的热加载规则文件。
