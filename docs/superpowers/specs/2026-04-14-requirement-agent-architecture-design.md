@@ -135,7 +135,7 @@ Body:
 | `FeishuGateway.create_requirement_document()` | Coordinator 负责创建文档 shell |
 | `Requirement.document_id / document_url` | 状态元数据，传给 Agent 用 |
 | `Requirement.completed_fields / pending_fields` | 状态元数据，从 callback 更新 |
-| `RequirementDocumentCompiler`（仅保留 `render_markdown` 用于初始化） | 创建文档 shell 时生成初始结构 |
+| `RequirementDocumentCompiler`（全部移除，无需保留） | 内容管理职责已完全归 Author Agent |
 
 ### 文档结构调整
 
@@ -157,6 +157,14 @@ Body:
 
 **移出文档**：「多轮讨论纪要」「AI Review结论」「人工Review结论」不再写入飞书文档。  
 它们是工作流元数据，保留在 Coordinator 内部状态和 Bitable 字段中。
+
+### Coordinator 文档创建流程（简化后）
+
+```
+create_requirement_document() → 得到 doc_id + URL → 写入 Bitable + 发通知给用户
+```
+
+文档从只有标题的空白状态开始。Author Agent 第一轮对话结束后写入完整 9 节内容。无中间状态写入。
 
 ### `handle_author_turn` 简化后
 
@@ -387,12 +395,6 @@ POST {callback_url}/callbacks/openclaw/review-result
 ## 技术范围声明
 （影响哪些模块/API/数据表；明确不包含什么）
 ```
-
-### 初始化写入（Coordinator 一次性操作）
-
-需求创建时，Coordinator 调用 `create_requirement_document()` 生成 doc_id 后，**一次性写入 9 节初始 shell**（需求概览填入 summary，其余节写「待补充」）。此后 Coordinator 不再碰文档内容，由 Author Agent 接管。
-
-此次写入通过 `FeishuGateway.write_document_initial_shell(doc_id, requirement)` 实现，是文档 shell 创建的组成部分，不属于「内容管理」。
 
 ### 移出文档的内容
 
