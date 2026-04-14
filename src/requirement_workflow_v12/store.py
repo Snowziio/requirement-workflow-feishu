@@ -9,7 +9,6 @@ from .models import (
     DiscussionTurn,
     HumanReviewResult,
     Requirement,
-    RequirementDocument,
     ReviewFinding,
     ReviewResult,
     WorkflowStatus,
@@ -74,7 +73,6 @@ class JsonStateStore:
         )
 
     def _requirement_from_payload(self, data: dict) -> Requirement:
-        document_payload = data.get("document")
         discussion_history_payload = data.get("discussion_history", [])
         review_history_payload = data.get("review_history", [])
         human_review_history_payload = data.get("human_review_history", [])
@@ -111,7 +109,6 @@ class JsonStateStore:
             github_repo_url=data.get("github_repo_url", ""),
             hifi_prototype_url=data.get("hifi_prototype_url", ""),
             hifi_prototype_confirmed=data.get("hifi_prototype_confirmed", False),
-            document=self._document_from_payload(document_payload) if document_payload else None,
             discussion_history=[self._discussion_turn_from_payload(item) for item in discussion_history_payload],
             review_history=[self._review_result_from_payload(item) for item in review_history_payload],
             human_review_history=[
@@ -120,13 +117,6 @@ class JsonStateStore:
             updated_at=self._parse_datetime(data.get("updated_at")) or utc_now(),
         )
         return requirement
-
-    def _document_from_payload(self, data: dict) -> RequirementDocument:
-        return RequirementDocument(
-            title=data.get("title", ""),
-            sections=data.get("sections", {}),
-            updated_at=self._parse_datetime(data.get("updated_at")) or utc_now(),
-        )
 
     def _review_result_from_payload(self, data: dict) -> ReviewResult:
         return ReviewResult(
@@ -154,7 +144,6 @@ class JsonStateStore:
             round_number=data.get("round_number", 0),
             focused_field=data.get("focused_field", ""),
             user_input=data.get("user_input", ""),
-            normalized_updates=data.get("normalized_updates", {}),
             review_summary=data.get("review_summary", ""),
             next_question=data.get("next_question", ""),
             ai_ready_after_review=data.get("ai_ready_after_review", False),

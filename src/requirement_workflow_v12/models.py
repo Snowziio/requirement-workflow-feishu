@@ -60,7 +60,6 @@ class DiscussionTurn:
     round_number: int
     focused_field: str
     user_input: str
-    normalized_updates: dict[str, str] = field(default_factory=dict)
     review_summary: str = ""
     next_question: str = ""
     ai_ready_after_review: bool = False
@@ -72,17 +71,6 @@ class HumanReviewResult:
     approved: bool
     summary: str
     reviewed_at: datetime = field(default_factory=utc_now)
-
-
-@dataclass
-class RequirementDocument:
-    title: str
-    sections: dict[str, str] = field(default_factory=dict)
-    updated_at: datetime = field(default_factory=utc_now)
-
-    def rewrite_section(self, section: str, content: str) -> None:
-        self.sections[section] = content.strip()
-        self.updated_at = utc_now()
 
 
 @dataclass
@@ -113,7 +101,6 @@ class Requirement:
     document_url: str = ""
     active_private_binding_confirmed: bool = False
     latest_writeback_at: datetime | None = None
-    document: RequirementDocument | None = None
     discussion_history: list[DiscussionTurn] = field(default_factory=list)
     review_history: list[ReviewResult] = field(default_factory=list)
     human_review_history: list[HumanReviewResult] = field(default_factory=list)

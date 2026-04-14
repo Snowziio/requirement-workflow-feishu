@@ -77,6 +77,21 @@ def test_context_query_returns_field_hints():
     assert len(hints["验收标准"]) > 10
 
 
+def test_requirement_has_no_document_field():
+    """Requirement 不再持有文档内容副本。"""
+    svc, req_id = _make_service_with_drafting_req()
+    req = svc.get_requirement(req_id)
+    assert req is not None
+    assert not hasattr(req, "document") or req.document is None
+
+
+def test_discussion_turn_has_no_normalized_updates():
+    """DiscussionTurn 不再存储字段值。"""
+    from requirement_workflow_v12.models import DiscussionTurn
+    turn = DiscussionTurn(round_number=1, focused_field="问题描述", user_input="test")
+    assert not hasattr(turn, "normalized_updates")
+
+
 def test_dm_handler_redirects_to_author_agent():
     """直接私聊 Coordinator 时应提示使用 Author Agent，不处理需求内容。"""
     from requirement_workflow_v12.service_app import CoordinatorRuntimeApp, MessageContext
