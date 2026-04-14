@@ -457,14 +457,17 @@ class CoordinatorRuntimeApp:
         )
         response = self.service.create_requirement_from_group(request)
         requirement = self.service.get_requirement(response.req_id)
+        if requirement is not None:
+            requirement.needs_ui = payload.needs_ui
         self._save_state()
         if requirement is not None:
             LOGGER.info(
-                "Accepted requirement creation from form req_id=%s status=%s project=%s creator_user_id=%s",
+                "Accepted requirement creation from form req_id=%s status=%s project=%s creator_user_id=%s needs_ui=%s",
                 requirement.req_id,
                 requirement.status.value,
                 requirement.project,
                 requirement.creator_user_id,
+                requirement.needs_ui,
             )
         return request, requirement, response.req_id
 
@@ -1120,6 +1123,8 @@ class CoordinatorRuntimeApp:
             return None
 
         creation_chat_id = self._normalize_form_value(value.get("creation_chat_id")) or self._observed_creation_group_chat_id
+        needs_ui_raw = self._normalize_form_value(form_value.get("needs_ui")).lower()
+        needs_ui = needs_ui_raw in ("yes", "true", "1", "是", "需要")
         return CreationFormPayload(
             project=project,
             name=name,
@@ -1130,6 +1135,7 @@ class CoordinatorRuntimeApp:
             background_links=self._normalize_form_value(form_value.get("background_links")),
             priority=self._normalize_form_value(form_value.get("priority")),
             expected_due_date=self._normalize_form_value(form_value.get("expected_due_date")),
+            needs_ui=needs_ui,
         )
 
     def _normalize_form_value(self, value: object) -> str:
@@ -1239,34 +1245,10 @@ class CoordinatorRuntimeApp:
             "header": {
                 "template": "blue",
                 "title": {"tag": "plain_text", "content": "新建需求"},
+                "subtitle": {"tag": "plain_text", "content": "提交后自动生成 REQ ID · 创建文档 · 写入表格 · 通知项目群"},
             },
             "body": {
                 "elements": [
-                    {
-                        "tag": "div",
-                        "text": {
-                            "tag": "lark_md",
-                            "content": (
-                                "**提交后将自动完成以下动作：**\n"
-                                "- 生成 `REQ ID`\n"
-                                "- 创建需求文档\n"
-                                "- 写入多维表格\n"
-                                "- 向项目需求群发送接手卡片"
-                            ),
-                        },
-                    },
-                    {"tag": "hr"},
-                    {
-                        "tag": "div",
-                        "text": {
-                            "tag": "lark_md",
-                            "content": (
-                                "**请先填写最小信息集**\n"
-                                "必填：项目代号、需求名称、需求简述\n"
-                                "选填：背景链接、优先级、期望完成时间"
-                            ),
-                        },
-                    },
                     {
                         "tag": "form",
                         "name": "requirement_create_form",
@@ -1276,14 +1258,16 @@ class CoordinatorRuntimeApp:
                                 "name": "project",
                                 "required": True,
                                 "width": "fill",
-                                "placeholder": {"tag": "plain_text", "content": "项目代号，例如 HARNESS"},
+                                "label": {"tag": "plain_text", "content": "项目代号"},
+                                "placeholder": {"tag": "plain_text", "content": "例如 HARNESS"},
                             },
                             {
                                 "tag": "input",
                                 "name": "name",
                                 "required": True,
                                 "width": "fill",
-                                "placeholder": {"tag": "plain_text", "content": "需求名称，例如 多轮需求构造工作流"},
+                                "label": {"tag": "plain_text", "content": "需求名称"},
+                                "placeholder": {"tag": "plain_text", "content": "例如 多轮需求构造工作流"},
                             },
                             {
                                 "tag": "input",
@@ -1292,7 +1276,8 @@ class CoordinatorRuntimeApp:
                                 "width": "fill",
                                 "input_type": "multiline_text",
                                 "max_length": 500,
-                                "placeholder": {"tag": "plain_text", "content": "需求简述：要解决什么问题，期望得到什么结果"},
+                                "label": {"tag": "plain_text", "content": "需求简述"},
+                                "placeholder": {"tag": "plain_text", "content": "要解决什么问题，期望得到什么结果"},
                             },
                             {
                                 "tag": "input",
@@ -1300,11 +1285,12 @@ class CoordinatorRuntimeApp:
                                 "width": "fill",
                                 "input_type": "multiline_text",
                                 "max_length": 1000,
-                                "placeholder": {"tag": "plain_text", "content": "背景材料链接，可选；多个链接请换行"},
+                                "label": {"tag": "plain_text", "content": "背景材料链接（选填）"},
+                                "placeholder": {"tag": "plain_text", "content": "多个链接请换行"},
                             },
                             {
                                 "tag": "column_set",
-                                "horizontal_spacing": "12px",
+                                "horizontal_spacing": "8px",
                                 "columns": [
                                     {
                                         "tag": "column",
@@ -1314,11 +1300,12 @@ class CoordinatorRuntimeApp:
                                             {
                                                 "tag": "select_static",
                                                 "name": "priority",
-                                                "placeholder": {"tag": "plain_text", "content": "优先级，可选"},
+                                                "label": {"tag": "plain_text", "content": "优先级"},
+                                                "placeholder": {"tag": "plain_text", "content": "选填"},
                                                 "options": [
-                                                    {"text": {"tag": "plain_text", "content": "P0"}, "value": "P0"},
-                                                    {"text": {"tag": "plain_text", "content": "P1"}, "value": "P1"},
-                                                    {"text": {"tag": "plain_text", "content": "P2"}, "value": "P2"},
+                                                    {"text": {"tag": "plain_text", "content": "P0 紧急"}, "value": "P0"},
+                                                    {"text": {"tag": "plain_text", "content": "P1 高"}, "value": "P1"},
+                                                    {"text": {"tag": "plain_text", "content": "P2 普通"}, "value": "P2"},
                                                 ],
                                             }
                                         ],
@@ -1331,7 +1318,25 @@ class CoordinatorRuntimeApp:
                                             {
                                                 "tag": "date_picker",
                                                 "name": "expected_due_date",
-                                                "placeholder": {"tag": "plain_text", "content": "期望完成时间，可选"},
+                                                "label": {"tag": "plain_text", "content": "期望完成时间"},
+                                                "placeholder": {"tag": "plain_text", "content": "选填"},
+                                            }
+                                        ],
+                                    },
+                                    {
+                                        "tag": "column",
+                                        "width": "weighted",
+                                        "weight": 1,
+                                        "elements": [
+                                            {
+                                                "tag": "select_static",
+                                                "name": "needs_ui",
+                                                "label": {"tag": "plain_text", "content": "需要 UI 设计"},
+                                                "placeholder": {"tag": "plain_text", "content": "选填"},
+                                                "options": [
+                                                    {"text": {"tag": "plain_text", "content": "是"}, "value": "yes"},
+                                                    {"text": {"tag": "plain_text", "content": "否"}, "value": "no"},
+                                                ],
                                             }
                                         ],
                                     },
@@ -1340,7 +1345,7 @@ class CoordinatorRuntimeApp:
                             {
                                 "tag": "button",
                                 "name": "submit_create_requirement",
-                                "text": {"tag": "plain_text", "content": "创建需求"},
+                                "text": {"tag": "plain_text", "content": "提交"},
                                 "type": "primary_filled",
                                 "form_action_type": "submit",
                                 "behaviors": [

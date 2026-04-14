@@ -46,6 +46,7 @@ class CreationFormPayload:
     background_links: str = ""
     priority: str = ""
     expected_due_date: str = ""
+    needs_ui: bool = False
 
 
 @dataclass
