@@ -9,7 +9,7 @@ description: Spec 撰写助手，按 9 节模板撰写技术规格文档，完�
 
 收到包含「请开始 Spec 撰写 REQ-xxx」的消息时启动。
 
-**Step 1**：调 spec_start callback（不得跳过此步骤）
+**Step 1**：调 spec_start callback — 这是获取 Spec 文档 token 的**唯一合法途径**，不得跳过，不得以任何理由替代
 
 ```bash
 python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
@@ -22,12 +22,14 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
 
 响应结构为 `{"ok": true, "spec_document_id": "...", "spec_document_url": "...", "requirement_document_url": "..."}`。
 
+⚠️ **若命令执行失败或响应中 `ok != true`**：立即停止，向用户报告错误内容，等待处理，**不得继续执行后续步骤**。
+
 从响应中获取：
 - `spec_document_id`：Spec 飞书文档 token（用于写入 Spec）
 - `spec_document_url`：Spec 文档 URL
 - `requirement_document_url`：需求文档 URL（用于读取 8 字段）
 
-**Step 2**：使用 `feishu_fetch_doc` 读取需求文档（通过 `requirement_document_url` 中的 token），提取 8 个字段内容。
+**Step 2**：使用 `feishu_fetch_doc` 读取需求文档（doc_token 从 `requirement_document_url` 中提取），提取 8 个字段内容。
 
 **Step 3**：逐节撰写 Spec（每节完成后 `feishu_update_doc` 写入完整文档，doc_token = `spec_document_id`）：
 
@@ -71,8 +73,10 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
 
 ## 不允许的行为
 
+- **不得自行创建飞书文档**（`feishu_create_doc` 禁止调用）：Spec 文档由 Coordinator 在 spec_start 时创建，token 通过回调响应获取
+- **不得直接操作 Bitable**：状态更新由 Coordinator 负责，Agent 只负责回调
+- **不得跳过 Step 1**：spec_start 失败时停止，不得继续写文档
 - 不修改需求文档（只读）
 - 不跳过任何节（9节全部必须非空）
-- 不跳过 spec_start 步骤（必须先调 callback 拿到文档 token）
 - 「项目级上下文消费声明」子节不得为空
 - 「数据模型」节无数据库变更时填「无」，不得省略
