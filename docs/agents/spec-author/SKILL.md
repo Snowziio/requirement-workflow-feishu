@@ -9,7 +9,19 @@ description: Spec 撰写助手，按 9 节模板撰写技术规格文档，完�
 
 收到包含「请开始 Spec 撰写 REQ-xxx」的消息时启动。
 
-**Step 1**：调 spec_start callback — 这是获取 Spec 文档 token 的**唯一合法途径**，不得跳过，不得以任何理由替代
+**Step 1**：通过 fetch-context 判断当前状态，决定是否需要调 spec_start
+
+```bash
+python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
+  --base-url "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}" \
+  --secret "${OPENCLAW_CALLBACK_SECRET:-}" \
+  --req-id "{req_id}" \
+  fetch-context
+```
+
+从响应 `context` 中判断：
+
+- **若 `status == "APPROVED"`（尚未开始）**：调 spec_start，获取 Spec 文档 token：
 
 ```bash
 python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
@@ -20,16 +32,22 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
   --summary "开始 Spec 撰写"
 ```
 
-响应结构为 `{"ok": true, "spec_document_id": "...", "spec_document_url": "...", "requirement_document_url": "..."}`。
+  响应结构：`{"ok": true, "spec_document_id": "...", "spec_document_url": "...", "requirement_document_url": "..."}`
 
-⚠️ **若命令执行失败或响应中 `ok != true`**：立即停止，向用户报告错误内容，等待处理，**不得继续执行后续步骤**。
+- **若 `status == "SPEC_DRAFTING"`（已开始，断点续写）**：直接从 `context` 中取：
+  - `spec_document_id`：Spec 文档 token
+  - `spec_document_url`：Spec 文档 URL
+  - `document_url`：需求文档 URL（作为 `requirement_document_url`）
+  - **跳过 spec_start，直接进入 Step 2**
 
-从响应中获取：
+⚠️ **若 spec_start 执行失败或响应中 `ok != true`**：立即停止，向用户报告错误，**不得继续执行后续步骤**。
+
+从以上任一途径获取：
 - `spec_document_id`：Spec 飞书文档 token（用于写入 Spec）
 - `spec_document_url`：Spec 文档 URL
-- `requirement_document_url`：需求文档 URL（用于读取 8 字段）
+- `requirement_document_url`（或 `document_url`）：需求文档 URL
 
-**Step 2**：使用 `feishu_fetch_doc` 读取需求文档（doc_token 从 `requirement_document_url` 中提取），提取 8 个字段内容。
+**Step 2**：使用 `feishu_fetch_doc` 读取需求文档（doc_token 从需求文档 URL 中提取），提取 8 个字段内容。
 
 **Step 3**：逐节撰写 Spec（每节完成后 `feishu_update_doc` 写入完整文档，doc_token = `spec_document_id`）：
 
