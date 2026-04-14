@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 AUTHOR_ENDPOINT = "/callbacks/openclaw/author-turn"
 REVIEW_ENDPOINT = "/callbacks/openclaw/review-result"
 CONTEXT_QUERY_ENDPOINT = "/queries/openclaw/requirement-context"
+SPEC_TURN_ENDPOINT = "/callbacks/openclaw/spec-turn"
 DEFAULT_COORDINATOR_BASE_URL = "http://127.0.0.1:8004"
 
 
@@ -51,6 +52,23 @@ def build_review_payload(args: argparse.Namespace) -> Dict[str, Any]:
 def build_context_query_payload(args: argparse.Namespace) -> Dict[str, Any]:
     return {
         "req_id": args.req_id,
+    }
+
+
+def build_spec_start_payload(args: argparse.Namespace) -> Dict[str, Any]:
+    return {
+        "req_id": args.req_id,
+        "event": "spec_start",
+        "summary": args.summary,
+    }
+
+
+def build_spec_submit_payload(args: argparse.Namespace) -> Dict[str, Any]:
+    return {
+        "req_id": args.req_id,
+        "event": "spec_submit",
+        "summary": args.summary,
+        "spec_document_url": args.spec_document_url or "",
     }
 
 
@@ -112,6 +130,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("fetch-context", help="Query requirement context for an agent by req_id")
 
+    spec_start_parser = subparsers.add_parser("spec-start", help="Notify Coordinator that Spec Agent has started drafting")
+    spec_start_parser.add_argument("--summary", required=True, help="Brief summary for Coordinator logs")
+
+    spec_submit_parser = subparsers.add_parser("spec-submit", help="Notify Coordinator that Spec Agent has submitted a draft for review")
+    spec_submit_parser.add_argument("--summary", required=True, help="Spec draft completion summary")
+    spec_submit_parser.add_argument("--spec-document-url", default="", help="URL of the completed spec document")
+
     return parser
 
 
@@ -129,6 +154,12 @@ def main() -> int:
     elif args.mode == "fetch-context":
         endpoint = CONTEXT_QUERY_ENDPOINT
         payload = build_context_query_payload(args)
+    elif args.mode in ("spec-start", "spec-submit"):
+        endpoint = SPEC_TURN_ENDPOINT
+        if args.mode == "spec-start":
+            payload = build_spec_start_payload(args)
+        else:
+            payload = build_spec_submit_payload(args)
     else:
         endpoint = REVIEW_ENDPOINT
         payload = build_review_payload(args)
