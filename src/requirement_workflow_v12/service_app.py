@@ -219,10 +219,7 @@ class CoordinatorRuntimeApp:
         self._observed_creation_group_chat_id = context.chat_id
         parsed = self._parse_creation_command(context.text)
         if parsed is None:
-            return [OutboundMessage(
-                receive_id=context.chat_id,
-                text="格式：新建需求 [项目名] [需求名] [简述]（可加 --ui 标记表示需要UI设计）",
-            )]
+            return [OutboundCard(receive_id=context.chat_id, card=self._build_requirement_creation_card(context))]
 
         project, name, summary, needs_ui = parsed
 
@@ -254,7 +251,7 @@ class CoordinatorRuntimeApp:
     def _parse_creation_command(text: str) -> tuple[str, str, str, bool] | None:
         needs_ui = "--ui" in text
         clean = text.replace("--ui", "").strip()
-        m = re.match(r"(?:新建需求|创建需求)\s+(\S+)\s+(\S+)\s+(.+)", clean)
+        m = re.search(r"(?:新建需求|创建需求)\s+(\S+)\s+(\S+)\s+(.+)", clean)
         if not m:
             return None
         return m.group(1), m.group(2), m.group(3).strip(), needs_ui
