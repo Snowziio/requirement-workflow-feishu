@@ -34,6 +34,8 @@ class WorkflowStatus(str, Enum):
     REVIEWING = "FINAL_REVIEW"
     APPROVED = "APPROVED"
     REQ_APPROVED = "APPROVED"
+    SPEC_DRAFTING = "SPEC_DRAFTING"
+    SPEC_LOCKED = "SPEC_LOCKED"
 
 
 @dataclass
@@ -108,6 +110,9 @@ class Requirement:
     github_repo_url: str = ""
     hifi_prototype_url: str = ""
     hifi_prototype_confirmed: bool = False
+    spec_document_id: str = ""
+    spec_document_url: str = ""
+    spec_review_summary: str = ""
     updated_at: datetime = field(default_factory=utc_now)
 
     def touch(self) -> None:
