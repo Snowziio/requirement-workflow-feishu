@@ -20,6 +20,13 @@ from .state_machine import Event, apply_event
 
 LOGGER = logging.getLogger(__name__)
 
+FIELD_HINTS: dict[str, str] = {
+    "输入": "列举每个入参的字段名、类型、约束，例：license_image: File(jpg/png, max 5MB)",
+    "输出": "列举每个出参的字段名、类型、示例值，例：risk_level: str('low'|'medium'|'high')",
+    "验收标准": "每条写为可测试断言：Given [前置条件], When [动作], Then [期望结果]",
+    "技术范围声明": "说明影响哪些模块/API/数据表，以及明确不包含什么",
+}
+
 AUTHOR_EVENT_ALIASES = {
     "author_ready_for_ai_review": "author_submit",
 }
@@ -525,6 +532,7 @@ class CoordinatorService:
                 }
                 for turn in requirement.discussion_history[-5:]
             ],
+            "field_hints": FIELD_HINTS,
             "latest_writeback_at": requirement.latest_writeback_at.isoformat()
             if requirement.latest_writeback_at
             else "",

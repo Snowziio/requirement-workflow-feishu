@@ -59,3 +59,19 @@ def test_author_callback_without_completed_fields_is_accepted():
     req = svc.get_requirement(req_id)
     assert req is not None
     assert req.status == WorkflowStatus.AI_REVIEWING
+
+
+def test_context_query_returns_field_hints():
+    svc, req_id = _make_service_with_drafting_req()
+    from requirement_workflow_v12.protocols import AgentRequirementContextQuery
+    context = svc.get_agent_requirement_context(
+        AgentRequirementContextQuery(req_id=req_id)
+    )
+    assert "field_hints" in context
+    hints = context["field_hints"]
+    assert "输入" in hints
+    assert "输出" in hints
+    assert "验收标准" in hints
+    assert "技术范围声明" in hints
+    assert len(hints["输入"]) > 10
+    assert len(hints["验收标准"]) > 10
