@@ -73,3 +73,11 @@ class AgentReviewEventPayload:
 @dataclass
 class AgentRequirementContextQuery:
     req_id: str
+
+
+@dataclass
+class AgentSpecEventPayload:
+    req_id: str
+    event: str  # "spec_start" | "spec_submit"
+    summary: str
+    spec_document_url: str = ""

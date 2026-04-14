@@ -381,32 +381,57 @@ class CoordinatorService:
 
         if payload.document_url:
             requirement.document_url = payload.document_url
-        requirement.latest_review_summary = payload.review_summary
         requirement.latest_writeback_at = utc_now()
 
-        if event_name == "ai_review_reject":
-            decision = apply_event(requirement.status, Event.AI_REVIEW_REJECT)
-            if not decision.allowed:
-                raise ValueError(decision.message)
-            requirement.status = decision.next_status
-            requirement.current_phase = "需求构造"
-            requirement.current_owner = "author"
-            requirement.current_role_label = "需求构造Agent"
-            requirement.ai_ready = False
-            requirement.human_confirmed = False
-            requirement.latest_question = payload.review_summary
-        elif event_name == "ai_review_pass":
-            decision = apply_event(requirement.status, Event.AI_REVIEW_PASS)
-            if not decision.allowed:
-                raise ValueError(decision.message)
-            requirement.status = decision.next_status
-            requirement.current_phase = "人工确认"
-            requirement.current_owner = "human"
-            requirement.current_role_label = "人工确认"
-            requirement.ai_ready = True
-            requirement.latest_question = "AI review 已通过，请进行人工确认。"
+        if requirement.status == WorkflowStatus.SPEC_DRAFTING:
+            # Spec layer review branch
+            if event_name == "ai_review_pass":
+                decision = apply_event(requirement.status, Event.AI_REVIEW_PASS)
+                if not decision.allowed:
+                    raise ValueError(decision.message)
+                requirement.status = decision.next_status
+                requirement.spec_review_summary = payload.review_summary
+                requirement.current_phase = "Spec 已锁定"
+                requirement.current_owner = "coordinator-service"
+                requirement.current_role_label = "需求协调服务"
+            else:  # ai_review_reject
+                decision = apply_event(requirement.status, Event.AI_REVIEW_REJECT)
+                if not decision.allowed:
+                    raise ValueError(decision.message)
+                requirement.status = decision.next_status
+                requirement.spec_review_summary = payload.review_summary
+                requirement.current_phase = "Spec 撰写"
+                requirement.current_owner = "spec-agent"
+                requirement.current_role_label = "Spec 撰写 Agent"
+        elif requirement.status == WorkflowStatus.AI_REVIEW:
+            # Requirement layer review branch (original logic)
+            requirement.latest_review_summary = payload.review_summary
+            if event_name == "ai_review_reject":
+                decision = apply_event(requirement.status, Event.AI_REVIEW_REJECT)
+                if not decision.allowed:
+                    raise ValueError(decision.message)
+                requirement.status = decision.next_status
+                requirement.current_phase = "需求构造"
+                requirement.current_owner = "author"
+                requirement.current_role_label = "需求构造Agent"
+                requirement.ai_ready = False
+                requirement.human_confirmed = False
+                requirement.latest_question = payload.review_summary
+            elif event_name == "ai_review_pass":
+                decision = apply_event(requirement.status, Event.AI_REVIEW_PASS)
+                if not decision.allowed:
+                    raise ValueError(decision.message)
+                requirement.status = decision.next_status
+                requirement.current_phase = "人工确认"
+                requirement.current_owner = "human"
+                requirement.current_role_label = "人工确认"
+                requirement.ai_ready = True
+                requirement.latest_question = "AI review 已通过，请进行人工确认。"
         else:
-            raise ValueError(f"不支持的 review 事件：{payload.event}")
+            raise ValueError(
+                f"当前状态 {requirement.status.value} 不支持 review 事件。"
+                "review callback 只能在 AI_REVIEW 或 SPEC_DRAFTING 状态使用。"
+            )
 
         requirement.touch()
         LOGGER.info(
@@ -485,6 +510,9 @@ class CoordinatorService:
             if requirement.latest_writeback_at
             else "",
             "updated_at": requirement.updated_at.isoformat(),
+            "spec_document_id": requirement.spec_document_id,
+            "spec_document_url": requirement.spec_document_url,
+            "spec_review_summary": requirement.spec_review_summary,
         }
 
     def handle_human_confirmation(self, requirement: Requirement, approved: bool) -> Requirement:
@@ -535,6 +563,47 @@ class CoordinatorService:
         requirement.latest_question = f"需求已批准，建议后续分支名为 spec/{requirement.req_id}。"
         requirement.touch()
         LOGGER.info("Approved requirement req_id=%s status=%s", requirement.req_id, requirement.status.value)
+        return requirement
+
+    def submit_spec_start(
+        self,
+        req_id: str,
+        *,
+        spec_document_id: str,
+        spec_document_url: str,
+    ) -> Requirement:
+        requirement = self.requirements.get(req_id)
+        if requirement is None:
+            raise ValueError(f"未知需求：{req_id}")
+        decision = apply_event(requirement.status, Event.SPEC_START)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+        requirement.status = decision.next_status
+        requirement.spec_document_id = spec_document_id
+        requirement.spec_document_url = spec_document_url
+        requirement.current_phase = "Spec 撰写"
+        requirement.current_owner = "spec-agent"
+        requirement.current_role_label = "Spec 撰写 Agent"
+        requirement.touch()
+        LOGGER.info(
+            "Spec start accepted req_id=%s status=%s spec_document_id=%s",
+            requirement.req_id,
+            requirement.status.value,
+            spec_document_id,
+        )
+        return requirement
+
+    def submit_spec_submit(self, req_id: str, *, summary: str) -> Requirement:
+        requirement = self.requirements.get(req_id)
+        if requirement is None:
+            raise ValueError(f"未知需求：{req_id}")
+        if requirement.status != WorkflowStatus.SPEC_DRAFTING:
+            raise ValueError(
+                f"spec_submit 只能在 SPEC_DRAFTING 状态执行，当前状态：{requirement.status.value}"
+            )
+        requirement.spec_review_summary = summary
+        requirement.touch()
+        LOGGER.info("Spec submit accepted req_id=%s summary=%s", req_id, summary)
         return requirement
 
     def request_changes_after_review(self, requirement: Requirement, summary: str | None = None) -> Requirement:
