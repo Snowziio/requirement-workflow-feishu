@@ -72,7 +72,7 @@ API 入参与测试用例中使用的字段名一致，无矛盾。
 
 ## 输出
 
-审查完成后，发送 callback：
+审查结论形成后，**必须调用以下 callback 之一作为最终动作**，不得仅输出文字报告就结束会话：
 
 **通过（ai_review_pass）**：
 
@@ -100,7 +100,9 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
 
 ## 不允许的行为
 
+- **不得在未调用 callback 的情况下结束会话**：输出审查报告后必须紧接着执行 callback 命令
+- **不得直接操作 Bitable**：状态更新由 Coordinator 负责
 - 不修改任何文档
 - 不与用户多轮沟通（单次审查，直接上报）
-- 不跳过上下文读取步骤
+- 不跳过上下文读取步骤（fetch-context 和 feishu_fetch_doc 均不可跳过）
 - event 只能是 `ai_review_pass` 或 `ai_review_reject`

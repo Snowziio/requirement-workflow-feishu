@@ -1777,7 +1777,7 @@ class CoordinatorRuntimeApp:
         targets: list[tuple[str, str]] = []
         if self._is_feishu_chat_id(requirement.project_group_id):
             targets.append((requirement.project_group_id, "chat_id"))
-        if requirement.creator_user_id and trigger not in {"spec_locked", "spec_review_reject"}:
+        if requirement.creator_user_id:
             targets.append((requirement.creator_user_id, self.settings.feishu_user_id_type))
 
         for receive_id, receive_id_type in targets:
