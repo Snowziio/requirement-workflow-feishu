@@ -1,0 +1,61 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from requirement_workflow_v12.coordinator_service import CoordinatorService
+from requirement_workflow_v12.protocols import AgentAuthorEventPayload
+from requirement_workflow_v12 import CreationRequest, WorkflowStatus
+
+
+def _make_service_with_drafting_req():
+    svc = CoordinatorService()
+    resp = svc.create_requirement_from_group(
+        CreationRequest(
+            project="PROTO",
+            name="协议测试",
+            summary="验证 completed_fields 协议",
+            creator="tester",
+            creator_user_id="u1",
+            creation_chat_id="c1",
+        )
+    )
+    req = svc.get_requirement(resp.req_id)
+    assert req is not None
+    svc.handoff_to_author(req)
+    return svc, resp.req_id
+
+
+def test_author_callback_uses_completed_fields():
+    svc, req_id = _make_service_with_drafting_req()
+    svc.submit_author_event_payload(
+        AgentAuthorEventPayload(
+            req_id=req_id,
+            event="author_submit",
+            summary="完成了问题描述和使用场景",
+            completed_fields=["问题描述", "使用场景"],
+            iteration_round=1,
+        )
+    )
+    req = svc.get_requirement(req_id)
+    assert req is not None
+    assert req.status == WorkflowStatus.AI_REVIEWING
+    assert "问题描述" in req.completed_fields
+    assert "使用场景" in req.completed_fields
+    assert "输入" not in req.completed_fields
+
+
+def test_author_callback_without_completed_fields_is_accepted():
+    """Backward compat: completed_fields 为空列表时不报错."""
+    svc, req_id = _make_service_with_drafting_req()
+    svc.submit_author_event_payload(
+        AgentAuthorEventPayload(
+            req_id=req_id,
+            event="author_submit",
+            summary="完成了全部字段",
+            completed_fields=[],
+            iteration_round=2,
+        )
+    )
+    req = svc.get_requirement(req_id)
+    assert req is not None
+    assert req.status == WorkflowStatus.AI_REVIEWING

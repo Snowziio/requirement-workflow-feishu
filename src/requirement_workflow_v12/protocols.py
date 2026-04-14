@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 @dataclass
 class CreationRequest:
@@ -56,6 +56,7 @@ class AgentAuthorEventPayload:
     document_url: str = ""
     document_version: str = ""
     iteration_round: int | None = None
+    completed_fields: list[str] = field(default_factory=list)
 
 
 @dataclass

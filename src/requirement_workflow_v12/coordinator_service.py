@@ -383,6 +383,14 @@ class CoordinatorService:
         requirement.current_role_label = "需求审查Agent"
         requirement.latest_review_summary = payload.summary
         requirement.latest_question = "需求已提交 AI review，请由 review agent 与需求提出者完成审查。"
+        if payload.completed_fields:
+            requirement.completed_fields = list(payload.completed_fields)
+            requirement.pending_fields = [
+                f for f in DISCUSSION_FIELDS
+                if f not in requirement.completed_fields
+            ]
+            if requirement.pending_fields:
+                requirement.current_discussion_field = requirement.pending_fields[0]
         if payload.document_url:
             requirement.document_url = payload.document_url
         if payload.iteration_round is not None:
