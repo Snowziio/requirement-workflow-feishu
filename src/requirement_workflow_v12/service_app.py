@@ -639,44 +639,17 @@ class CoordinatorRuntimeApp:
         return None
 
     def _handle_author_turn(self, context: MessageContext, requirement: Requirement) -> list[OutboundMessage]:
-        current_field = requirement.current_discussion_field
-        next_field = self._next_discussion_field(requirement)
-        if next_field:
-            next_question = self._question_for_field(next_field)
-        else:
-            next_question = "当前核心字段已补齐，AI review 将进入人工确认。若内容准确，请回复“确认需求”；如需继续打磨，请回复“继续修改”。"
-
-        turn = AuthorTurnResult(
-            updates={current_field: context.text.strip()},
-            next_question=next_question,
-            current_field_completed=True,
-            next_field=next_field,
-        )
-        requirement = self.service.handle_author_turn(requirement, turn)
-
-        review = self._build_rule_based_review(requirement, current_field=current_field)
-        requirement = self.service.handle_review_result(requirement, review)
-        self._sync_requirement_outputs(requirement)
-        self._save_state()
-        if requirement.status == WorkflowStatus.HUMAN_CONFIRM:
-            self._dispatch_transition_notifications(requirement, trigger="ai_review_pass")
-        else:
-            self._dispatch_transition_notifications(requirement, trigger="ai_review_reject")
-
-        if requirement.status == WorkflowStatus.HUMAN_CONFIRM:
-            response_text = (
-                f"需求构造 Agent：已更新【{current_field}】。\n\n"
-                f"审查 Agent：{requirement.latest_review_summary}\n\n"
-                f"{requirement.latest_question}\n"
-                "请回复“确认需求”或“继续修改”。"
+        agent_name = self.settings.openclaw_author_agent_name
+        return [
+            OutboundMessage(
+                receive_id=context.chat_id,
+                text=(
+                    "\u8bf7\u524d\u5f80 " + agent_name + " \u7ee7\u7eed\u9700\u6c42\u6784\u9020\u3002\n"
+                    "\u5728 " + agent_name + " \u4e2d\u53d1\u9001\uff1a\n"
+                    "\u5f00\u59cb\u9700\u6c42\u6784\u9020 " + requirement.req_id
+                ),
             )
-        else:
-            response_text = (
-                f"需求构造 Agent：已更新【{current_field}】。\n\n"
-                f"审查 Agent：{requirement.latest_review_summary}\n\n"
-                f"下一步：{requirement.latest_question}"
-        )
-        return [OutboundMessage(receive_id=context.chat_id, text=response_text)]
+        ]
 
     def _handle_status_query(self, context: MessageContext) -> list[OutboundMessage]:
         active_req_id = self.service.active_req_by_user.get(context.user_id)
@@ -1609,83 +1582,6 @@ class CoordinatorRuntimeApp:
             message_id=message.message_id or "",
             thread_id=message.thread_id or "",
         )
-
-    def _next_discussion_field(self, requirement) -> str | None:
-        for field in requirement.pending_fields:
-            if field != requirement.current_discussion_field:
-                return field
-        return None
-
-    def _build_rule_based_review(self, requirement: Requirement, *, current_field: str) -> ReviewResult:
-        if requirement.document is None:
-            return ReviewResult(
-                ready_for_human_confirmation=False,
-                summary="正式需求文档尚未初始化完成，请继续等待系统同步。",
-                next_focus=requirement.latest_question,
-            )
-
-        findings: list[ReviewFinding] = []
-        weak_fields: list[str] = []
-        conflicts: list[str] = []
-        non_testable_acceptance_criteria: list[str] = []
-        sections = requirement.document.sections
-        for field in DISCUSSION_FIELDS:
-            content = (sections.get(field) or "").strip()
-            if not content or content == "待补充":
-                findings.append(ReviewFinding(dimension=field, summary="该字段仍未补充。", severity="high"))
-                weak_fields.append(field)
-                continue
-            if len(content) < 12:
-                findings.append(ReviewFinding(dimension=field, summary="内容过短，仍不足以支撑后续实现。", severity="medium"))
-                weak_fields.append(field)
-                continue
-            if field == "验收标准" and not any(token in content for token in ("应", "必须", ">= ", "<=", "至少", "小于", "大于", "true", "false", "%", "秒", "分钟")):
-                findings.append(ReviewFinding(dimension=field, summary="缺少可验证或可量化的验收口径。", severity="high"))
-                weak_fields.append(field)
-                non_testable_acceptance_criteria.append(content)
-            if field == "边界" and not any(token in content for token in ("不包含", "不做", "不在本次", "排除", "暂不")):
-                findings.append(ReviewFinding(dimension=field, summary="边界描述不够明确，未清楚说明本次不做什么。", severity="medium"))
-                weak_fields.append(field)
-            if field == "输入":
-                output = (sections.get("输出") or "").strip()
-                if output and content and output == content:
-                    findings.append(ReviewFinding(dimension="一致性", summary="输入与输出内容完全相同，可能存在语义混淆。", severity="medium"))
-                    conflicts.append("输入与输出内容重复，尚未体现处理前后差异。")
-
-        ready = not weak_fields
-        if ready:
-            return ReviewResult(
-                ready_for_human_confirmation=True,
-                summary="AI review 认为当前需求已具备完整性、一致性与可验证性，可以进入人工确认。",
-                conflicts=conflicts,
-            )
-
-        next_focus = self._question_for_field(weak_fields[0])
-        if current_field in weak_fields:
-            summary = f"当前已补充【{current_field}】，但该字段仍需继续打磨；请优先完善【{weak_fields[0]}】。"
-        else:
-            summary = f"当前已补充【{current_field}】，下一轮请优先完善【{weak_fields[0]}】。"
-        return ReviewResult(
-            ready_for_human_confirmation=False,
-            summary=summary,
-            findings=findings,
-            weak_fields=weak_fields,
-            conflicts=conflicts,
-            non_testable_acceptance_criteria=non_testable_acceptance_criteria,
-            next_focus=next_focus,
-        )
-
-    def _question_for_field(self, field: str) -> str:
-        prompts = {
-            "问题描述": "请说明这个需求当前要解决的核心问题，以及不解决会造成什么影响。",
-            "使用场景": "请补充谁会在什么情况下使用它，以及期望完成什么结果。",
-            "输入": "请说明这个需求依赖哪些输入，来源、格式和约束分别是什么。",
-            "输出": "请说明最终输出是什么，输出方式、格式和接收方分别是什么。",
-            "边界": "请明确这次需求不包含什么，哪些事项仍然留在边界之外。",
-            "验收标准": "请给出可以验证的验收标准，尽量使用阈值、布尔条件或明确结果。",
-            "非功能要求": "请补充性能、稳定性、权限、安全或可观测性等非功能要求。",
-        }
-        return prompts.get(field, "请继续补充当前需求。")
 
     def _sync_requirement_outputs(self, requirement) -> None:
         LOGGER.info(

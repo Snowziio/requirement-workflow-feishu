@@ -75,3 +75,41 @@ def test_context_query_returns_field_hints():
     assert "技术范围声明" in hints
     assert len(hints["输入"]) > 10
     assert len(hints["验收标准"]) > 10
+
+
+def test_dm_handler_redirects_to_author_agent():
+    """直接私聊 Coordinator 时应提示使用 Author Agent，不处理需求内容。"""
+    from requirement_workflow_v12.service_app import CoordinatorRuntimeApp, MessageContext
+    from requirement_workflow_v12.config import Settings
+
+    svc, req_id = _make_service_with_drafting_req()
+    req = svc.get_requirement(req_id)
+    assert req is not None
+
+    class _FakeGateway:
+        def update_requirement_record(self, r): pass
+        def sync_requirement_document(self, r): pass
+
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as tmp:
+        app = CoordinatorRuntimeApp(
+            Settings(
+                feishu_app_id="app",
+                feishu_app_secret="secret",
+                state_store_path=os.path.join(tmp, "state.json"),
+            ),
+            service=svc,
+            gateway=_FakeGateway(),
+        )
+
+        ctx = MessageContext(
+            chat_id="dm_chat",
+            chat_type="p2p",
+            user_id="u1",
+            text="这个需求的输入是用户ID和密码",
+            sender_name="Test",
+        )
+        responses = app._handle_author_turn(ctx, req)
+        texts = [r.text for r in responses if hasattr(r, "text")]
+        assert len(texts) > 0
+        assert any("请前往" in t for t in texts), f"Expected redirect message, got: {texts}"
