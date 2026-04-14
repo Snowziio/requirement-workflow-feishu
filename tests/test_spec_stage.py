@@ -63,13 +63,7 @@ def test_store_round_trips_spec_fields():
 
 def test_config_has_spec_agent_settings():
     from requirement_workflow_v12.config import Settings
-    s = Settings(
-        spec_agent_feishu_id="ou_spec_agent_1",
-        spec_reviewer_feishu_id="ou_spec_reviewer_1",
-        openclaw_spec_agent_name="我的Spec助手",
-    )
-    assert s.spec_agent_feishu_id == "ou_spec_agent_1"
-    assert s.spec_reviewer_feishu_id == "ou_spec_reviewer_1"
+    s = Settings(openclaw_spec_agent_name="我的Spec助手")
     assert s.openclaw_spec_agent_name == "我的Spec助手"
 
 
@@ -263,11 +257,13 @@ def test_spec_start_blocked_if_not_approved():
     assert status == 400
 
 
-def test_spec_submit_notifies_reviewer():
+def test_spec_submit_sends_card_to_project_group():
     app, req_id, gateway = _make_app_with_approved_req()
+    req = app.service.get_requirement(req_id)
+    assert req is not None
+    req.project_group_id = "oc_submit_group"
     start_body = json.dumps({"req_id": req_id, "event": "spec_start", "summary": "start"}).encode()
     app.handle_openclaw_spec_turn_callback(start_body)
-    app.settings.spec_reviewer_feishu_id = "ou_reviewer_123"
     submit_body = json.dumps({
         "req_id": req_id,
         "event": "spec_submit",
@@ -277,9 +273,10 @@ def test_spec_submit_notifies_reviewer():
     status, payload = app.handle_openclaw_spec_turn_callback(submit_body)
     assert status == 200
     assert payload["ok"] is True
-    reviewer_texts = [t for t in gateway.sent_texts if t[0] == "ou_reviewer_123"]
-    assert len(reviewer_texts) == 1
-    assert req_id in reviewer_texts[0][1]
+    group_cards = [c for c in gateway.sent_cards if c[0] == "oc_submit_group"]
+    assert len(group_cards) >= 1
+    card_str = json.dumps(group_cards[-1][1])
+    assert req_id in card_str
 
 
 def test_review_result_on_spec_drafting_transitions_to_spec_locked():

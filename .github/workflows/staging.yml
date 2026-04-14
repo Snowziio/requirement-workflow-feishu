@@ -84,8 +84,6 @@ jobs:
             PROJECT_GROUP_NAME_TEMPLATE={project} 需求群
             STATE_STORE_PATH=/app/state/coordinator_state.json
             OPENCLAW_SPEC_AGENT_NAME=${{ secrets.OPENCLAW_SPEC_AGENT_NAME || 'Spec 撰写助手' }}
-            SPEC_AGENT_FEISHU_ID=${{ secrets.SPEC_AGENT_FEISHU_ID }}
-            SPEC_REVIEWER_FEISHU_ID=${{ secrets.SPEC_REVIEWER_FEISHU_ID }}
             EOF
 
             docker pull ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/$APP:${{ steps.build.outputs.image_tag }}

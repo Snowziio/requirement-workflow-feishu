@@ -33,8 +33,6 @@ class Settings:
     github_token: str = os.environ.get("GITHUB_TOKEN", "")
     github_default_branch: str = os.environ.get("GITHUB_DEFAULT_BRANCH", "main")
     openclaw_spec_agent_name: str = os.environ.get("OPENCLAW_SPEC_AGENT_NAME", "Spec 撰写助手")
-    spec_agent_feishu_id: str = os.environ.get("SPEC_AGENT_FEISHU_ID", "")
-    spec_reviewer_feishu_id: str = os.environ.get("SPEC_REVIEWER_FEISHU_ID", "")
 
     def validate_runtime(self) -> None:
         missing = []

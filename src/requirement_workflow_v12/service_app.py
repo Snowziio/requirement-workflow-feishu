@@ -1066,20 +1066,10 @@ class CoordinatorRuntimeApp:
             if spec_document_url_from_payload:
                 requirement.spec_document_url = spec_document_url_from_payload
 
-            reviewer_id = self.settings.spec_reviewer_feishu_id
-            if reviewer_id:
-                try:
-                    self.gateway.send_text(
-                        reviewer_id,
-                        self._build_spec_review_handoff(requirement),
-                        receive_id_type="open_id",
-                    )
-                except Exception as exc:
-                    LOGGER.warning("Failed to notify spec reviewer req_id=%s: %s", req_id, exc)
-
             self._save_state()
+            self._dispatch_transition_notifications(requirement, trigger="spec_submitted")
             LOGGER.info("Spec submit accepted req_id=%s summary=%s", req_id, summary)
-            return 200, {"ok": True, "message": "已通知 Spec Reviewer 开始审查"}
+            return 200, {"ok": True, "message": "Spec 已提交，已通知项目群发起审查"}
 
         return 400, {"error": "invalid_event"}
 
@@ -1148,6 +1138,52 @@ class CoordinatorRuntimeApp:
                     }
                 }
             return 200, {"toast": {"type": "success", "content": "已将启动指令私发给你。"}}
+
+        if action_name == "send_spec_author_start":
+            req_id = value.get("req_id", "")
+            if not req_id:
+                return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            requirement = self.service.get_requirement(req_id)
+            if requirement is None:
+                return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
+            if requirement.status not in {WorkflowStatus.APPROVED, WorkflowStatus.SPEC_DRAFTING}:
+                return 200, {"toast": {"type": "error", "content": f"当前需求不处于 Spec 撰写阶段（状态：{requirement.status.value}）。"}}
+            target_user_id, receive_id_type = self._resolve_operator_receive_target(operator)
+            if not target_user_id:
+                return 200, {"toast": {"type": "error", "content": "无法识别当前点击人身份，请手动私聊 Spec 撰写助手。"}}
+            try:
+                self.gateway.send_text(
+                    target_user_id,
+                    self._build_spec_author_handoff_text(requirement),
+                    receive_id_type=receive_id_type,
+                )
+            except Exception as exc:
+                LOGGER.warning("Failed to send spec author handoff req_id=%s: %s", req_id, exc)
+                return 200, {"toast": {"type": "error", "content": "私发失败，请手动私聊 Spec 撰写助手。"}}
+            return 200, {"toast": {"type": "success", "content": "已将 Spec 撰写启动指令私发给你。"}}
+
+        if action_name == "send_spec_reviewer_start":
+            req_id = value.get("req_id", "")
+            if not req_id:
+                return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            requirement = self.service.get_requirement(req_id)
+            if requirement is None:
+                return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
+            if requirement.status != WorkflowStatus.SPEC_DRAFTING:
+                return 200, {"toast": {"type": "error", "content": f"当前需求不处于 Spec 审查阶段（状态：{requirement.status.value}）。"}}
+            target_user_id, receive_id_type = self._resolve_operator_receive_target(operator)
+            if not target_user_id:
+                return 200, {"toast": {"type": "error", "content": "无法识别当前点击人身份，请手动私聊 Spec 审查助手。"}}
+            try:
+                self.gateway.send_text(
+                    target_user_id,
+                    self._build_spec_review_handoff(requirement),
+                    receive_id_type=receive_id_type,
+                )
+            except Exception as exc:
+                LOGGER.warning("Failed to send spec reviewer handoff req_id=%s: %s", req_id, exc)
+                return 200, {"toast": {"type": "error", "content": "私发失败，请手动私聊 Spec 审查助手。"}}
+            return 200, {"toast": {"type": "success", "content": "已将 Spec 审查启动指令私发给你。"}}
 
         if action_name in {"human_confirm_yes", "human_confirm_no"}:
             req_id = value.get("req_id", "")
@@ -1676,6 +1712,15 @@ class CoordinatorRuntimeApp:
             "要求：如果需求文档链接已存在，必须直接在该文档上继续撰写，不要重新创建第二份文档。"
         )
 
+    def _build_spec_author_handoff_text(self, requirement: Requirement) -> str:
+        spec_agent_name = self.settings.openclaw_spec_agent_name
+        return (
+            f"请私聊 {spec_agent_name}，并发送以下完整上下文：\n\n"
+            f"请开始 Spec 撰写 {requirement.req_id}\n"
+            f"需求名称：{requirement.name}\n"
+            f"需求文档：{requirement.document_url or '（待同步）'}"
+        )
+
     def _build_spec_review_handoff(self, requirement: Requirement) -> str:
         return (
             f"请开始 Spec 审查 {requirement.req_id}\n"
@@ -1724,45 +1769,6 @@ class CoordinatorRuntimeApp:
                 LOGGER.warning("Failed to update bitable record for %s: %s", requirement.req_id, exc)
 
     def _dispatch_transition_notifications(self, requirement: Requirement, *, trigger: str) -> None:
-        # Spec Agent notification on APPROVED
-        if trigger == "final_review_passed":
-            spec_agent_id = self.settings.spec_agent_feishu_id
-            if spec_agent_id:
-                try:
-                    self.gateway.send_text(
-                        spec_agent_id,
-                        (
-                            f"请开始 Spec 撰写 {requirement.req_id}\n"
-                            f"需求名称：{requirement.name}\n"
-                            f"需求文档：{requirement.document_url or '（待同步）'}\n\n"
-                            f"调用 spec_start callback 正式开始。"
-                        ),
-                        receive_id_type="open_id",
-                    )
-                except Exception as exc:
-                    LOGGER.warning(
-                        "Failed to notify spec agent for %s: %s", requirement.req_id, exc
-                    )
-
-        # Spec Agent notification on spec review reject
-        if trigger == "spec_review_reject":
-            spec_agent_id = self.settings.spec_agent_feishu_id
-            if spec_agent_id:
-                try:
-                    self.gateway.send_text(
-                        spec_agent_id,
-                        (
-                            f"Spec 审查未通过，请根据以下意见修改 {requirement.req_id}：\n\n"
-                            f"{requirement.spec_review_summary}\n\n"
-                            f"修改后重新调用 spec_submit 提交。"
-                        ),
-                        receive_id_type="open_id",
-                    )
-                except Exception as exc:
-                    LOGGER.warning(
-                        "Failed to notify spec agent for revision %s: %s", requirement.req_id, exc
-                    )
-
         card = self._build_transition_notification_card(requirement, trigger=trigger)
         text = self._build_transition_notification_text(requirement, trigger=trigger)
         if card is None and not text:
@@ -1899,6 +1905,33 @@ class CoordinatorRuntimeApp:
                     "value": {"action": "final_review_reject", "req_id": requirement.req_id},
                 },
             ]
+        if trigger == "final_review_passed":
+            return [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "开始 Spec 撰写"},
+                    "type": "primary",
+                    "value": {"action": "send_spec_author_start", "req_id": requirement.req_id},
+                },
+            ]
+        if trigger == "spec_submitted":
+            return [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "开始 Spec 审查"},
+                    "type": "primary",
+                    "value": {"action": "send_spec_reviewer_start", "req_id": requirement.req_id},
+                },
+            ]
+        if trigger == "spec_review_reject":
+            return [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "重新开始 Spec 撰写"},
+                    "type": "default",
+                    "value": {"action": "send_spec_author_start", "req_id": requirement.req_id},
+                },
+            ]
         return []
 
     def _transition_notification_content(self, requirement: Requirement, *, trigger: str) -> tuple[str, str, str, str, str]:
@@ -1947,12 +1980,13 @@ class CoordinatorRuntimeApp:
                 f"请由 {author_name} 根据反馈继续修改，并准备下一轮 AI Review。",
             )
         if trigger == "final_review_passed":
+            spec_agent_name = self.settings.openclaw_spec_agent_name
             return (
                 "green",
                 f"{requirement.req_id} 已批准通过",
                 latest_review,
-                "正式审查已通过，当前需求进入批准完成状态。",
-                "无需进一步介入，可按后续规格/实现流程继续推进。",
+                "正式审查已通过，需求进入 Spec 撰写阶段。",
+                f"请点击「开始 Spec 撰写」，将启动指令私发给自己后转发给 {spec_agent_name}。",
             )
         if trigger == "final_review_rejected":
             return (
@@ -1969,6 +2003,15 @@ class CoordinatorRuntimeApp:
                 "需求已创建并完成 author 接手。",
                 "当前需求进入需求构造阶段，由需求构造助手继续推进文档。",
                 f"请需求提出者继续与 {author_name} 私聊完成多轮需求构造。",
+            )
+        if trigger == "spec_submitted":
+            spec_reviewer_name = self.settings.openclaw_spec_agent_name
+            return (
+                "indigo",
+                f"{requirement.req_id} Spec 已提交，待审查",
+                "Spec Agent 已完成 9 节 Spec 文档撰写。",
+                "Spec 文档已提交，等待 Spec Reviewer 按 6+2+1 维度审查。",
+                f"请点击「开始 Spec 审查」，将审查启动指令私发给自己后转发给 Spec Reviewer。",
             )
         if trigger == "spec_locked":
             return (
