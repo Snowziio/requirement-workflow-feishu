@@ -1818,6 +1818,7 @@ class CoordinatorRuntimeApp:
             self.service.requirements,
             self.service.active_req_by_user,
             self.service.project_groups,
+            self.service.project_configs,
         )
 
     def _is_feishu_chat_id(self, value: str) -> bool:
