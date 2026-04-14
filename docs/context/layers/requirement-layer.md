@@ -23,7 +23,7 @@
 
 | 上下文产物 | 内容 | 存储位置 | 更新策略 |
 |-----------|------|---------|---------|
-| 需求文档 8 字段 | 问题描述/使用场景/输入/输出/边界/验收标准/非功能要求/技术范围声明 | 飞书文档（document_id） | 每轮 onExit(DISCUSSING) section-rewrite |
+| 需求文档 8 字段 | 问题描述/使用场景/输入/输出/边界/验收标准/非功能要求/技术范围声明 | 飞书文档（document_id） | 每轮 onExit(DRAFTING) section-rewrite |
 | req_id | 需求唯一编号 REQ-{PROJECT}-{NNN} | Coordinator state + Bitable | 创建时写入，不可变 |
 | needs_ui | 是否涉及 UI | Coordinator state + Bitable | 创建时写入，APPROVED 前可修改 |
 | latest_review_summary | 最近一次 AI 审查结论 | Coordinator state + Bitable | 每次审查完成后更新 |
@@ -50,33 +50,37 @@
 
 ## 一、状态机完整转移表
 
-### 概念层（7 态）
+### 状态转移表（6 态）
 
 | 当前状态 | 事件 | 目标状态 | 触发条件 |
 |---|---|---|---|
-| CREATED | create_requirement | DISCUSSING | 无条件 |
-| DISCUSSING | author_submit | AI_REVIEWING | 无条件（由 Author Agent 判断是否提交） |
-| AI_REVIEWING | ai_review_reject | DISCUSSING | ai_ready = false |
-| AI_REVIEWING | ai_review_pass | HUMAN_CONFIRMING | ai_ready = true |
-| HUMAN_CONFIRMING | human_confirm_no | DISCUSSING | 无条件 |
-| HUMAN_CONFIRMING | human_confirm_yes | REVIEWING | human_confirmed = true |
-| REVIEWING | final_review_pass | APPROVED | 无条件 |
-| REVIEWING | final_review_reject | DISCUSSING | 无条件 |
+| CREATED | create_requirement | DRAFTING | 无条件 |
+| DRAFTING | author_submit | AI_REVIEW | 无条件（由 Author Agent 判断是否提交） |
+| AI_REVIEW | ai_review_reject | DRAFTING | ai_ready = false |
+| AI_REVIEW | ai_review_pass | HUMAN_CONFIRM | ai_ready = true |
+| HUMAN_CONFIRM | human_confirm_no | DRAFTING | 无条件 |
+| HUMAN_CONFIRM | human_confirm_yes | FINAL_REVIEW | human_confirmed = true |
+| FINAL_REVIEW | final_review_pass | APPROVED | 无条件 |
+| FINAL_REVIEW | final_review_reject | DRAFTING | 无条件 |
 
-> 注：DISCUSSION_ROUTING 状态在参考实现中已合并进创建流程（Coordinator 创建需求后直接私信 author，author 在私聊发送启动指令后即进入 DISCUSSING），不单独成状态。
+> 注：DISCUSSION_ROUTING 状态在参考实现中已合并进创建流程（Coordinator 创建需求后直接私信 author，author 在私聊发送启动指令后即进入 DRAFTING），不单独成状态。
 
-### 参考实现状态名对照
+### 状态 canonical 名与含义
 
-| 概念层 | 参考实现（state_machine.py） |
+**需求层主状态（6 态，本文及所有 docs/context/** 文档统一使用这组名称；代码中历史遗留的 `DISCUSSING` / `AI_REVIEWING` / `HUMAN_CONFIRMING` / `REVIEWING` 为别名，字符串值已对齐 canonical）**：
+
+| 状态 | 含义 |
 |---|---|
-| CREATED | CREATED |
-| DISCUSSING | DRAFTING |
-| AI_REVIEWING | AI_REVIEW |
-| HUMAN_CONFIRMING | HUMAN_CONFIRM |
-| REVIEWING | FINAL_REVIEW |
-| APPROVED | APPROVED |
+| CREATED | 需求刚建出，尚未开始讨论 |
+| DRAFTING | Author 与 Author Agent 讨论、持续撰写 |
+| AI_REVIEW | Reviewer Agent 审查中 |
+| HUMAN_CONFIRM | 提出人确认 AI 审查结论 + 可选 UI 设计一阶段 |
+| FINAL_REVIEW | 正式审查（人工卡点） |
+| APPROVED | 需求定稿，规格层可启动 |
 
 事件名以参考实现 `Event` 枚举为准：`author_submit`、`ai_review_reject`、`ai_review_pass`、`human_confirm_yes`、`human_confirm_no`、`final_review_pass`、`final_review_reject`。
+
+> 代码兼容性注意：`src/requirement_workflow_v12/models.py` 的 `WorkflowStatus` 枚举同时保留 `DISCUSSING` / `AI_REVIEWING` / `HUMAN_CONFIRMING` / `REVIEWING` / `REQ_APPROVED` / `DISCUSSION_ROUTING` 作为历史别名（枚举成员字符串值与 canonical 一致），用于向后兼容旧调用点；新代码与文档一律使用 canonical 名。
 
 ---
 
@@ -87,18 +91,18 @@
 ```
 约束 1（AI Ready 前置）：
   if event == human_confirm_yes and ai_ready == false:
-    → 拒绝转移，保持 HUMAN_CONFIRMING
+    → 拒绝转移，保持 HUMAN_CONFIRM
     → 原因：「AI Ready 未满足，需先通过 AI 审查」
 
 约束 2（Human Confirmed 前置）：
   if event == final_review_pass and human_confirmed == false:
-    → 拒绝转移，保持 REVIEWING
+    → 拒绝转移，保持 FINAL_REVIEW
     → 原因：「Human Confirmed 未满足，不能批准需求」
 ```
 
 | 闸门 | 判定者 | 存储字段 | 满足条件 |
 |---|---|---|---|
-| AI Ready | Reviewer Agent | Bitable `AI Ready` (bool) | 七字段全部有实质内容 + 完整性/一致性/可测试性/技术范围非空 全部通过 |
+| AI Ready | Reviewer Agent | Bitable `AI Ready` (bool) | 8 字段全部有实质内容 + 完整性/一致性/可测试性/技术范围非空 全部通过 |
 | Human Confirmed | Author（需求发起人） | Bitable `Human Confirmed` (bool) | 私聊中主动确认（human_confirm_yes 事件） |
 
 ---
@@ -107,9 +111,9 @@
 
 每个 Hook 的输入/输出契约如下。Workflow Service 不感知 Hook 内部实现，Hook 不感知状态机实现。
 
-### onEnter(DISCUSSING)
+### onEnter(DRAFTING)
 
-**触发时机**：每次进入 DISCUSSING 状态，以及每条 author 私聊消息到达时
+**触发时机**：每次进入 DRAFTING 状态，以及每条 author 私聊消息到达时
 
 | | 内容 |
 |---|---|
@@ -118,9 +122,9 @@
 | **能力层** | OpenClaw Author Agent（requirement-writer Skill） |
 | **失败处理** | Hook 层重试最多 2 次，超限记录到 Bitable 追溯字段，推送错误提示给 author |
 
-### onEnter(AI_REVIEWING)
+### onEnter(AI_REVIEW)
 
-**触发时机**：author_submit 事件触发状态迁移到 AI_REVIEWING 时
+**触发时机**：author_submit 事件触发状态迁移到 AI_REVIEW 时
 
 | | 内容 |
 |---|---|
@@ -129,32 +133,32 @@
 | **能力层** | OpenClaw Reviewer Agent（requirement-reviewer Skill） |
 | **失败处理** | 重试 2 次，超限则 ai_ready = false，触发 ai_review_reject，原因「Reviewer Agent 调用失败，请人工介入」 |
 
-### onEnter(HUMAN_CONFIRMING)
+### onEnter(HUMAN_CONFIRM)
 
-**触发时机**：ai_review_pass 事件触发状态迁移到 HUMAN_CONFIRMING 时
+**触发时机**：ai_review_pass 事件触发状态迁移到 HUMAN_CONFIRM 时
 
 执行顺序：
 1. 组装 AI 审查结论（结构化文字）
-2. 若 `需要UI = true`，调 UI 设计 Agent 生成低保真线框图，写入飞书文档
+2. 若 `needs_ui = true`，调 UI 设计 Agent 生成低保真线框图，写入飞书文档
 3. 把「审查结论 + 线框图链接（如有）」推送到 author 私聊
 4. 等待 author 响应（human_confirm_yes / human_confirm_no）
 
 | | 内容 |
 |---|---|
-| **输入（UI 设计部分）** | 完整需求快照（7 字段） |
+| **输入（UI 设计部分）** | 完整需求快照（8 字段） |
 | **输出（UI 设计部分）** | 低保真线框图（组件树 + 主要交互逻辑说明），写入飞书文档 |
 | **能力层** | OpenClaw UI 设计 Agent（ui-design-bridge Skill） |
 
-### onExit(DISCUSSING)
+### onExit(DRAFTING)
 
-**触发时机**：author_submit 事件（DISCUSSING → AI_REVIEWING 转移时）
+**触发时机**：author_submit 事件（DRAFTING → AI_REVIEW 转移时）
 
 1. 将所有讨论字段同步写入 Bitable 进度字段
 2. 调用飞书 Docx API，按 section 幂等重写需求文档
 
-### onEnter(REVIEWING)
+### onEnter(FINAL_REVIEW)
 
-**触发时机**：human_confirm_yes 事件（HUMAN_CONFIRMING → REVIEWING 转移时）
+**触发时机**：human_confirm_yes 事件（HUMAN_CONFIRM → FINAL_REVIEW 转移时）
 
 向项目群发送正式审查卡片，包含：需求文档链接 + 审查结论摘要 + UI 设计稿链接（如有）+ [通过] [打回] 按钮。
 
@@ -211,7 +215,7 @@
 
 ### Section-rewrite 规则
 
-需求文档在每轮 `onExit(DISCUSSING)` 时同步。**必须遵守以下规则，不可例外**：
+需求文档在每轮 `onExit(DRAFTING)` 时同步。**必须遵守以下规则，不可例外**：
 
 1. 每个 section 有稳定的 H2 标题锚点（`## 问题描述`、`## 使用场景`等）
 2. 每次写回只替换该 section 的内容，不追加、不全删重建
@@ -238,7 +242,7 @@
 | req_id | 文本（主键） | `REQ-{PROJECT}-{NNN}` |
 | 名称 | 文本 | 需求名称 |
 | 项目 | 单选 | 项目代号 |
-| 状态 | 单选 | 需求层：CREATED / DRAFTING / AI_REVIEW / HUMAN_CONFIRM / FINAL_REVIEW / APPROVED；规格层后续：SPEC_DRAFTING / SPEC_LOCKED / HARNESS_GENERATING / HARNESS_READY / IMPLEMENTING / CI_PENDING / STAGING / DEPLOYED |
+| 状态 | 单选 | **需求层主状态（6 态）**：CREATED / DRAFTING / AI_REVIEW / HUMAN_CONFIRM / FINAL_REVIEW / APPROVED。规格层 Spec 子状态（SPEC_DRAFTING / SPEC_LOCKED）在 APPROVED 后由 Spec 子状态机承接，不占用本字段。Harness / Impl / CI / 部署层进度由 checkpoint-handler 与 GitHub PR 状态承接，不进入本字段。 |
 | 创建人 | 人员 | |
 | 创建时间 | 日期 | |
 | 需求文档 | 链接 | 飞书文档 URL |
@@ -260,7 +264,7 @@
 - **归属类**：当前 Owner / 当前接手角色
 - **闸门类**：AI Ready（bool）/ Human Confirmed（bool）
 - **追溯类**：最近一次 review 结论 / 最近一次提问 / 最近一次写回时间
-- **UI 类**：需要UI（bool）/ UI设计稿链接（text）/ 高保真原型链接（text）
+- **UI 类**：needs_ui（bool）/ UI设计稿链接（text）/ 高保真原型链接（text）
 
 **命名权威**：字段真相源为仓库根目录 `bitable_schema_v12.json`。任何字段新增/重命名/类型变更，必须先修改该 schema，再同步更新 Coordinator 写入映射、Bitable 建表脚本、Agent 字段契约。禁止绕过 schema 单独修改。
 
@@ -268,15 +272,15 @@
 
 ## 六、UI 设计两阶段详细实现
 
-### 第一阶段：低保真线框图（HUMAN_CONFIRMING）
+### 第一阶段：低保真线框图（HUMAN_CONFIRM）
 
-**触发**：状态进入 HUMAN_CONFIRMING 且 `需要UI = true`
+**触发**：状态进入 HUMAN_CONFIRM 且 `needs_ui = true`
 
 **UI 设计 Agent 调用规格**：
 
 | | 内容 |
 |---|---|
-| **输入** | 需求文档 7 字段（已补全）+ 技术范围声明 |
+| **输入** | 需求文档 8 字段（含技术范围声明） |
 | **输出** | 低保真线框图描述（Markdown 格式）：① 页面列表 ② 每个页面的主要元素布局 ③ 关键交互说明 ④ 各状态说明（空态/加载/错误/成功） |
 | **交付** | 写入飞书文档（需求文档下的"UI 设计草稿"节），更新 Bitable `UI设计稿链接` |
 
@@ -286,10 +290,10 @@
 
 ### 第二阶段：高保真可运行原型（APPROVED 后）
 
-**触发**：REQ APPROVED 且 `需要UI = true`
+**触发**：REQ APPROVED 且 `needs_ui = true`
 
 **输入清单**：
-1. 需求文档 7 字段
+1. 需求文档 8 字段
 2. 第一阶段低保真线框图（飞书文档链接）
 3. 项目设计系统文档（Coordinator 从飞书读取，注入最新版本）
 
@@ -310,7 +314,7 @@
 **确认后操作**：
 1. Coordinator 将本次设计决策 append 进项目设计系统文档（飞书，append-only）
 2. 更新 Bitable `高保真原型链接`
-3. 进入 Spec 生成阶段（需要UI = true 时，Spec 转化 Agent 从原型直接提取 UI 技术规格 → design-ui.md）
+3. 进入 Spec 生成阶段（needs_ui = true 时，Spec 转化 Agent 从原型直接提取 UI 技术规格 → design-ui.md）
 
 ---
 
@@ -342,7 +346,21 @@
 | 情况 | 处理方式 |
 |---|---|
 | 新需求 | 在创建群发起"创建需求"命令 → 生成新 REQ ID |
-| 审查前修改 | 在 author 私聊继续补全/修改，状态在 DISCUSSING ↔ AI_REVIEWING ↔ HUMAN_CONFIRMING 之间循环 |
-| 审查后变更（小改） | final_review_reject → 回 DISCUSSING，同一 REQ ID 继续迭代 |
+| 审查前修改 | 在 author 私聊继续补全/修改，状态在 DRAFTING ↔ AI_REVIEW ↔ HUMAN_CONFIRM 之间循环 |
+| 审查后变更（小改） | final_review_reject → 回 DRAFTING，同一 REQ ID 继续迭代 |
 | 审查后变更（大改） | 新开 REQ ID，走 v2 流程，旧 REQ ID 标记 SUPERSEDED |
 | Bug 修复（已上线） | 不走需求层，直接在 GitHub 开 PR |
+
+### 需求版本 vs Spec 版本的关系
+
+本系统中两类版本号语义严格区分，互相不耦合：
+
+| 维度 | 需求版本（`requirement_version`） | Spec 版本（`spec_version`） |
+|---|---|---|
+| 归属 | 需求层（Bitable 需求主表字段） | 规格层（`spec/REQ-.../acceptance.yaml` 中声明） |
+| 变更触发 | 同一 REQ ID 内的需求文档正式变更（`final_review_reject` 后再次 APPROVED 算一次新版）；大改则开新 REQ ID 而非新 `requirement_version` | 已 SPEC_LOCKED 的 Spec 需要更新（AC 写错、性能收紧、非阻断新增 AC）时 increment |
+| 与 Spec 的关系 | 每个 `requirement_version` 对应 **0 或 1** 条当前有效 Spec 链（即最新 `spec_version`）；历史 `spec_version` 为该需求版本下的演进记录 | 每个 `spec_version` 必须声明其基于的 `requirement_version`（`acceptance.yaml` 顶部 `based_on_requirement_version` 字段） |
+| Fallback 影响 | 被触发"需求回炉 fallback"后，需求主态从 APPROVED 回到 DRAFTING，下次再次 APPROVED 时 `requirement_version` +1 | 回炉时当前 Spec 草稿作废（`SPEC_REJECTED`），不 increment `spec_version`；新需求版本下的首个 Spec 仍为 v1 |
+| 锁定时刻 | 进入 APPROVED 时锁定；回炉会解锁 | SPEC_LOCKED 时锁定；只允许通过新 `spec_version` 修改，不原地改 |
+
+**不允许的耦合**：禁止用 `requirement_version` 推算 `spec_version`，也禁止用 `spec_version` 反推需求变更次数。二者在时间线上独立演进，仅通过 `based_on_requirement_version` 字段建立追溯。

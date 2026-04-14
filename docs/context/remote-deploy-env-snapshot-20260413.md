@@ -103,3 +103,27 @@ curl http://47.251.81.45:8004/health
 ## 7. 可复用的 Harness Scaffold 能力
 
 `harness-scaffold-app-1`（端口 8001）已部署，功能待确认。`checkpoint-handler`（端口 8002）已稳定运行，是后续规格层与 GitHub CI 联动的接入点。
+
+---
+
+## 8. 历史警告与已知问题（从已废弃的 current-environment-context.md 迁入）
+
+### 8.1 Bitable 线上数据需要关注的迁移点
+
+- 远端 author / reviewer 模板仍需持续校验，避免旧事件名或旧状态名回流
+- Bitable 线上旧记录存在 14 态历史值（含 `HARNESS_GENERATING` / `HARNESS_READY` / `IMPLEMENTING` / `CI_PENDING` / `STAGING` / `DEPLOYED` 等），需要执行状态值迁移：**需求层主状态字段**统一到现行的 6 态（`CREATED` / `DRAFTING` / `AI_REVIEW` / `HUMAN_CONFIRM` / `FINAL_REVIEW` / `APPROVED`）；**规格层子状态**（`SPEC_DRAFTING` / `SPEC_LOCKED`）使用独立字段或单独子状态机承接；**Harness/Impl/CI/部署层状态**不再进入 Bitable 需求表的状态字段（由 checkpoint-handler 与 GitHub PR 状态承接）
+- `创建时间` 的确定性写入尚未形成稳定实现
+
+### 8.2 不应直接继承的旧方案（架构反模式记录）
+
+以下设计属于早期过渡形态，新项目与新代码路径不应重走：
+
+- 主协调能力（Coordinator）与深度需求写作耦合在同一个 Agent
+- 让 Coordinator 参与需求文档正文编写（正文由 author Agent 负责，Coordinator 只路由和状态管理）
+- reviewer 直接推进人工确认或正式审查（reviewer 仅输出 pass/reject 结论，状态流转由 Coordinator 统一推进）
+- 把项目专属逻辑塞进共享模板基础设施（项目配置走 `project_configs`，模板只承载通用结构）
+
+### 8.3 已验证的最小端到端闭环（需求层）
+
+截至 2026-04-13，以下 8 步闭环在远端稳定运行：
+飞书群创建需求 → 生成 REQ ID → 创建需求文档 → 写入 Bitable → `CREATED -> DRAFTING` → `DRAFTING -> AI_REVIEW` → reviewer 读取上下文并上报审查结论 → Coordinator 根据事件推进到 `DRAFTING`（打回）或 `HUMAN_CONFIRM`（通过）。

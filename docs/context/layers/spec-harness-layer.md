@@ -75,14 +75,14 @@ Spec 存储于 GitHub `spec/REQ-{PROJECT}-{NNN}/` 目录：
 spec/REQ-PROJECT-001/
   requirements.md       ← Layer 1（自动生成）
   design.md             ← Layer 2（唯一人工 review 层）
-  design-ui.md          ← Layer 2 UI 技术规格（需要UI = true 时）
+  design-ui.md          ← Layer 2 UI 技术规格（needs_ui = true 时）
   acceptance.yaml       ← Layer 3 ACM
   tasks.md              ← Layer 4
 ```
 
 ### Layer 1：requirements.md（自动生成）
 
-从需求文档 7 字段转换为 EARS 格式。仅作格式化中间产物，无需人工 review。
+从需求文档 8 字段转换为 EARS 格式。仅作格式化中间产物，无需人工 review。
 
 ```markdown
 # REQ-PROJECT-001 Requirements
@@ -152,7 +152,7 @@ POST /api/v1/risk-report
 - 新增表 risk_reports 不影响现有表结构
 ```
 
-### Layer 2（可选）：design-ui.md（需要UI = true 时）
+### Layer 2（可选）：design-ui.md（needs_ui = true 时）
 
 从高保真原型直接提取，不由 AI 凭空推导。
 
@@ -328,7 +328,7 @@ compatibility:
 - 对应 AC：AC-001、AC-002、AC-003
 - 依赖：Task-2
 
-### Task-4：前端页面（需要UI = true）
+### Task-4：前端页面（needs_ui = true）
 - 实现 RiskReportPage（见 design-ui.md）
 - 实现 RiskBadge、CreditReportInput、RiskReportPage 三个新组件
 - 对应 AC：AC-UI-001
@@ -337,9 +337,36 @@ compatibility:
 
 ---
 
+## 一bis、飞书 9 节 Spec ↔ GitHub 四文件 Spec 映射
+
+> 规格层有两阶段产物（见方法论 §4.2 "两阶段 Spec 模型"）：飞书 9 节 Spec 为协作草稿，GitHub 四文件 Spec 为机器可解析结构。卡点1a 是二者的单向转化锁定点。下表给出每一节的落点，spec-author Agent 的 9 节输出到 checkpoint-handler 的四文件转化必须按此映射执行，不得自由发挥。
+
+| 飞书 Spec 节 | 主要落点 | 次要落点 |
+|---|---|---|
+| §1 背景与目标 | `design.md` 头部"背景" | `requirements.md` 头部 `req_id` / `summary` |
+| §2 API 入参定义 | `design.md` §接口契约（入参表） | `acceptance.yaml` 每条 AC 的 `given` 字段（结构化输入） |
+| §3 API 出参定义 | `design.md` §接口契约（出参 + 错误码表） | `acceptance.yaml` 每条 AC 的 `then` 字段（期望输出） |
+| §4 异常处理与边界条件 | `design.md` §接口契约（错误码表） | `acceptance.yaml` 异常类 AC 条目（AC-xxx_invalid_*） |
+| §5 测试策略 | `acceptance.yaml`（AC 全集，含 P0 标记） | `tasks.md`（测试实现任务） |
+| §6 性能与可用性指标 | `design.md` §非功能约束 | `acceptance.yaml` 非功能类 P0 AC（P99/QPS/可用性） |
+| §7 实现范围 | `design.md` §架构接合点 | `tasks.md` 任务范围声明（in/out of scope） |
+| §8.1 顶层架构背景 | `design.md` §架构接合点 | — |
+| §8.2 项目级上下文消费声明 | `design.md` §上下文消费（新增子节，列出消费的 ARCHITECTURE.yaml 版本、ACM 快照日期等） | — |
+| §8.3 关键架构决策 | `design.md` §架构决策（每条"决策 + 依据 + 影响"三要素保留） | — |
+| §8.4 存储与数据流设计 | `design.md` §数据模型变更 | — |
+| §9 数据模型 | `design.md` §数据模型变更（表/字段定义） | `tasks.md` Task-1 数据库迁移 |
+
+**UI 补充**：`needs_ui = true` 时，高保真原型 → `design-ui.md`（组件树 + 组件接口 + 交互规格），独立于上表 9 节映射；视觉类 AC（AC-UI-xxx）在 `acceptance.yaml` 中与功能 AC 并列。
+
+**覆盖性校验**：卡点1a 合并前，checkpoint-handler 必须校验飞书 Spec 9 节全部非空，且上表每一行的主要落点在四文件中可定位（缺失任一则打回）。
+
+---
+
 ## 二、Spec 生成流程
 
-### Phase 1：人工桥接（当前实施）
+> 本节"阶段 A / 阶段 B"是 Spec 生成方式的演进路径，与方法论 §六 的全局 Phase 命名相互独立。阶段 A 是当前实施方式，阶段 B 是 Phase 2 目标完成后的自动化形态。
+
+### 阶段 A：人工桥接（当前实施方式）
 
 ```
 1. Coordinator 通知：「REQ-PROJECT-001 已 APPROVED，可进入规格层」
@@ -353,7 +380,7 @@ compatibility:
 4. checkpoint-handler 发送卡点1a 飞书卡片
 ```
 
-### Phase 2：半自动化（后续实施）
+### 阶段 B：半自动化（Phase 2 交付目标）
 
 ```
 1. 人：@Coordinator 创建Spec REQ-PROJECT-001
@@ -443,7 +470,7 @@ harness/tests/
 │   │   ├── test_case.py
 │   │   └── fixtures/
 │   │       └── invalid_license.jpg
-│   └── visual/                        # 需要UI = true 时
+│   └── visual/                        # needs_ui = true 时
 │       ├── test_visual_regression.py
 │       └── screenshots/               # 截图基线（首次 CI 通过时建立）
 │           ├── idle_state.png
@@ -568,7 +595,44 @@ P0 全覆盖：✅（4/4）
 
 ---
 
-## 四、Spec 版本管理规则
+## 四、Spec 子状态机与 fallback
+
+需求主态在 APPROVED 后不再变化（见 [requirement-layer.md](requirement-layer.md) §一）。规格层 Spec 子层引入独立的子状态字段 `spec_status`（Bitable 字段名：`Spec状态`，枚举：`NONE` / `SPEC_DRAFTING` / `SPEC_LOCKED` / `SPEC_REJECTED`），不覆盖需求主态。
+
+### 子状态转移表
+
+| 当前 `spec_status` | 事件 | 目标 | 触发方 | 说明 |
+|---|---|---|---|---|
+| NONE | spec_start | SPEC_DRAFTING | Coordinator 收到 spec-author Agent 的 `spec_start` 回调 | 同时创建飞书 Spec 文档，写入 `spec_document_url` |
+| SPEC_DRAFTING | spec_submit | SPEC_DRAFTING（保持）| spec-author 上报 9 节完稿 | 仅更新 `spec_review_summary`，不立即转 SPEC_LOCKED |
+| SPEC_DRAFTING | ai_review_reject | SPEC_DRAFTING（保持）| spec-reviewer 审查未通过 | spec-author 继续修改；回合数计入 `spec_iteration_round` |
+| SPEC_DRAFTING | ai_review_pass | SPEC_DRAFTING（保持）| spec-reviewer 通过 | 等待人工卡点1a |
+| SPEC_DRAFTING | checkpoint_1a_pass | SPEC_LOCKED | 人（飞书卡片"确认提交"按钮） | 触发飞书 9 节 → GitHub 四文件转化；飞书 Spec 文档自此只读 |
+| SPEC_DRAFTING | checkpoint_1a_reject | SPEC_DRAFTING（保持）| 人（飞书卡片"返回修改"按钮）| spec-author 继续迭代 |
+| SPEC_DRAFTING | spec_abort | SPEC_REJECTED | 人（显式放弃）或超时清理 | **需求主态回到 DRAFTING**（见下方 §"需求回炉 fallback"） |
+| SPEC_LOCKED | — | （终态） | — | 任何进一步变更走"Spec 版本演进"（新 spec_version），不改现有 SPEC_LOCKED |
+
+### 需求回炉 fallback（跨态降级）
+
+若 Spec 阶段发现需求本身存在不可修复问题（字段不完整 / 技术范围声明与现实严重不符 / 核心验收标准无法落实），允许从 Spec 子状态机降级回需求主态机：
+
+触发条件（任一）：
+- 技术负责人在 Spec 讨论中主动判定"需求需要重做"，向 Coordinator 发送 `spec_to_requirement_rework` 事件
+- spec-reviewer 连续 3 轮 `ai_review_reject` 且共同根因指向需求层字段（由 Coordinator 聚合判定）
+
+执行动作（Coordinator 原子执行）：
+1. `spec_status` → SPEC_REJECTED（标记当前 Spec 草稿作废）
+2. `requirement.status`：APPROVED → DRAFTING（需求主态回炉）
+3. 将 `spec_review_summary` 作为 "需求层需关注的问题" 写入需求文档的讨论追溯节
+4. 通知 author 私聊：需求已回炉，请继续补全
+5. 飞书 Spec 文档保留（只读，标记 `[已作废 · SPEC_REJECTED]`），供审计追溯
+6. 同一 REQ ID 继续使用；若后续再次进入 Spec 阶段，`spec_version` 从 v1 重新开始（上个作废版本保留为 v0.rejected）
+
+该 fallback 是**唯一允许从规格层回退到需求层的路径**，必须经 Coordinator 记录事件日志，不得由 Agent 直接改写状态。
+
+---
+
+## 五、Spec 版本管理规则
 
 | 情况 | 处理方式 |
 |---|---|

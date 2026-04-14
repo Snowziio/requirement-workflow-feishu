@@ -1,4 +1,18 @@
-# 顶层与全景设计上下文
+> ⚠️ **已归档 — 请勿再更新或引用**（2026-04-15）
+>
+> 本文件已废弃。多处内容与现行方法论冲突：
+> - §6"本项目暂不负责 Spec/Harness 自动生成" 与方法论 v2.0 Phase 2 目标冲突
+> - §9 "关联来源" 引用的 v1.3 方法论已归档
+> - §7 文档体系规划（`specs/` `decisions/` `reference/` 四目录）与仓库实际结构不符
+>
+> 现行顶层设计请参考：
+> - **方法论与三维框架** → `docs/context/harness-engineering-methodology-v2.0.md`
+> - **三层分离与层间契约** → `docs/context/infra/context-chain-principle.md`
+> - **仓库文档结构** → 以实际目录（`docs/context/` / `docs/agents/` / `docs/plans/` / `docs/specs/`）为准
+>
+> 保留本文件仅用于追溯早期三层架构判断（§8 判断一至四）的原始表达。
+
+# 顶层与全景设计上下文 [ARCHIVED]
 
 本次开发最终目标：在新的项目里落地三层架构方案，形成一套可执行的上下文文档包，支持从现有 OpenClaw/飞书环境无缝启动实现工作。
 

@@ -97,7 +97,7 @@ REQ_ID: {REQ-{PROJECT}-{NNN}}
 
 ## Harness 通过标准（CI 必须全绿才能合并 PR）
 - P0 AC 对应测试全部通过
-- 视觉回归测试无超阈值差异（需要UI = true 时）
+- 视觉回归测试无超阈值差异（needs_ui = true 时）
 - 无新增 lint 错误
 ```
 
