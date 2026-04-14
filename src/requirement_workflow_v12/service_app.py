@@ -1442,17 +1442,17 @@ class CoordinatorRuntimeApp:
                                         "width": "weighted",
                                         "weight": 1,
                                         "elements": [
+                                            {"tag": "div", "text": {"tag": "plain_text", "content": "优先级"}},
                                             {
                                                 "tag": "select_static",
                                                 "name": "priority",
-                                                "label": {"tag": "plain_text", "content": "优先级"},
                                                 "placeholder": {"tag": "plain_text", "content": "选填"},
                                                 "options": [
                                                     {"text": {"tag": "plain_text", "content": "P0 紧急"}, "value": "P0"},
                                                     {"text": {"tag": "plain_text", "content": "P1 高"}, "value": "P1"},
                                                     {"text": {"tag": "plain_text", "content": "P2 普通"}, "value": "P2"},
                                                 ],
-                                            }
+                                            },
                                         ],
                                     },
                                     {
@@ -1460,12 +1460,12 @@ class CoordinatorRuntimeApp:
                                         "width": "weighted",
                                         "weight": 1,
                                         "elements": [
+                                            {"tag": "div", "text": {"tag": "plain_text", "content": "期望完成时间"}},
                                             {
                                                 "tag": "date_picker",
                                                 "name": "expected_due_date",
-                                                "label": {"tag": "plain_text", "content": "期望完成时间"},
                                                 "placeholder": {"tag": "plain_text", "content": "选填"},
-                                            }
+                                            },
                                         ],
                                     },
                                     {
@@ -1473,16 +1473,16 @@ class CoordinatorRuntimeApp:
                                         "width": "weighted",
                                         "weight": 1,
                                         "elements": [
+                                            {"tag": "div", "text": {"tag": "plain_text", "content": "需要 UI 设计"}},
                                             {
                                                 "tag": "select_static",
                                                 "name": "needs_ui",
-                                                "label": {"tag": "plain_text", "content": "需要 UI 设计"},
                                                 "placeholder": {"tag": "plain_text", "content": "选填"},
                                                 "options": [
                                                     {"text": {"tag": "plain_text", "content": "是"}, "value": "yes"},
                                                     {"text": {"tag": "plain_text", "content": "否"}, "value": "no"},
                                                 ],
-                                            }
+                                            },
                                         ],
                                     },
                                 ],
