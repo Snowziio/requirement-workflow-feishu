@@ -154,6 +154,8 @@ class CoordinatorRuntimeApp:
                     status, payload = app.handle_openclaw_review_result_callback(raw_body, headers=headers)
                 elif self.path == "/queries/openclaw/requirement-context":
                     status, payload = app.handle_openclaw_requirement_context_query(raw_body, headers=headers)
+                elif self.path == "/callbacks/openclaw/spec-turn":
+                    status, payload = app.handle_openclaw_spec_turn_callback(raw_body, headers=headers)
                 else:
                     status, payload = 404, {"error": "not_found"}
                 body = json.dumps(payload, ensure_ascii=False).encode()
@@ -900,7 +902,12 @@ class CoordinatorRuntimeApp:
             )
             self._sync_requirement_outputs(requirement)
             self._save_state()
-            self._dispatch_transition_notifications(requirement, trigger=normalized_event)
+            if requirement.status == WorkflowStatus.SPEC_LOCKED:
+                self._dispatch_transition_notifications(requirement, trigger="spec_locked")
+            elif requirement.status == WorkflowStatus.SPEC_DRAFTING and normalized_event == "ai_review_reject":
+                self._dispatch_transition_notifications(requirement, trigger="spec_review_reject")
+            else:
+                self._dispatch_transition_notifications(requirement, trigger=normalized_event)
         except PermissionError as exc:
             return 400, {"error": "invalid_payload", "message": str(exc)}
         except ValueError as exc:
@@ -973,6 +980,108 @@ class CoordinatorRuntimeApp:
             "ok": True,
             "context": context_payload,
         }
+
+    def handle_openclaw_spec_turn_callback(
+        self,
+        raw_body: bytes,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, object]]:
+        auth_error = self._validate_openclaw_callback_auth(raw_body, headers=headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            payload = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return 400, {"error": "invalid_json"}
+
+        req_id = str(payload.get("req_id", "")).strip()
+        event = str(payload.get("event", "")).strip()
+        summary = str(payload.get("summary", "")).strip()
+        spec_document_url_from_payload = str(payload.get("spec_document_url", "")).strip()
+
+        if not req_id or not event or not summary:
+            return 400, {"error": "invalid_payload", "message": "req_id、event、summary 为必填字段。"}
+
+        supported_events = {"spec_start", "spec_submit"}
+        if event not in supported_events:
+            return 400, {"error": "invalid_payload", "message": f"不支持的 spec 事件：{event}。"}
+
+        LOGGER.info("Received spec-turn callback req_id=%s event=%s", req_id, event)
+
+        requirement = self.service.get_requirement(req_id)
+        if requirement is None:
+            return 404, {"error": "not_found", "message": f"未知需求：{req_id}"}
+
+        if event == "spec_start":
+            if requirement.status != WorkflowStatus.APPROVED:
+                return 400, {
+                    "error": "invalid_state",
+                    "message": f"spec_start 只能在 APPROVED 状态执行，当前状态：{requirement.status.value}",
+                }
+            try:
+                created_doc = self.gateway.create_spec_document(requirement)
+            except Exception as exc:
+                LOGGER.exception("Failed to create spec document for %s", req_id)
+                return 500, {"error": "create_spec_document_failed", "message": str(exc)}
+
+            spec_doc_id = created_doc.document_id if created_doc else ""
+            spec_doc_url = created_doc.document_url if created_doc else ""
+
+            try:
+                requirement = self.service.submit_spec_start(
+                    req_id,
+                    spec_document_id=spec_doc_id,
+                    spec_document_url=spec_doc_url,
+                )
+            except ValueError as exc:
+                return 400, {"error": "invalid_state", "message": str(exc)}
+
+            self._sync_requirement_outputs(requirement)
+            self._save_state()
+            LOGGER.info(
+                "Spec start accepted req_id=%s status=%s spec_document_id=%s",
+                req_id, requirement.status.value, spec_doc_id,
+            )
+            return 200, {
+                "ok": True,
+                "req_id": req_id,
+                "status": requirement.status.value,
+                "spec_document_id": requirement.spec_document_id,
+                "spec_document_url": requirement.spec_document_url,
+                "requirement_document_url": requirement.document_url,
+            }
+
+        if event == "spec_submit":
+            if requirement.status != WorkflowStatus.SPEC_DRAFTING:
+                return 400, {
+                    "error": "invalid_state",
+                    "message": f"spec_submit 只能在 SPEC_DRAFTING 状态执行，当前状态：{requirement.status.value}",
+                }
+            try:
+                requirement = self.service.submit_spec_submit(req_id, summary=summary)
+            except ValueError as exc:
+                return 400, {"error": "invalid_state", "message": str(exc)}
+
+            if spec_document_url_from_payload:
+                requirement.spec_document_url = spec_document_url_from_payload
+
+            reviewer_id = self.settings.spec_reviewer_feishu_id
+            if reviewer_id:
+                try:
+                    self.gateway.send_text(
+                        reviewer_id,
+                        self._build_spec_review_handoff(requirement),
+                        receive_id_type="open_id",
+                    )
+                except Exception as exc:
+                    LOGGER.warning("Failed to notify spec reviewer req_id=%s: %s", req_id, exc)
+
+            self._save_state()
+            LOGGER.info("Spec submit accepted req_id=%s summary=%s", req_id, summary)
+            return 200, {"ok": True, "message": "已通知 Spec Reviewer 开始审查"}
+
+        return 400, {"error": "invalid_event"}
 
     def _handle_card_action_payload(self, payload: dict[str, object]) -> tuple[int, dict[str, object]]:
         LOGGER.info("Handling card payload: %s", payload)
@@ -1567,6 +1676,15 @@ class CoordinatorRuntimeApp:
             "要求：如果需求文档链接已存在，必须直接在该文档上继续撰写，不要重新创建第二份文档。"
         )
 
+    def _build_spec_review_handoff(self, requirement: Requirement) -> str:
+        return (
+            f"请开始 Spec 审查 {requirement.req_id}\n"
+            f"需求名称：{requirement.name}\n"
+            f"Spec 文档：{requirement.spec_document_url or '（创建中）'}\n"
+            f"需求文档：{requirement.document_url or '（待同步）'}\n\n"
+            f"请按 6+2+1 维度审查，单次上报 ai_review_pass 或 ai_review_reject。"
+        )
+
     def _extract_message_context(self, data: P2ImMessageReceiveV1) -> MessageContext | None:
         event = getattr(data, "event", None)
         if event is None or event.message is None:
@@ -1606,6 +1724,45 @@ class CoordinatorRuntimeApp:
                 LOGGER.warning("Failed to update bitable record for %s: %s", requirement.req_id, exc)
 
     def _dispatch_transition_notifications(self, requirement: Requirement, *, trigger: str) -> None:
+        # Spec Agent notification on APPROVED
+        if trigger == "final_review_passed":
+            spec_agent_id = self.settings.spec_agent_feishu_id
+            if spec_agent_id:
+                try:
+                    self.gateway.send_text(
+                        spec_agent_id,
+                        (
+                            f"请开始 Spec 撰写 {requirement.req_id}\n"
+                            f"需求名称：{requirement.name}\n"
+                            f"需求文档：{requirement.document_url or '（待同步）'}\n\n"
+                            f"调用 spec_start callback 正式开始。"
+                        ),
+                        receive_id_type="open_id",
+                    )
+                except Exception as exc:
+                    LOGGER.warning(
+                        "Failed to notify spec agent for %s: %s", requirement.req_id, exc
+                    )
+
+        # Spec Agent notification on spec review reject
+        if trigger == "spec_review_reject":
+            spec_agent_id = self.settings.spec_agent_feishu_id
+            if spec_agent_id:
+                try:
+                    self.gateway.send_text(
+                        spec_agent_id,
+                        (
+                            f"Spec 审查未通过，请根据以下意见修改 {requirement.req_id}：\n\n"
+                            f"{requirement.spec_review_summary}\n\n"
+                            f"修改后重新调用 spec_submit 提交。"
+                        ),
+                        receive_id_type="open_id",
+                    )
+                except Exception as exc:
+                    LOGGER.warning(
+                        "Failed to notify spec agent for revision %s: %s", requirement.req_id, exc
+                    )
+
         card = self._build_transition_notification_card(requirement, trigger=trigger)
         text = self._build_transition_notification_text(requirement, trigger=trigger)
         if card is None and not text:
@@ -1614,7 +1771,7 @@ class CoordinatorRuntimeApp:
         targets: list[tuple[str, str]] = []
         if self._is_feishu_chat_id(requirement.project_group_id):
             targets.append((requirement.project_group_id, "chat_id"))
-        if requirement.creator_user_id:
+        if requirement.creator_user_id and trigger not in {"spec_locked", "spec_review_reject"}:
             targets.append((requirement.creator_user_id, self.settings.feishu_user_id_type))
 
         for receive_id, receive_id_type in targets:
@@ -1659,6 +1816,8 @@ class CoordinatorRuntimeApp:
         bitable_url = self.gateway.bitable_url() if hasattr(self.gateway, "bitable_url") else ""
         if bitable_url:
             links.append(f"[查看多维表格]({bitable_url})")
+        if hasattr(requirement, "spec_document_url") and requirement.spec_document_url and trigger == "spec_locked":
+            links.append(f"[查看 Spec 文档]({requirement.spec_document_url})")
         if links:
             elements.append({"tag": "markdown", "content": " | ".join(links)})
 
@@ -1810,6 +1969,22 @@ class CoordinatorRuntimeApp:
                 "需求已创建并完成 author 接手。",
                 "当前需求进入需求构造阶段，由需求构造助手继续推进文档。",
                 f"请需求提出者继续与 {author_name} 私聊完成多轮需求构造。",
+            )
+        if trigger == "spec_locked":
+            return (
+                "green",
+                f"{requirement.req_id} Spec 已锁定",
+                requirement.spec_review_summary or "Spec Reviewer 审查通过",
+                "Spec 文档已锁定，可进入 Harness 生成阶段（卡点1a）。",
+                "无需操作，流程自动继续。",
+            )
+        if trigger == "spec_review_reject":
+            return (
+                "orange",
+                f"{requirement.req_id} Spec 审查未通过",
+                requirement.spec_review_summary or "Spec 需要修改",
+                "Spec Reviewer 判定当前文档未达到标准，已通知 Spec Agent 修改。",
+                "等待 Spec Agent 修改后重新提交。",
             )
         return ("grey", "", "", "", "")
 
