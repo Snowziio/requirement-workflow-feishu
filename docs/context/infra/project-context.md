@@ -113,6 +113,62 @@ tech_stack:
   database: PostgreSQL 15
   orm: SQLAlchemy 2.0
   test_framework: pytest 8.0
+
+# ---- 以下为 v2.0 新增节（AI 集成登记 / 硬约束清单 / IM 平台集成） ----
+# 所有 ID 命名空间：
+#   AC-xxx = Acceptance Criterion（验收标准，位于 acceptance.yaml，不在本文件）
+#   KC-xxx = Known Constraint（硬约束条目，位于本文件 known_constraints 节）
+# 注：ACM = Acceptance Criteria Matrix，即 acceptance.yaml 的整体；
+#     AC 与 KC 是两套独立命名空间，不得复用。
+
+ai_integrations:
+  # 登记每个 AI 能力消费点。运行时配置（token 预算 / 限流 / 重试参数）
+  # 由各 Agent 自身配置管理，不进入本 yaml。
+  - name: spec-author
+    provider: openclaw           # openclaw | anthropic_api | openai | aliyun_qianwen | ...
+    model: claude-sonnet-4-6
+    purpose: "Spec 9 节撰写"
+    consumer_module: spec-author-agent
+    prompt_source: "docs/agents/spec-author/SKILL.md"
+    fallback: "none"             # 或另一个 provider 标识
+    introduced_in: REQ-HARNESS-002
+
+known_constraints:
+  # 业务/合规/架构硬约束。spec-reviewer 审查 Spec 时必须把每条
+  # Spec 内容与本清单比对，违反即阻断。
+  - id: KC-001
+    category: compliance         # compliance | performance | architecture | business
+    statement: "所有用户凭证必须经飞书 tenant_access_token 签发，禁止本地存储明文"
+    source: "外部合规要求"        # REQ-xxx / 外部合规要求 / 技术决策记录
+    affects: [risk-assessment-service, credit-gateway]
+  - id: KC-002
+    category: architecture
+    statement: "Agent 不得直接读写 Bitable，状态变更一律通过 Coordinator callback"
+    source: REQ-LEGACY-002
+    affects: [spec-author-agent, spec-reviewer-agent, requirement-author-agent]
+
+external_integrations:
+  # 企业 IM / 协作平台的集成登记。与 external_dependencies（第三方 API）区分：
+  # external_integrations 描述"本项目嵌入哪些协作平台"，
+  # external_dependencies 描述"本项目调用哪些外部业务 API"。
+  - platform: feishu              # feishu | wecom | dingtalk
+    app_id: "<APP_ID_PLACEHOLDER>"  # 模板中占位，实例化部署时填真实值
+    scopes: [docx:document, im:message, bitable:app, contact:user.id:readonly]
+    webhook_endpoints: [/callbacks/feishu/event]
+    introduced_in: REQ-HARNESS-001
+```
+
+**data_models 节字段增强**：`data_models[*]` 除既有 `columns` / `introduced_in` / `spec_version` 外，新增两个可选字段，帮助 Coding Agent 生成方案时不猜测存储形态：
+
+```yaml
+data_models:
+  - name: risk_reports
+    storage: postgres             # postgres | mysql | redis | s3 | feishu_bitable | local_file
+    retention: "180d"             # 保留策略：固定时长 / "permanent" / "until_req_closed"
+    # 以下字段保持原有语义
+    columns: { ... }
+    introduced_in: REQ-PROJECT-001
+    spec_version: 1
 ```
 
 ---
