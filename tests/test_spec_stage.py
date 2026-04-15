@@ -234,7 +234,12 @@ def _make_app_with_approved_req():
 
 def test_spec_start_callback_creates_doc_and_transitions_state():
     app, req_id, gateway = _make_app_with_approved_req()
-    body = json.dumps({"req_id": req_id, "event": "spec_start", "summary": "开始 Spec 撰写"}).encode()
+    req = app.service.get_requirement(req_id)
+    req.active_spec_context_token = "test_tok"
+    body = json.dumps({
+        "req_id": req_id, "event": "spec_start", "summary": "开始 Spec 撰写",
+        "context_token": "test_tok",
+    }).encode()
     status, payload = app.handle_openclaw_spec_turn_callback(body)
     assert status == 200
     assert payload["ok"] is True
@@ -250,7 +255,12 @@ def test_spec_start_callback_creates_doc_and_transitions_state():
 
 def test_spec_start_blocked_if_not_approved():
     app, req_id, gateway = _make_app_with_approved_req()
-    body = json.dumps({"req_id": req_id, "event": "spec_start", "summary": "start"}).encode()
+    req = app.service.get_requirement(req_id)
+    req.active_spec_context_token = "test_tok"
+    body = json.dumps({
+        "req_id": req_id, "event": "spec_start", "summary": "start",
+        "context_token": "test_tok",
+    }).encode()
     app.handle_openclaw_spec_turn_callback(body)
     # Try to start again (now SPEC_DRAFTING, not APPROVED)
     status, payload = app.handle_openclaw_spec_turn_callback(body)
@@ -262,13 +272,19 @@ def test_spec_submit_sends_card_to_project_group():
     req = app.service.get_requirement(req_id)
     assert req is not None
     req.project_group_id = "oc_submit_group"
-    start_body = json.dumps({"req_id": req_id, "event": "spec_start", "summary": "start"}).encode()
+    req.active_spec_context_token = "test_tok"
+    start_body = json.dumps({
+        "req_id": req_id, "event": "spec_start", "summary": "start",
+        "context_token": "test_tok",
+    }).encode()
     app.handle_openclaw_spec_turn_callback(start_body)
     submit_body = json.dumps({
         "req_id": req_id,
         "event": "spec_submit",
         "summary": "9节已完成",
         "spec_document_url": "https://feishu.cn/docx/spec_doc",
+        "context_token": "test_tok",
+        "architecture_commit_sha": "test_sha",
     }).encode()
     status, payload = app.handle_openclaw_spec_turn_callback(submit_body)
     assert status == 200
@@ -281,7 +297,12 @@ def test_spec_submit_sends_card_to_project_group():
 
 def test_review_result_on_spec_drafting_transitions_to_spec_locked():
     app, req_id, gateway = _make_app_with_approved_req()
-    start_body = json.dumps({"req_id": req_id, "event": "spec_start", "summary": "start"}).encode()
+    req = app.service.get_requirement(req_id)
+    req.active_spec_context_token = "test_tok"
+    start_body = json.dumps({
+        "req_id": req_id, "event": "spec_start", "summary": "start",
+        "context_token": "test_tok",
+    }).encode()
     app.handle_openclaw_spec_turn_callback(start_body)
     review_body = json.dumps({
         "req_id": req_id,
@@ -300,7 +321,11 @@ def test_spec_locked_sends_notification_card_to_project_group():
     req = app.service.get_requirement(req_id)
     assert req is not None
     req.project_group_id = "oc_testgroup123"
-    start_body = json.dumps({"req_id": req_id, "event": "spec_start", "summary": "start"}).encode()
+    req.active_spec_context_token = "test_tok"
+    start_body = json.dumps({
+        "req_id": req_id, "event": "spec_start", "summary": "start",
+        "context_token": "test_tok",
+    }).encode()
     app.handle_openclaw_spec_turn_callback(start_body)
     review_body = json.dumps({
         "req_id": req_id,
