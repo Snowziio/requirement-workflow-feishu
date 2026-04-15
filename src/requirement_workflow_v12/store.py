@@ -24,6 +24,16 @@ LEGACY_STATUS_ALIASES = {
     "HUMAN_CONFIRMING": WorkflowStatus.HUMAN_CONFIRM.value,
     "REVIEWING": WorkflowStatus.FINAL_REVIEW.value,
     "REQ_APPROVED": WorkflowStatus.APPROVED.value,
+    # Spec 子状态从 2026-04 起不再写入 Requirement.status；历史 state.json 里
+    # 残留的 SPEC_DRAFTING/SPEC_LOCKED 一律回推为 APPROVED，spec_status 由下面
+    # 的 LEGACY_SPEC_STATUS_BACKFILL 补齐。
+    "SPEC_DRAFTING": WorkflowStatus.APPROVED.value,
+    "SPEC_LOCKED": WorkflowStatus.APPROVED.value,
+}
+
+LEGACY_SPEC_STATUS_BACKFILL = {
+    "SPEC_DRAFTING": "SPEC_DRAFTING",
+    "SPEC_LOCKED": "SPEC_LOCKED",
 }
 
 
@@ -78,6 +88,8 @@ class JsonStateStore:
         raw_status = str(data.get("status", WorkflowStatus.CREATED.value))
         normalized_status = LEGACY_STATUS_ALIASES.get(raw_status, raw_status)
         raw_spec_status = data.get("spec_status")
+        if raw_spec_status in (None, "") and raw_status in LEGACY_SPEC_STATUS_BACKFILL:
+            raw_spec_status = LEGACY_SPEC_STATUS_BACKFILL[raw_status]
         spec_status: SpecStatus | None
         if raw_spec_status in (None, ""):
             spec_status = None
