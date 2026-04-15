@@ -69,6 +69,8 @@ def build_spec_submit_payload(args: argparse.Namespace) -> Dict[str, Any]:
         "event": "spec_submit",
         "summary": args.summary,
         "spec_document_url": args.spec_document_url or "",
+        "context_token": args.context_token or "",
+        "architecture_doc_revision": args.architecture_doc_revision or "",
     }
 
 
@@ -136,6 +138,8 @@ def build_parser() -> argparse.ArgumentParser:
     spec_submit_parser = subparsers.add_parser("spec-submit", help="Notify Coordinator that Spec Agent has submitted a draft for review")
     spec_submit_parser.add_argument("--summary", required=True, help="Spec draft completion summary")
     spec_submit_parser.add_argument("--spec-document-url", default="", help="URL of the completed spec document")
+    spec_submit_parser.add_argument("--context-token", default="", help="Spec context token returned by fetch-context")
+    spec_submit_parser.add_argument("--architecture-doc-revision", default="", help="ARCHITECTURE Feishu doc revision at submit time")
 
     return parser
 
