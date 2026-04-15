@@ -1,0 +1,36 @@
+# Generated from template: public-web-site.v1
+# Placeholders: {project} {pkg} {date}
+version: "{date}"
+project: "{project}"
+category: public-web-site
+status: bootstrap
+
+tech_stack:
+  frontend: "React + TypeScript"
+  backend: "FastAPI (Python 3.11)"
+  database: "PostgreSQL"
+  cdn: "CloudFront"
+  deployment: "single-host Docker Compose"
+
+modules:
+  - name: "{pkg}_web"
+    description: "面向 C 端的 H5/SSR 前端页面。"
+    repo_path: "src/{pkg}/web"
+    public_api: []
+    status: bootstrap
+  - name: "{pkg}_api"
+    description: "对外 REST API 服务。"
+    repo_path: "src/{pkg}/api"
+    public_api: []
+    status: bootstrap
+  - name: "{pkg}_worker"
+    description: "轻量异步任务处理。"
+    repo_path: "src/{pkg}/worker"
+    public_api: []
+    status: bootstrap
+
+services: []
+data_models: []
+external_dependencies:
+  - "浏览器静态资源 CDN"
+  - "SMTP / 短信网关（如有通知场景）"

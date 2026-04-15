@@ -1,0 +1,41 @@
+# Generated from template: saas-ai-automation.v1
+# Placeholders: {project} {pkg} {date}
+version: "{date}"
+project: "{project}"
+category: saas-ai-automation
+status: bootstrap
+
+tech_stack:
+  backend: "FastAPI (Python 3.11)"
+  llm: "Anthropic API (claude-sonnet-4-6)"
+  database: "PostgreSQL"
+  queue: "轻量进程内异步队列"
+  deployment: "single-host Docker Compose"
+
+modules:
+  - name: "{pkg}_saas_connectors"
+    description: "对接外部 SaaS 工具的适配器集合。"
+    repo_path: "src/{pkg}/saas_connectors"
+    public_api: []
+    status: bootstrap
+  - name: "{pkg}_ai_pipeline"
+    description: "基于 LLM 的数据抽取 / 生成 / 增强流水线。"
+    repo_path: "src/{pkg}/ai_pipeline"
+    public_api: []
+    status: bootstrap
+  - name: "{pkg}_automation_engine"
+    description: "工作流编排与自动化触发。"
+    repo_path: "src/{pkg}/automation_engine"
+    public_api: []
+    status: bootstrap
+  - name: "{pkg}_webhook_gateway"
+    description: "外部事件接入与回调分发。"
+    repo_path: "src/{pkg}/webhook_gateway"
+    public_api: []
+    status: bootstrap
+
+services: []
+data_models: []
+external_dependencies:
+  - "对接 SaaS 工具 OpenAPI"
+  - "Anthropic API"

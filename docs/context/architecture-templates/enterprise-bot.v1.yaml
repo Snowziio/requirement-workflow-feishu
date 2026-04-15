@@ -1,0 +1,39 @@
+# Generated from template: enterprise-bot.v1
+# Placeholders: {project} {pkg} {date}
+version: "{date}"
+project: "{project}"
+category: enterprise-bot
+status: bootstrap
+
+tech_stack:
+  platform: "飞书 / 企微 Bot"
+  backend: "FastAPI (Python 3.11)"
+  database: "PostgreSQL"
+  deployment: "single-host Docker Compose"
+
+modules:
+  - name: "{pkg}_bot_gateway"
+    description: "IM 事件订阅与消息下发。"
+    repo_path: "src/{pkg}/bot_gateway"
+    public_api: []
+    status: bootstrap
+  - name: "{pkg}_intent_router"
+    description: "消息意图识别与指令分发。"
+    repo_path: "src/{pkg}/intent_router"
+    public_api: []
+    status: bootstrap
+  - name: "{pkg}_skills"
+    description: "Bot 可执行的业务技能集合。"
+    repo_path: "src/{pkg}/skills"
+    public_api: []
+    status: bootstrap
+  - name: "{pkg}_store"
+    description: "对话状态与业务数据持久化。"
+    repo_path: "src/{pkg}/store"
+    public_api: []
+    status: bootstrap
+
+services: []
+data_models: []
+external_dependencies:
+  - "飞书 OpenAPI / 企微 API"

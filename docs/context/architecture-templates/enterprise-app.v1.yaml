@@ -1,0 +1,36 @@
+# Generated from template: enterprise-app.v1
+# Placeholders: {project} {pkg} {date}
+version: "{date}"
+project: "{project}"
+category: enterprise-app
+status: bootstrap
+
+tech_stack:
+  frontend: "React + TypeScript (内网访问)"
+  backend: "FastAPI (Python 3.11)"
+  database: "PostgreSQL"
+  auth: "企业 SSO（OIDC / SAML）"
+  deployment: "single-host Docker Compose"
+
+modules:
+  - name: "{pkg}_webapp"
+    description: "企业内部管理 Web 前端。"
+    repo_path: "src/{pkg}/webapp"
+    public_api: []
+    status: bootstrap
+  - name: "{pkg}_api"
+    description: "业务 REST API。"
+    repo_path: "src/{pkg}/api"
+    public_api: []
+    status: bootstrap
+  - name: "{pkg}_auth"
+    description: "SSO 接入与会话管理。"
+    repo_path: "src/{pkg}/auth"
+    public_api: []
+    status: bootstrap
+
+services: []
+data_models: []
+external_dependencies:
+  - "企业 SSO"
+  - "企业邮件 / IM 通知渠道"

@@ -1,0 +1,34 @@
+# Generated from template: miniprogram.v1
+# Placeholders: {project} {pkg} {date}
+version: "{date}"
+project: "{project}"
+category: miniprogram
+status: bootstrap
+
+tech_stack:
+  client: "微信小程序 (原生框架)"
+  backend: "FastAPI (Python 3.11)"
+  database: "PostgreSQL"
+  deployment: "single-host Docker Compose"
+
+modules:
+  - name: "{pkg}_miniapp"
+    description: "小程序端页面与业务逻辑。"
+    repo_path: "src/{pkg}/miniapp"
+    public_api: []
+    status: bootstrap
+  - name: "{pkg}_api"
+    description: "小程序后端 REST API。"
+    repo_path: "src/{pkg}/api"
+    public_api: []
+    status: bootstrap
+  - name: "{pkg}_wx_gateway"
+    description: "微信登录 / 支付 / 消息回调封装。"
+    repo_path: "src/{pkg}/wx_gateway"
+    public_api: []
+    status: bootstrap
+
+services: []
+data_models: []
+external_dependencies:
+  - "微信开放平台 OpenAPI"
