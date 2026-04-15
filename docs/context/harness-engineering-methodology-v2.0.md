@@ -24,6 +24,31 @@
 
 ## 一、核心目标与设计哲学
 
+### 1.0 适用范围声明
+
+**本方法论面向以下特定场景，超出此范围的系统需另行评估适用性。**
+
+**目标场景定义**：面向企业内部或特定组织的、以功能交付为核心的中小型应用系统，具体特征为：
+
+| 维度 | 范围描述 |
+|---|---|
+| **技术形态** | 前端以 H5 / 小程序 / 轻量 Web 为主，后端以 API 服务（REST / GraphQL）+ 轻量异步处理为主；单机或小规模服务器部署，无分布式基础设施运维需求 |
+| **价值交付节奏** | 单个需求从提出到上线以天到周为单位，不以季度为单位 |
+| **企业集成** | 深度嵌入企业 IM 平台（飞书 / 企业微信 / 钉钉），账号体系、权限模型、消息推送与平台打通；不需要独立建设 IAM 系统 |
+| **AI 能力** | AI 作为功能模块集成（LLM 调用用于生成、分类、提取、对话），不涉及模型训练、嵌入向量管道、大规模推理基础设施 |
+| **团队规模** | 1–10 人核心团队，无需多团队协作流程 |
+| **用户规模** | 数十到数千活跃用户（企业内部用户，非 C 端百万量级） |
+| **需求迭代频率** | 每月 1–10 个新需求 |
+| **代码库规模** | 单 repo，ARCHITECTURE.yaml 架构条目在数十个以内 |
+
+**在范围内的典型产品形态**：嵌入飞书/企业微信的内部工具、企业工作流自动化系统、带 AI 对话/生成能力的后台管理系统、轻量 SaaS（组织内部订阅）、工程效率工具（含本方法论自身的实现）。
+
+**超出范围（暂不覆盖）**：大规模 C 端消费应用、iOS/Android 原生 App、K8s 分布式集群服务、金融/医疗强合规系统、通用开源框架/基础库、实时系统（硬性延迟要求 < 10ms）。
+
+> 超出范围不意味着方法论完全不适用，而是指需要在适用范围内的规格基础上增加额外层次的设计，不能直接套用。
+
+---
+
 ### 1.1 核心目标
 
 **用一套标准化工作流，让 AI 成为主要开发执行者，人只在关键决策点介入。**
@@ -125,13 +150,13 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：
 
 #### 五层内容结构
 
-| 层 | 内容 | 防止 |
-|---|---|---|
-| **功能契约层** | ACM 注册表（所有已批准 REQ 的验收条件）、REQ 状态索引 | 功能漂移（新 Spec 与已有契约冲突） |
-| **架构快照层** | ARCHITECTURE.yaml（服务/模块/接口/数据模型）、ADR 归档 | 架构漂移（新实现破坏已有架构约定） |
-| **视觉规范层** | 项目设计系统文档（飞书）、设计系统快照（GitHub） | 视觉漂移（新 UI 风格与已有界面不一致） |
-| **规范惯例层** | CLAUDE.md、技术栈声明 | 代码风格漂移（每 session 自动热加载） |
-| **需求历史层** | 需求文档集、UI 原型集（飞书） | 新需求构造时的历史背景参考 |
+| 层         | 内容                                      | 防止                      |
+| --------- | --------------------------------------- | ----------------------- |
+| **功能契约层** | ACM 注册表（所有已批准 REQ 的验收条件）、REQ 状态索引       | 功能漂移（新 Spec 与已有契约冲突）    |
+| **架构快照层** | ARCHITECTURE.yaml（服务/模块/接口/数据模型）、ADR 归档 | 架构漂移（新实现破坏已有架构约定）       |
+| **视觉规范层** | 项目设计系统文档（飞书）、设计系统快照（GitHub）             | 视觉漂移（新 UI 风格与已有界面不一致）   |
+| **规范惯例层** | CLAUDE.md、技术栈声明                         | 代码风格漂移（每 session 自动热加载） |
+| **需求历史层** | 需求文档集、UI 原型集（飞书）                        | 新需求构造时的历史背景参考           |
 
 #### 双平面存储与职责分工
 
@@ -224,24 +249,24 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：
 
 **核心机制**：
 
-**7 态状态机**（概念层）：
+**6 态状态机**：
 ```
-CREATED → DISCUSSING → AI_REVIEWING → HUMAN_CONFIRMING → REVIEWING → APPROVED
+CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROVED
                     ↑___________↙              ↑__________↙        ↑________↙
-                  （AI退回）              （人工打回）          （审查打回，回 DISCUSSING）
+                  （AI退回）              （人工打回）          （审查打回，回 DRAFTING）
 ```
 
-**双闸门**：AI Ready + Human Confirmed 两道独立的门，分别记录、分别失败、分别追溯。任何一道门失败都回 DISCUSSING，不相互污染。双门均通过才能进入 REVIEWING 阶段。
+**双闸门**：AI Ready + Human Confirmed 两道独立的门，分别记录、分别失败、分别追溯。任何一道门失败都回 DRAFTING，不相互污染。双门均通过才能进入 FINAL_REVIEW 阶段。
 
 **三方交互模型**：
 - 创建群：发起需求创建，接收 REQ ID
 - Author 私聊：字段补全讨论（私密，避免群噪声）
 - 项目群：正式审查卡片，项目干系人参与判断
 
-**需求文档格式**：7 个固定 section，后续 section-level 幂等重写（不允许全删重建）。输入/输出格式要求到字段名 + 类型 + 约束粒度，不接受纯自然语言描述；验收标准格式要求为可测试断言（给定输入 → 期望输出 → 判断方式）；技术范围声明是 Spec 生成的必要输入。
+**需求文档格式**：8 个固定 section（问题描述 / 使用场景 / 输入 / 输出 / 边界 / 验收标准 / 非功能要求 / 技术范围声明），后续 section-level 幂等重写（不允许全删重建）。输入/输出格式要求到字段名 + 类型 + 约束粒度，不接受纯自然语言描述；验收标准格式要求为可测试断言（给定输入 → 期望输出 → 判断方式）；技术范围声明是 Spec 生成的必要输入。
 
-**UI 两阶段模型**（`需要UI = true` 时）：
-- **第一阶段（低保真线框图）**：`onEnter(HUMAN_CONFIRMING)` 时生成，辅助 author 判断 AI 是否理解需求方向
+**UI 两阶段模型**（`needs_ui = true` 时）：
+- **第一阶段（低保真线框图）**：`onEnter(HUMAN_CONFIRM)` 时生成，辅助 author 判断 AI 是否理解需求方向
 - **第二阶段（高保真可运行原型）**：REQ APPROVED 后、Spec 生成前独立执行，视觉/交互全貌确认，产出 UI 技术合同；确认后设计决策 append 进项目设计系统文档
 
 **参考实现**：`Snowziio/requirement-workflow-feishu`。实现细节见 [layers/requirement-layer.md](layers/requirement-layer.md)。
@@ -258,7 +283,7 @@ CREATED → DISCUSSING → AI_REVIEWING → HUMAN_CONFIRMING → REVIEWING → A
 
 | | 内容 |
 |---|---|
-| **输入** | APPROVED 需求文档（含技术范围声明）+ 高保真 UI 原型（`需要UI = true` 时）+ 项目级上下文（ARCHITECTURE.yaml + ACM 注册表 + 设计系统快照） |
+| **输入** | APPROVED 需求文档（含技术范围声明）+ 高保真 UI 原型（`needs_ui = true` 时）+ 项目级上下文（ARCHITECTURE.yaml + ACM 注册表 + 设计系统快照） |
 | **输出** | 四层 Spec（requirements.md + design.md + acceptance.yaml + tasks.md）+ 可选 design-ui.md；存入 `spec/REQ-{PROJECT}-{NNN}/` |
 | **完成标准** | 卡点1a（方案门）通过：Design 层经技术负责人确认，ACM 条目完整，兼容性检查无阻断冲突 |
 
@@ -266,18 +291,27 @@ CREATED → DISCUSSING → AI_REVIEWING → HUMAN_CONFIRMING → REVIEWING → A
 
 **单向转化门**：飞书（需求空间，发散、自由）→ 卡点1a（人工桥接）→ GitHub（锁定空间，确定性、自动化管道）。转化后 GitHub 是唯一权威。
 
-**四层 Spec 结构**：
+**两阶段 Spec 模型**（关键概念，避免两轨混淆）：
+
+| 阶段 | 载体 | 结构 | 目的 | 可变性 |
+|---|---|---|---|---|
+| **Spec 草稿（阶段一）** | 飞书 Spec 文档（9 节模板） | 人可读、协作友好 | 技术负责人与 spec-author Agent 讨论、定稿 | 卡点1a 通过前可修改 |
+| **Spec 结构化（阶段二）** | GitHub `spec/REQ-{PROJECT}-{NNN}/` 四文件 | 机器可解析（YAML/Markdown） | 喂给 `spec-to-harness.yml` 等自动化管道 | 卡点1a 通过后锁定；仅允许补丁提交 |
+
+阶段一在飞书完成是为了让"讨论与决策"发生在人最熟悉的协作空间；阶段二转到 GitHub 是因为 ACM/Harness/CI 需要确定性的文件结构。卡点1a 是两阶段之间的唯一转化点，一旦通过则飞书 Spec 文档冻结（仅留作历史追溯），后续任何变更在 GitHub 侧以 PR 形式进入。
+
+**四层 Spec 结构**（指阶段二）：
 
 | 层 | 文件 | 生成方式 | 人工介入 |
 |---|---|---|---|
-| Layer 1 Requirements | requirements.md | 自动（从需求文档 7 字段转为 EARS 格式） | 无（格式化中间产物） |
+| Layer 1 Requirements | requirements.md | 自动（从需求文档 8 字段转为 EARS 格式） | 无（格式化中间产物） |
 | Layer 2 Design | design.md（+ design-ui.md） | AI 生成（注入 ARCHITECTURE.yaml + ACM 注册表） | **卡点1a**——唯一人工判断点 |
 | Layer 3 ACM | acceptance.yaml | 自动（从 EARS 需求和 Design 层推导） | 卡点1a 时可否决 |
 | Layer 4 Tasks | tasks.md | 自动（按 AC 依赖关系排序生成实现任务） | 无 |
 
 **Design 层是整个链路唯一需要深度人工判断的文件**：接口契约（路径/请求/响应/错误码）+ 数据模型变更 + 架构接合点（复用哪些模块，新建什么）+ 兼容性影响（与历史 ACM 的冲突分析）。
 
-**注入的三类项目级上下文**：`ARCHITECTURE.yaml`（现有模块和接口）+ ACM 注册表（历史验收约束）+ 设计系统快照（UI 技术规格来源，`需要UI = true` 时）
+**注入的三类项目级上下文**：`ARCHITECTURE.yaml`（现有模块和接口）+ ACM 注册表（历史验收约束）+ 设计系统快照（UI 技术规格来源，`needs_ui = true` 时）
 
 实现细节见 [layers/spec-harness-layer.md](layers/spec-harness-layer.md)。
 
@@ -303,7 +337,7 @@ CREATED → DISCUSSING → AI_REVIEWING → HUMAN_CONFIRMING → REVIEWING → A
 
 **P0 测试是 Impl PR 合并门槛**：priority = P0 的 AC 对应测试必须全部通过，PR 才能合并。P1/P2 允许后续补齐。
 
-**视觉回归测试（`需要UI = true` 时）**：与功能性 Harness 并行生成。基于 Playwright 的截图比对——对 design-ui.md 定义的关键视图建立截图基线；后续每次 Impl PR 触发比对，超过阈值则阻断 PR。这是 UI 层的 Harness 等价机制，防止 Coding Agent 悄悄改动组件样式。
+**视觉回归测试（`needs_ui = true` 时）**：与功能性 Harness 并行生成。基于 Playwright 的截图比对——对 design-ui.md 定义的关键视图建立截图基线；后续每次 Impl PR 触发比对，超过阈值则阻断 PR。这是 UI 层的 Harness 等价机制，防止 Coding Agent 悄悄改动组件样式。
 
 **历史只读**：已通过卡点1b 的 Harness 目录不得在后续 PR 中修改，只能在新版本目录追加。
 
@@ -452,7 +486,18 @@ CREATED → DISCUSSING → AI_REVIEWING → HUMAN_CONFIRMING → REVIEWING → A
 
 已完成：Coordinator Service 部署（`admin@47.251.81.45:8004`）、Author/Reviewer Agent 接入、Bitable 状态流转、正式文档 section-rewrite。
 
-### Phase 2：需求层→规格层桥接（当前目标）
+### Pre-Phase-2：需求层稳固与 ARCHITECTURE.yaml 注入（当前进行中）
+
+目标：在启动需求层→规格层桥接之前，补齐需求层存在的信息漂移风险和项目级上下文缺口，避免问题带入下一阶段。
+
+关键任务：
+- **ARCHITECTURE.yaml 注入链路**：`fetch-context` 返回项目级 `github_repo_url`，spec-author 在启动时通过 GitHub API 读取 ARCHITECTURE.yaml 并注入上下文
+- **既有项目 `github_repo_url` 绑定机制**：创建群引导流程中补充 GitHub 仓库绑定步骤，project_configs 持久化
+- **SPEC_DRAFTING 超时提醒**：防止 Spec 会话长时间无进展，Coordinator 侧定时扫描
+- **ARCHITECTURE.yaml 启动脚本**：针对已有仓库通过 `bootstrap_architecture.py` 扫描生成初版
+- **文档体系清理**：方法论、层次契约、现有环境文档的冲突/冗余统一，作为 Phase 2 实现的干净底座
+
+### Phase 2：需求层→规格层桥接（待启动，依赖 Pre-Phase-2 完成）
 
 目标：打通 APPROVED 需求文档到 GitHub 四层 Spec 的生成链路，卡点1a 跑通。
 

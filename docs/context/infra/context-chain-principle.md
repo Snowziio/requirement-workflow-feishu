@@ -140,9 +140,36 @@ APPROVED 后的需求文档、SPEC_LOCKED 后的 Spec 文档，通过 `document_
 | 项 | 内容 |
 |----|------|
 | 消费 | design.md（接口契约 + 数据模型 + 架构接合点）/ ARCHITECTURE.yaml（复用模块）/ 设计系统快照 / Harness 测试（作为约束） |
-| 产出 | 实现代码 / 更新后的 ARCHITECTURE.yaml |
-| 防漂移 | CI 必须跑全量 Harness；PR review 检查接口签名与 design.md 一致性 |
+| 产出 | 实现代码 / 更新后的 ARCHITECTURE.yaml（待合并 Impl PR 内） |
+| 防漂移 | CI 必须跑全量 Harness；PR review 检查接口签名与 design.md 一致性；ARCHITECTURE.yaml 变更必须在 Impl PR 中可见 |
 | 终止 | 需求文档原文（不再需要，已经过 Spec 结构化转化） |
+
+### 验证层（Validation Layer）
+
+| 项 | 内容 |
+|----|------|
+| 消费 | 实现代码（PR diff）/ Harness 测试（harness/tests/REQ-xxx/）/ 视觉回归基线（needs_ui = true 时）/ ACM 注册表（历史回归 AC 列表） |
+| 产出 | CI 报告（P0 测试结果 + 历史回归结果 + 覆盖率 + 视觉差异）/ 失败定位摘要 |
+| 防漂移 | P0 测试必须全绿 + 历史 ACM 回归必须全绿才能进入集成层；卡点2 以此报告为判断依据 |
+| 终止 | 中间调试日志（仅保留在 CI artifacts，不向集成层传递） |
+
+### 集成层（Integration Layer）
+
+| 项 | 内容 |
+|----|------|
+| 消费 | CI 全绿的 Impl PR / design.md 接合点声明 / ARCHITECTURE.yaml |
+| 产出 | 合并后的主分支 commit / 更新生效的 ARCHITECTURE.yaml / 部署镜像标签（commit-sha） |
+| 防漂移 | 合并前再次校验 ARCHITECTURE.yaml 的接合点变更与 design.md 声明一致；Impl PR 合并后立即触发 ACM 注册表 status 更新为 integrated |
+| 终止 | PR 讨论串（归档在 GitHub，不进入后续环境） |
+
+### 交付层（Delivery Layer）
+
+| 项 | 内容 |
+|----|------|
+| 消费 | 集成层输出的部署镜像 / Staging 验证结果 / 设计系统文档（面向运营的操作说明） |
+| 产出 | 生产部署版本 / Staging URL（卡点3 审查对象）/ 发布记录（append 至发布日志） |
+| 防漂移 | 卡点3 卡片必须基于 Staging 实际页面截图/行为而非代码；上线后 ACM 注册表 status 更新为 released |
+| 终止 | Impl PR 内部实现细节（不向下游传递，下一个需求只读 design.md + ARCHITECTURE.yaml + ACM 注册表） |
 
 ---
 

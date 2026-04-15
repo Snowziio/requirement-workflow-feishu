@@ -5,9 +5,39 @@
 
 ---
 
-## 一、ARCHITECTURE.yaml 格式
+## 一、ARCHITECTURE.yaml 格式与生命周期
 
-存储于 GitHub 仓库根目录，由 checkpoint-handler 在每次 Impl PR 合并时更新（如有接口变更）。
+### 存储与总体生命周期
+
+- **存储位置**：GitHub 仓库根目录 `ARCHITECTURE.yaml`
+- **权威来源**：始终以仓库 main 分支最新 commit 的版本为准；Coordinator 通过 GitHub API 按需读取，不在本地缓存作权威
+- **更新节奏**：
+  - **初始化**：项目首次接入方法论时一次性建立（见下方"初始化三路径"）
+  - **增量更新**：每次 Impl PR 合并时由 checkpoint-handler 基于 design.md 变更追加/修改对应节（接口新增、模块新增、数据模型变更）
+  - **校核**：周期性（建议每月）由 spec-reviewer Agent 在 Spec 审查时比对 ARCHITECTURE.yaml 声明与实际代码导出，发现漂移时向项目群提醒
+
+### 初始化三路径
+
+ARCHITECTURE.yaml 的首次建立按项目形态选择路径，三者互斥：
+
+| 路径 | 适用场景 | 建立方式 | 责任方 |
+|---|---|---|---|
+| **Path A（新项目 scaffold）** | 使用 `harness-scaffold` 模板新建的项目 | 模板中自带骨架 ARCHITECTURE.yaml（`services: []` / `modules: []` / `data_models: []`，仅填 `tech_stack`）；首次 Impl PR 合并后由 checkpoint-handler 自动填充 | scaffold 模板 + 项目创建者 |
+| **Path B（既有仓库接入）** | 已有代码的存量仓库首次引入方法论 | 运行 `scripts/bootstrap_architecture.py` 对仓库做一次 AI 扫描，生成初版 ARCHITECTURE.yaml，由技术负责人 review 后合并 | 技术负责人（手动触发） |
+| **Path C（Coordinator 引导初始化）** | 通过飞书创建群 onboarding 流程绑定 GitHub 仓库时 | `ProjectBootstrapper` 调 GitHub API 在 main 分支创建最小 ARCHITECTURE.yaml（仅 `project` + `tech_stack` 占位），明确标记 `status: bootstrap`；后续 Path A 或 Path B 的流程补全内容 | Coordinator（自动） |
+
+三路径之间的选择由 `project_configs` 的 `bootstrap_path` 字段记录（`scaffold` / `existing_scan` / `coordinator_bootstrap`），不允许中途切换路径。
+
+### 更新责任边界（防漂移）
+
+| 操作 | 允许的责任方 | 禁止的责任方 |
+|---|---|---|
+| 新增 service / module / data_model 条目 | checkpoint-handler（Impl PR 合并后自动）；bootstrap_architecture.py（初始化时） | spec-author、spec-reviewer、requirement-author、人工直接 commit（除 bootstrap 合并 PR 外） |
+| 修改 `introduced_in` / `spec_version` 字段 | checkpoint-handler | 所有其他 |
+| 变更 `tech_stack` | 人工（提交独立 PR，需技术负责人 approve） | 任何 Agent |
+| 删除条目 | 人工（独立 PR + 理由记录在 PR description） | 任何 Agent、任何 Hook |
+
+### 格式示例
 
 ```yaml
 # ARCHITECTURE.yaml
@@ -278,7 +308,7 @@ interaction_patterns:
 | 触发事件 | 更新的产物 | 执行者 | 更新策略 |
 |---|---|---|---|
 | REQ 创建 | Bitable REQ 索引（新增条目） | Coordinator | 写入 |
-| 需求字段更新（每轮讨论） | 飞书需求文档（section-level 幂等重写） | Coordinator（onExit DISCUSSING Hook） | 幂等替换 |
+| 需求字段更新（每轮讨论） | 飞书需求文档（section-level 幂等重写） | Coordinator（onExit DRAFTING Hook） | 幂等替换 |
 | REQ APPROVED | Bitable REQ 索引（状态更新） | Coordinator | 更新字段 |
 | UI 设计第二阶段确认 | 飞书设计系统文档（append 新组件 + 决策日志） | Coordinator | Append-only |
 | UI 设计第二阶段确认 | Bitable 高保真原型链接 | Coordinator | 更新字段 |

@@ -1,4 +1,15 @@
-# 当前环境上下文
+> ⚠️ **已归档 — 请勿再更新或引用**（2026-04-15）
+>
+> 本文件已废弃。其信息已按下述方式分散到现行文档：
+>
+> - **远端主机、服务端口、Bitable token、OpenClaw Agent 部署** → `docs/context/remote-deploy-env-snapshot-20260413.md`（含历史警告 §8）
+> - **Bitable 字段清单与状态机** → `docs/context/layers/requirement-layer.md`
+> - **Agent 角色与分工** → `docs/agents/*/SKILL.md` 与方法论 §4.1
+> - **方法论适用范围与当前阶段目标** → `docs/context/harness-engineering-methodology-v2.0.md`（§1.0、§六 Pre-Phase-2）
+>
+> 保留本文件仅用于追溯早期三层架构的设计意图，内容不再维护。
+
+# 当前环境上下文 [ARCHIVED]
 
 本次开发最终目标：在新的项目里落地三层架构方案，形成一套可执行的上下文文档包，支持从现有 OpenClaw/飞书环境无缝启动实现工作。
 

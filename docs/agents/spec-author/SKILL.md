@@ -15,8 +15,8 @@ description: Spec 撰写助手，按 9 节模板撰写技术规格文档，并�
 python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
   --base-url "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}" \
   --secret "${OPENCLAW_CALLBACK_SECRET:-}" \
-  spec-context \
-  --req-id "{req_id}"
+  --req-id "{req_id}" \
+  fetch-context
 ```
 
 响应结构：
