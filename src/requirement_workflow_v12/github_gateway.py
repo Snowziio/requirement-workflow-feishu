@@ -1,0 +1,221 @@
+"""GitHub gateway for Coordinator-driven repo / branch / commit / PR ops.
+
+Used in SPEC_TRANSFORMING to materialize spec-transformer's four-file
+output into a Spec PR. The transformer agents themselves never touch
+GitHub — all I/O lives here, behind the Coordinator.
+
+Auth: classic PAT via ``Settings.github_token``. App-based auth deferred
+until multi-org / multi-customer phase.
+"""
+from __future__ import annotations
+
+import base64
+import logging
+from dataclasses import dataclass
+from typing import Iterable
+
+try:  # pragma: no cover - optional during tests before runtime deps installed
+    import httpx
+except ImportError:  # pragma: no cover
+    httpx = None  # type: ignore[assignment]
+
+from .config import Settings
+
+
+logger = logging.getLogger(__name__)
+
+GITHUB_API_BASE = "https://api.github.com"
+
+
+class GitHubGatewayError(RuntimeError):
+    """Raised on non-2xx GitHub API responses."""
+
+    def __init__(self, status: int, message: str, payload: object | None = None):
+        super().__init__(f"github api {status}: {message}")
+        self.status = status
+        self.payload = payload
+
+
+@dataclass(frozen=True)
+class FileChange:
+    """One file to include in an atomic multi-file commit."""
+
+    path: str
+    content: str  # plain text; binary not supported in this iteration
+
+
+class GitHubGateway:
+    """Thin GitHub REST client. One HTTP call = one method.
+
+    Multi-file commits go through the Git Data API (blob → tree → commit
+    → ref) so transformer's four files land as a single commit.
+    """
+
+    def __init__(self, settings: Settings, *, client: "httpx.Client | None" = None):
+        if not settings.github_token:
+            raise ValueError("Settings.github_token is required for GitHubGateway")
+        self.settings = settings
+        self._owns_client = client is None
+        self.client = client or httpx.Client(
+            base_url=GITHUB_API_BASE,
+            timeout=30.0,
+            headers={
+                "Authorization": f"token {settings.github_token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "requirement-workflow-coordinator",
+            },
+        )
+
+    def close(self) -> None:
+        if self._owns_client:
+            self.client.close()
+
+    def __enter__(self) -> "GitHubGateway":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+    # --- repo / branch ------------------------------------------------
+
+    def create_repo_from_template(
+        self,
+        *,
+        template_owner: str,
+        template_repo: str,
+        owner: str,
+        name: str,
+        private: bool = True,
+        description: str = "",
+    ) -> str:
+        """POST /repos/{template_owner}/{template_repo}/generate. Returns html_url."""
+        body = {
+            "owner": owner,
+            "name": name,
+            "private": private,
+            "description": description,
+            "include_all_branches": False,
+        }
+        resp = self.client.post(
+            f"/repos/{template_owner}/{template_repo}/generate", json=body
+        )
+        data = self._unwrap(resp)
+        return str(data["html_url"])
+
+    def create_branch(
+        self, *, owner: str, repo: str, branch: str, from_branch: str | None = None
+    ) -> str:
+        """Create ``branch`` pointing at the head of ``from_branch``. Returns new ref SHA."""
+        base = from_branch or self.settings.github_default_branch
+        head_sha = self._get_branch_head_sha(owner, repo, base)
+        resp = self.client.post(
+            f"/repos/{owner}/{repo}/git/refs",
+            json={"ref": f"refs/heads/{branch}", "sha": head_sha},
+        )
+        data = self._unwrap(resp)
+        return str(data["object"]["sha"])
+
+    # --- commit + PR --------------------------------------------------
+
+    def commit_files(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        branch: str,
+        files: Iterable[FileChange],
+        message: str,
+    ) -> str:
+        """Create a single commit on ``branch`` containing all ``files``. Returns commit SHA.
+
+        Uses Git Data API so the four-file payload lands atomically.
+        """
+        files = list(files)
+        if not files:
+            raise ValueError("commit_files requires at least one FileChange")
+
+        parent_sha = self._get_branch_head_sha(owner, repo, branch)
+        parent_commit = self._unwrap(
+            self.client.get(f"/repos/{owner}/{repo}/git/commits/{parent_sha}")
+        )
+        base_tree_sha = parent_commit["tree"]["sha"]
+
+        tree_entries = []
+        for fc in files:
+            blob = self._unwrap(
+                self.client.post(
+                    f"/repos/{owner}/{repo}/git/blobs",
+                    json={
+                        "content": base64.b64encode(fc.content.encode("utf-8")).decode("ascii"),
+                        "encoding": "base64",
+                    },
+                )
+            )
+            tree_entries.append(
+                {"path": fc.path, "mode": "100644", "type": "blob", "sha": blob["sha"]}
+            )
+
+        new_tree = self._unwrap(
+            self.client.post(
+                f"/repos/{owner}/{repo}/git/trees",
+                json={"base_tree": base_tree_sha, "tree": tree_entries},
+            )
+        )
+        new_commit = self._unwrap(
+            self.client.post(
+                f"/repos/{owner}/{repo}/git/commits",
+                json={
+                    "message": message,
+                    "tree": new_tree["sha"],
+                    "parents": [parent_sha],
+                },
+            )
+        )
+        commit_sha = str(new_commit["sha"])
+        self._unwrap(
+            self.client.patch(
+                f"/repos/{owner}/{repo}/git/refs/heads/{branch}",
+                json={"sha": commit_sha, "force": False},
+            )
+        )
+        return commit_sha
+
+    def open_pull_request(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        head_branch: str,
+        base_branch: str | None = None,
+        title: str,
+        body: str = "",
+    ) -> dict:
+        """POST /repos/{owner}/{repo}/pulls. Returns {number, html_url}."""
+        base = base_branch or self.settings.github_default_branch
+        resp = self.client.post(
+            f"/repos/{owner}/{repo}/pulls",
+            json={"title": title, "head": head_branch, "base": base, "body": body},
+        )
+        data = self._unwrap(resp)
+        return {"number": int(data["number"]), "html_url": str(data["html_url"])}
+
+    # --- internals ----------------------------------------------------
+
+    def _get_branch_head_sha(self, owner: str, repo: str, branch: str) -> str:
+        data = self._unwrap(
+            self.client.get(f"/repos/{owner}/{repo}/git/refs/heads/{branch}")
+        )
+        return str(data["object"]["sha"])
+
+    @staticmethod
+    def _unwrap(resp: "httpx.Response") -> dict:
+        if resp.status_code >= 400:
+            try:
+                payload = resp.json()
+                msg = payload.get("message", resp.text)
+            except Exception:
+                payload = None
+                msg = resp.text
+            raise GitHubGatewayError(resp.status_code, msg, payload)
+        return resp.json() if resp.content else {}

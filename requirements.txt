@@ -1,1 +1,2 @@
 lark-oapi==1.5.3
+httpx==0.27.2
