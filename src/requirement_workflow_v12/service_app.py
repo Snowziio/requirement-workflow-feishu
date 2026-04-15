@@ -98,6 +98,7 @@ class CoordinatorRuntimeApp:
             self.service.restore_snapshot(requirements, active_req_by_user, project_groups, project_configs)
         self._health_server: HTTPServer | None = None
         self._observed_creation_group_chat_id = settings.creation_group_chat_id
+        self._pending_form_payloads: dict[str, CreationFormPayload] = {}
 
         from .spec_context import SpecContextBuilder
 
@@ -239,6 +240,7 @@ class CoordinatorRuntimeApp:
         if requirement is not None:
             requirement.needs_ui = payload.needs_ui
         self._save_state()
+        self._pending_form_payloads[response.req_id] = payload
         if requirement is not None:
             LOGGER.info(
                 "Accepted requirement creation from form req_id=%s status=%s project=%s creator_user_id=%s needs_ui=%s",
@@ -250,7 +252,52 @@ class CoordinatorRuntimeApp:
             )
         return request, requirement, response.req_id
 
+    def _initialize_project_for_first_req(self, payload: CreationFormPayload) -> None:
+        from .architecture_templates import UnknownCategory, render_template
+
+        if not payload.category:
+            raise ValueError(
+                "category is required when creating the first requirement for a project"
+            )
+        try:
+            template_version, rendered = render_template(
+                payload.category, project=payload.project
+            )
+        except UnknownCategory as exc:
+            raise ValueError(f"未知类目：{payload.category}") from exc
+
+        created = self.gateway.create_architecture_document(payload.project)
+        if created is None:
+            raise RuntimeError("failed to create ARCHITECTURE feishu document (missing folder token)")
+        self.gateway.write_document_text(created.document_id, rendered)
+
+        self.service.initialize_project(
+            project=payload.project,
+            category=payload.category,
+            template_version=template_version,
+            architecture_doc_id=created.document_id,
+            architecture_doc_url=created.document_url,
+            tech_stack={},
+        )
+
     def _provision_requirement_after_creation(self, request: CreationRequest, req_id: str) -> None:
+        form_payload = self._pending_form_payloads.pop(req_id, None)
+        if form_payload is not None:
+            if form_payload.project not in self.service.project_configs:
+                try:
+                    self._initialize_project_for_first_req(form_payload)
+                    self._save_state()
+                except Exception:
+                    LOGGER.exception("Project initialization failed for %s", form_payload.project)
+                    return
+            else:
+                existing = self.service.project_configs[form_payload.project]
+                if form_payload.category and form_payload.category != existing.category:
+                    LOGGER.warning(
+                        "Form supplied mismatched category for existing project %s: got %s, have %s",
+                        form_payload.project, form_payload.category, existing.category,
+                    )
+
         requirement = self.service.get_requirement(req_id)
         if requirement is None:
             LOGGER.warning("Skipped provisioning because requirement disappeared req_id=%s", req_id)
@@ -1122,6 +1169,7 @@ class CoordinatorRuntimeApp:
         creation_chat_id = self._normalize_form_value(value.get("creation_chat_id")) or self._observed_creation_group_chat_id
         needs_ui_raw = self._normalize_form_value(form_value.get("needs_ui")).lower()
         needs_ui = needs_ui_raw in ("yes", "true", "1", "是", "需要")
+        category = self._normalize_form_value(form_value.get("category"))
         return CreationFormPayload(
             project=project,
             name=name,
@@ -1133,6 +1181,7 @@ class CoordinatorRuntimeApp:
             priority=self._normalize_form_value(form_value.get("priority")),
             expected_due_date=self._normalize_form_value(form_value.get("expected_due_date")),
             needs_ui=needs_ui,
+            category=category,
         )
 
     def _normalize_form_value(self, value: object) -> str:
@@ -1236,6 +1285,14 @@ class CoordinatorRuntimeApp:
         return None
 
     def _build_requirement_creation_card(self, context: MessageContext) -> dict[str, object]:
+        known_projects = sorted(self.service.project_configs.keys())
+        category_options = [
+            {"text": {"tag": "plain_text", "content": "公开 Web 站点"}, "value": "public-web-site"},
+            {"text": {"tag": "plain_text", "content": "小程序"}, "value": "miniprogram"},
+            {"text": {"tag": "plain_text", "content": "企业内 Bot / Agent"}, "value": "enterprise-bot"},
+            {"text": {"tag": "plain_text", "content": "企业内部应用"}, "value": "enterprise-app"},
+            {"text": {"tag": "plain_text", "content": "SaaS AI 自动化"}, "value": "saas-ai-automation"},
+        ]
         return {
             "schema": "2.0",
             "config": {"wide_screen_mode": True},
@@ -1275,6 +1332,22 @@ class CoordinatorRuntimeApp:
                                 "max_length": 500,
                                 "label": {"tag": "plain_text", "content": "需求简述"},
                                 "placeholder": {"tag": "plain_text", "content": "要解决什么问题，期望得到什么结果"},
+                            },
+                            {
+                                "tag": "select_static",
+                                "name": "category",
+                                "required": False,
+                                "width": "fill",
+                                "label": {
+                                    "tag": "plain_text",
+                                    "content": (
+                                        "项目类目（首次为该项目创建需求时必填；"
+                                        f"已注册的项目：{', '.join(known_projects) or '（无）'}"
+                                        "，已有项目可留空）"
+                                    ),
+                                },
+                                "placeholder": {"tag": "plain_text", "content": "选择项目类目"},
+                                "options": category_options,
                             },
                             {
                                 "tag": "input",

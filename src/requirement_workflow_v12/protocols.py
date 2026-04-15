@@ -47,6 +47,7 @@ class CreationFormPayload:
     priority: str = ""
     expected_due_date: str = ""
     needs_ui: bool = False
+    category: str = ""
 
 
 @dataclass
