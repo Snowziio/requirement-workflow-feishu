@@ -1,42 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-
-
-class OnboardingState(str, Enum):
-    COLLECTING_REPO = "COLLECTING_REPO"
-    COLLECTING_PROJECT_TYPE = "COLLECTING_PROJECT_TYPE"
-    COLLECTING_TECH_STACK = "COLLECTING_TECH_STACK"
-    WAITING_ARCH_CONFIRMATION = "WAITING_ARCH_CONFIRMATION"
-    BOOTSTRAPPING = "BOOTSTRAPPING"
-    COMPLETE = "COMPLETE"
 
 
 @dataclass
 class ProjectConfig:
-    github_repo_url: str
-    is_new_project: bool
-    tech_stack: dict[str, str]
-    architecture_yaml_initialized: bool = False
-    acm_registry_initialized: bool = False
+    category: str
+    template_version: str
+    architecture_doc_id: str
+    architecture_doc_url: str
+    tech_stack: dict[str, str] = field(default_factory=dict)
     design_system_doc_id: str | None = None
-    onboarding_state: OnboardingState = OnboardingState.COLLECTING_REPO
-
-    @property
-    def is_onboarding_complete(self) -> bool:
-        return self.onboarding_state == OnboardingState.COMPLETE
 
     @classmethod
-    def from_dict(cls, data: dict) -> ProjectConfig:
+    def from_dict(cls, data: dict) -> "ProjectConfig":
         return cls(
-            github_repo_url=data["github_repo_url"],
-            is_new_project=data.get("is_new_project", True),
+            category=data["category"],
+            template_version=data["template_version"],
+            architecture_doc_id=data["architecture_doc_id"],
+            architecture_doc_url=data["architecture_doc_url"],
             tech_stack=data.get("tech_stack", {}),
-            architecture_yaml_initialized=data.get("architecture_yaml_initialized", False),
-            acm_registry_initialized=data.get("acm_registry_initialized", False),
             design_system_doc_id=data.get("design_system_doc_id"),
-            onboarding_state=OnboardingState(
-                data.get("onboarding_state", OnboardingState.COLLECTING_REPO.value)
-            ),
         )

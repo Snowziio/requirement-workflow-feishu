@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import logging
 
 from .models import DISCUSSION_FIELDS, DiscussionTurn, HumanReviewResult, Requirement, ReviewResult, WorkflowStatus, utc_now
-from .project_config import OnboardingState, ProjectConfig
+from .project_config import ProjectConfig
 from .protocols import (
     AgentAuthorEventPayload,
     AgentRequirementContextQuery,

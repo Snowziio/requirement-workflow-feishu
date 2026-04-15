@@ -14,7 +14,7 @@ from .models import (
     WorkflowStatus,
     utc_now,
 )
-from .project_config import OnboardingState, ProjectConfig
+from .project_config import ProjectConfig
 
 LEGACY_STATUS_ALIASES = {
     "DISCUSSION_ROUTING": WorkflowStatus.DRAFTING.value,
