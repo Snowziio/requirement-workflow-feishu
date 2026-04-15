@@ -72,6 +72,7 @@ jobs:
             FEISHU_CREATION_GROUP_CHAT_ID=${{ secrets.FEISHU_CREATION_GROUP_CHAT_ID }}
             FEISHU_BITABLE_APP_TOKEN=${{ secrets.FEISHU_BITABLE_APP_TOKEN }}
             FEISHU_BITABLE_TABLE_ID=${{ secrets.FEISHU_BITABLE_TABLE_ID }}
+            FEISHU_BITABLE_PROJECT_CONFIGS_TABLE_ID=${{ secrets.FEISHU_BITABLE_PROJECT_CONFIGS_TABLE_ID }}
             FEISHU_DOC_FOLDER_TOKEN=${{ secrets.FEISHU_DOC_FOLDER_TOKEN }}
             FEISHU_BASE_URL=${{ secrets.FEISHU_BASE_URL || 'https://my.feishu.cn' }}
             FEISHU_USER_ID_TYPE=${{ secrets.FEISHU_USER_ID_TYPE || 'open_id' }}
