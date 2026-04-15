@@ -102,6 +102,15 @@ class CoordinatorRuntimeApp:
         self._pending_onboarding_project: dict[str, str] = {}   # user_id → project
         self._pending_requirement_info: dict[str, dict] = {}    # user_id → creation args
 
+        from .github_client import GitHubClient
+        from .spec_context import SpecContextBuilder
+
+        self.github_client = GitHubClient(token=self.settings.github_token)
+        self._spec_context_builder = SpecContextBuilder(
+            service=self.service,
+            github_client=self.github_client,
+        )
+
     def build_event_dispatcher(self):
         self._require_lark()
         builder = lark.EventDispatcherHandler.builder(
@@ -154,6 +163,8 @@ class CoordinatorRuntimeApp:
                     status, payload = app.handle_openclaw_review_result_callback(raw_body, headers=headers)
                 elif self.path == "/queries/openclaw/requirement-context":
                     status, payload = app.handle_openclaw_requirement_context_query(raw_body, headers=headers)
+                elif self.path == "/queries/openclaw/spec-context":
+                    status, payload = app.handle_openclaw_spec_context_query(raw_body, headers=headers)
                 elif self.path == "/callbacks/openclaw/spec-turn":
                     status, payload = app.handle_openclaw_spec_turn_callback(raw_body, headers=headers)
                 else:
@@ -979,6 +990,75 @@ class CoordinatorRuntimeApp:
         return 200, {
             "ok": True,
             "context": context_payload,
+        }
+
+    def handle_openclaw_spec_context_query(
+        self,
+        raw_body: bytes,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, object]]:
+        from .github_client import (
+            GitHubAuthError,
+            GitHubNotFoundError,
+            GitHubTransientError,
+        )
+        from .spec_context import SpecContextGateError, SpecContextMisconfigured
+
+        auth_error = self._validate_openclaw_callback_auth(raw_body, headers=headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            payload = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return 400, {"error": "invalid_json"}
+
+        req_id = str(payload.get("req_id", "")).strip()
+        if not req_id:
+            return 400, {"error": "invalid_payload", "message": "req_id 为必填字段。"}
+
+        if not self.settings.github_token:
+            return 500, {"error": "github_auth_missing", "message": "Coordinator 未配置 GITHUB_TOKEN。"}
+
+        LOGGER.info("Received spec-context query req_id=%s", req_id)
+
+        try:
+            result = self._spec_context_builder.build(req_id)
+        except ValueError as exc:
+            return 404, {"error": "not_found", "message": str(exc)}
+        except SpecContextGateError as exc:
+            return 409, {
+                "error": "invalid_state",
+                "message": str(exc),
+                "current_status": exc.current_status,
+            }
+        except SpecContextMisconfigured as exc:
+            return 500, {"error": "project_misconfigured", "message": str(exc)}
+        except GitHubAuthError as exc:
+            LOGGER.warning("GitHub auth failed for spec-context req_id=%s: %s", req_id, exc)
+            return 502, {"error": "github_auth_failed", "message": str(exc)}
+        except GitHubNotFoundError as exc:
+            LOGGER.error("ARCHITECTURE.yaml missing for spec-context req_id=%s: %s", req_id, exc)
+            return 502, {"error": "architecture_yaml_missing", "message": str(exc)}
+        except GitHubTransientError as exc:
+            LOGGER.warning("GitHub transient failure for spec-context req_id=%s: %s", req_id, exc)
+            return 503, {"error": "github_transient", "message": str(exc)}
+        except Exception as exc:
+            LOGGER.exception("Unexpected failure handling spec-context req_id=%s", req_id)
+            return 500, {"error": "spec_context_failed", "message": str(exc)}
+
+        self._save_state()
+
+        LOGGER.info(
+            "Spec-context served req_id=%s commit_sha=%s",
+            req_id,
+            result.context["architecture_commit_sha"],
+        )
+        return 200, {
+            "ok": True,
+            "context": result.context,
+            "context_token": result.context_token,
+            "expires_hint": "valid until SPEC_LOCKED or a newer token is issued",
         }
 
     def handle_openclaw_spec_turn_callback(

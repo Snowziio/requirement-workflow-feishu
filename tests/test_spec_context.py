@@ -181,3 +181,119 @@ def test_spec_context_token_overwrites_previous():
     result = builder.build("REQ-SC-001")
     assert req.active_spec_context_token == result.context_token
     assert req.active_spec_context_token != "old_token"
+
+
+import json as _jsonmod
+from unittest.mock import patch
+
+
+class _FakeGateway:
+    """Minimal gateway stub that avoids lark_oapi dependency."""
+    def update_requirement_record(self, req) -> None:
+        pass
+
+    def bitable_url(self) -> str:
+        return ""
+
+    def send_text(self, receive_id, text, receive_id_type="chat_id"):
+        pass
+
+    def send_card(self, receive_id, card, receive_id_type="chat_id"):
+        pass
+
+
+def _make_app_with_req(tmpdir_factory):
+    """Create a CoordinatorRuntimeApp with a pre-seeded APPROVED requirement."""
+    import tempfile
+    tmpdir = tempfile.mkdtemp()
+    from requirement_workflow_v12.service_app import CoordinatorRuntimeApp
+    from requirement_workflow_v12.config import Settings
+
+    settings = Settings(
+        feishu_app_id="x",
+        feishu_app_secret="y",
+        state_store_path=f"{tmpdir}/state.json",
+        github_token="fake-token-for-tests",
+    )
+    app = CoordinatorRuntimeApp(settings=settings, gateway=_FakeGateway())
+    req = _make_requirement()
+    app.service.requirements[req.req_id] = req
+    app.service.project_configs["P"] = ProjectConfig(
+        github_repo_url="https://github.com/org/repo",
+        is_new_project=False,
+        tech_stack={},
+    )
+    return app, req
+
+
+def test_spec_context_endpoint_unknown_req_returns_404(tmp_path):
+    app, _ = _make_app_with_req(None)
+    body = _jsonmod.dumps({"req_id": "REQ-MISSING"}).encode()
+    status, payload = app.handle_openclaw_spec_context_query(body)
+    assert status == 404
+    assert payload["error"] == "not_found"
+
+
+def test_spec_context_endpoint_invalid_state_returns_409(tmp_path):
+    app, req = _make_app_with_req(None)
+    req.status = WorkflowStatus.DRAFTING
+    body = _jsonmod.dumps({"req_id": req.req_id}).encode()
+    status, payload = app.handle_openclaw_spec_context_query(body)
+    assert status == 409
+    assert payload["error"] == "invalid_state"
+
+
+def test_spec_context_endpoint_success(tmp_path):
+    app, req = _make_app_with_req(None)
+    with patch.object(
+        app.github_client, "fetch_file",
+        return_value=FetchedFile(content="services: []\n", commit_sha="sha-xyz"),
+    ):
+        body = _jsonmod.dumps({"req_id": req.req_id}).encode()
+        status, payload = app.handle_openclaw_spec_context_query(body)
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["context"]["architecture_yaml"] == "services: []\n"
+    assert payload["context"]["architecture_commit_sha"] == "sha-xyz"
+    assert payload["context_token"].startswith("spec_ctx_")
+    assert req.active_spec_context_token == payload["context_token"]
+
+
+def test_spec_context_endpoint_github_auth_failure_returns_502(tmp_path):
+    app, req = _make_app_with_req(None)
+    with patch.object(app.github_client, "fetch_file", side_effect=GitHubAuthError("bad token")):
+        body = _jsonmod.dumps({"req_id": req.req_id}).encode()
+        status, payload = app.handle_openclaw_spec_context_query(body)
+    assert status == 502
+    assert payload["error"] == "github_auth_failed"
+
+
+def test_spec_context_endpoint_github_missing_file_returns_502(tmp_path):
+    app, req = _make_app_with_req(None)
+    with patch.object(app.github_client, "fetch_file", side_effect=GitHubNotFoundError("nf")):
+        body = _jsonmod.dumps({"req_id": req.req_id}).encode()
+        status, payload = app.handle_openclaw_spec_context_query(body)
+    assert status == 502
+    assert payload["error"] == "architecture_yaml_missing"
+
+
+def test_spec_context_endpoint_misconfigured_returns_500(tmp_path):
+    app, req = _make_app_with_req(None)
+    app.service.project_configs["P"] = ProjectConfig(
+        github_repo_url="",
+        is_new_project=False,
+        tech_stack={},
+    )
+    body = _jsonmod.dumps({"req_id": req.req_id}).encode()
+    status, payload = app.handle_openclaw_spec_context_query(body)
+    assert status == 500
+    assert payload["error"] == "project_misconfigured"
+
+
+def test_spec_context_endpoint_missing_github_token_returns_500(tmp_path):
+    app, req = _make_app_with_req(None)
+    app.settings.github_token = ""
+    body = _jsonmod.dumps({"req_id": req.req_id}).encode()
+    status, payload = app.handle_openclaw_spec_context_query(body)
+    assert status == 500
+    assert payload["error"] == "github_auth_missing"
