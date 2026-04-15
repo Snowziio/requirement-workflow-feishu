@@ -284,12 +284,8 @@ class CoordinatorRuntimeApp:
         form_payload = self._pending_form_payloads.pop(req_id, None)
         if form_payload is not None:
             if form_payload.project not in self.service.project_configs:
-                try:
-                    self._initialize_project_for_first_req(form_payload)
-                    self._save_state()
-                except Exception:
-                    LOGGER.exception("Project initialization failed for %s", form_payload.project)
-                    return
+                self._initialize_project_for_first_req(form_payload)
+                self._save_state()
             else:
                 existing = self.service.project_configs[form_payload.project]
                 if form_payload.category and form_payload.category != existing.category:

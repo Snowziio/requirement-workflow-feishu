@@ -325,6 +325,14 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
         with TemporaryDirectory() as temp_dir:
             runtime_service = CoordinatorService()
+            runtime_service.initialize_project(
+                project="HARNESS",
+                category="saas-ai-automation",
+                template_version="saas-ai-automation.v1",
+                architecture_doc_id="doc_pre",
+                architecture_doc_url="https://feishu.example/docx/doc_pre",
+                tech_stack={},
+            )
             gateway = FakeGateway()
             app = CoordinatorRuntimeApp(
                 Settings(
