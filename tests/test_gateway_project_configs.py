@@ -78,6 +78,8 @@ def test_list_project_configs_parses_rows():
             "架构文档URL": "https://example/docx/doc_x",
             "技术栈JSON": json.dumps({"backend": "FastAPI"}, ensure_ascii=False),
             "设计系统文档ID": "",
+            "GitHub仓库URL": "https://github.com/org/my-proj",
+            "GitHub负责人用户名": "alice",
         },
         record_id="rec_1",
     )
@@ -92,7 +94,32 @@ def test_list_project_configs_parses_rows():
     assert cfg.architecture_doc_id == "doc_x"
     assert cfg.tech_stack == {"backend": "FastAPI"}
     assert cfg.design_system_doc_id is None
+    assert cfg.github_repo_url == "https://github.com/org/my-proj"
+    assert cfg.github_owner_username == "alice"
     assert cfg.bitable_record_id == "rec_1"
+
+
+def test_list_project_configs_defaults_missing_github_fields_to_empty():
+    gateway = _make_gateway()
+    record = _FakeRecord(
+        fields={
+            "项目名": "LegacyProj",
+            "类别": "c",
+            "模板版本": "v",
+            "架构文档ID": "d",
+            "架构文档URL": "u",
+            "技术栈JSON": "",
+            "设计系统文档ID": "",
+        },
+        record_id="rec_legacy",
+    )
+    gateway.client.bitable.v1.app_table_record.list.return_value = _FakeResponse(
+        data=_FakeListData(items=[record])
+    )
+    loaded = gateway.list_project_configs()
+    cfg = loaded["LegacyProj"]
+    assert cfg.github_repo_url == ""
+    assert cfg.github_owner_username == ""
 
 
 def test_list_project_configs_skips_rows_without_project_name():

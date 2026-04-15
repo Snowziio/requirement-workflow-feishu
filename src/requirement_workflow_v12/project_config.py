@@ -11,6 +11,8 @@ class ProjectConfig:
     architecture_doc_url: str
     tech_stack: dict[str, str] = field(default_factory=dict)
     design_system_doc_id: str | None = None
+    github_repo_url: str = ""
+    github_owner_username: str = ""
     bitable_record_id: str = ""
 
     @classmethod
@@ -22,5 +24,7 @@ class ProjectConfig:
             architecture_doc_url=data["architecture_doc_url"],
             tech_stack=data.get("tech_stack", {}),
             design_system_doc_id=data.get("design_system_doc_id"),
+            github_repo_url=data.get("github_repo_url", ""),
+            github_owner_username=data.get("github_owner_username", ""),
             bitable_record_id=data.get("bitable_record_id", ""),
         )

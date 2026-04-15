@@ -44,6 +44,18 @@
       "field_type": "text",
       "required": false,
       "description": "该项目的设计系统文档 document_id(可空)。"
+    },
+    {
+      "name": "GitHub仓库URL",
+      "field_type": "text",
+      "required": false,
+      "description": "项目 GitHub 仓库 URL;为空表示新项目,Coordinator 在首次 Spec 转化时基于 harness-scaffold 初始化。"
+    },
+    {
+      "name": "GitHub负责人用户名",
+      "field_type": "text",
+      "required": false,
+      "description": "项目 GitHub admin 用户名,用于新建 repo 时授予 admin 权限。"
     }
   ]
 }

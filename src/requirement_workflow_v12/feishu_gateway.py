@@ -50,6 +50,8 @@ from .bitable_schema import (
     PROJECT_CONFIG_FIELD_ARCH_DOC_URL,
     PROJECT_CONFIG_FIELD_CATEGORY,
     PROJECT_CONFIG_FIELD_DESIGN_SYSTEM_DOC_ID,
+    PROJECT_CONFIG_FIELD_GITHUB_OWNER_USERNAME,
+    PROJECT_CONFIG_FIELD_GITHUB_REPO_URL,
     PROJECT_CONFIG_FIELD_PROJECT,
     PROJECT_CONFIG_FIELD_TECH_STACK_JSON,
     PROJECT_CONFIG_FIELD_TEMPLATE_VERSION,
@@ -419,6 +421,8 @@ class FeishuGateway:
                 cfg.tech_stack, ensure_ascii=False
             ),
             PROJECT_CONFIG_FIELD_DESIGN_SYSTEM_DOC_ID: cfg.design_system_doc_id or "",
+            PROJECT_CONFIG_FIELD_GITHUB_REPO_URL: cfg.github_repo_url,
+            PROJECT_CONFIG_FIELD_GITHUB_OWNER_USERNAME: cfg.github_owner_username,
         }
 
     @staticmethod
@@ -505,6 +509,12 @@ class FeishuGateway:
                     ),
                     tech_stack=tech_stack,
                     design_system_doc_id=design_system_doc_id,
+                    github_repo_url=self._extract_field_text(
+                        fields.get(PROJECT_CONFIG_FIELD_GITHUB_REPO_URL)
+                    ),
+                    github_owner_username=self._extract_field_text(
+                        fields.get(PROJECT_CONFIG_FIELD_GITHUB_OWNER_USERNAME)
+                    ),
                     bitable_record_id=item.record_id or "",
                 )
             if not data.has_more:
