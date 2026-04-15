@@ -61,11 +61,11 @@
   锁定：APPROVED 后需求文档不可修改
   存储：飞书文档（document_id）+ Coordinator state + Bitable
        │
-       ▼ 消费：需求文档全部 8 字段 + review_summary + ARCHITECTURE.yaml + tech_stack
+       ▼ 消费：需求文档全部 8 字段 + review_summary + ARCHITECTURE 飞书文档（当前 revision）+ tech_stack
 规格层-A：Spec 子层（SPEC_DRAFTING → SPEC_LOCKED）
-  产出：design.md（8节技术规格）/ requirements.md / acceptance.yaml / spec_document_url
-  锁定：SPEC_LOCKED 后 Spec 文档不可修改
-  存储：GitHub PR（spec/REQ-xxx/）+ Coordinator state（spec_document_url）
+  产出：Spec 飞书文档（9 节技术规格）+ 演化后的 ARCHITECTURE 飞书文档（同一份跨 REQ 持续更新）+ spec_document_url
+  锁定：SPEC_LOCKED 后 Spec 飞书文档不可修改；ARCHITECTURE 永不冻结，随后续 REQ 继续演化
+  存储：飞书（spec_document_id + architecture_doc_id）+ Coordinator state（spec_document_url + architecture_doc_revision）
        │
        ▼ 消费：acceptance.yaml（所有 AC）+ design.md（数据模型 + 架构接合点）+ needs_ui + 设计系统快照
 规格层-B：Harness 子层（HARNESS_GENERATING → HARNESS_READY）
@@ -121,9 +121,10 @@ APPROVED 后的需求文档、SPEC_LOCKED 后的 Spec 文档，通过 `document_
 
 | 项 | 内容 |
 |----|------|
-| 消费 | 需求文档 8 字段 / review_summary / ARCHITECTURE.yaml / tech_stack / 设计系统快照（needs_ui = true 时） |
-| 产出 | design.md（含架构设计节）/ requirements.md / acceptance.yaml / spec_document_url / spec_review_summary |
-| 防漂移 | Reviewer 维度：需求字段全覆盖 + 上下文消费声明完整性 + 测试用例与 AC 对齐 + 内部一致性 |
+| 消费 | 需求文档 8 字段 / latest_review_summary / ARCHITECTURE 飞书文档当前 revision / tech_stack / 设计系统快照（needs_ui = true 时） |
+| 产出 | Spec 飞书文档（9 节）/ **演化后的 ARCHITECTURE 飞书文档**（覆盖写，保留飞书原生 revision 历史）/ spec_document_url / architecture_doc_revision（写后）/ spec_review_summary |
+| 消费/产出入口 | 唯一合法入口为 `/queries/openclaw/spec-context` 端点（CLI 子命令 `spec-context`），返回 context_token；提交时必须回传该 token 与写后 revision |
+| 防漂移 | Reviewer 维度：需求字段全覆盖 + 上下文消费声明完整性 + 测试用例与 AC 对齐 + 内部一致性；并发安全见本文 §七 |
 | 终止 | discussion_history（需求层内部的逐轮讨论记录，Spec 不需要） |
 
 ### Harness 层（Harness Layer）
@@ -190,3 +191,58 @@ APPROVED 后的需求文档、SPEC_LOCKED 后的 Spec 文档，通过 `document_
 - [ ] 明确列出从上下文中需要读取的字段和产物
 - [ ] 产出内容的存储/上报方式与「上下文契约」中的存储位置一致
 - [ ] 不允许的行为中包含「不得跳过上下文读取步骤」
+- [ ] 不允许的行为中包含「不得在未成功调用 callback 的情况下结束会话」（见 §八）
+
+---
+
+## 七、并发写回契约
+
+**背景**：Pre-Phase-2 引入 ARCHITECTURE 作为 Spec 层的跨 REQ 共享产出物后，出现新的并发场景——两个 Spec 会话可能读取同一份 ARCHITECTURE 飞书文档、各自做增量合并、先后覆盖写回，导致后写者丢失先写者的变更。需求层不存在此问题（需求文档一 REQ 一份，单作者），但凡涉及**跨 REQ 共享的项目级产出物**，必须走下面的握手协议。
+
+### 握手协议
+
+1. **进入读取**：Agent 调用上下文端点（如 `/queries/openclaw/spec-context`），端点返回：
+   - 共享产物的 URL（如 `architecture_doc_url`）
+   - 进入时的 revision 快照（如 `architecture_doc_revision`）
+   - `context_token`（端点签发的一次性令牌，Coordinator 侧保留对应上下文镜像）
+2. **本地合并**：Agent `feishu_fetch_doc` 读取当前 YAML → 基于本次决策做增量合并 → 生成新版 YAML。
+3. **覆盖写回**：Agent `feishu_update_doc` 写回共享产物；**写回动作本身不做并发检查**（飞书底层 API 不提供 CAS 语义）。
+4. **读后 revision**：写回后 Agent **再次调用上下文端点**（或等价查询），取得**写后 revision**。
+5. **提交握手**：Agent 调用提交 callback（如 `spec-submit`），必须同时回传 `context_token` 与写后 revision。Coordinator 校验：
+   - `context_token` 未过期且匹配当前会话 → 否则 400 `token_invalid`，要求重走第 1 步
+   - 进入时 revision 与 Coordinator 记录一致 → 不一致抛 409 `revision_conflict`，要求 Agent 重新读当前 YAML 合并后再提交
+6. **状态推进**：两项校验通过后 Coordinator 才落地状态流转；否则拒绝，Agent 按错误码处理。
+
+### 为什么不是乐观锁
+
+飞书 docx 没有原生 CAS。协议的本质是**把并发仲裁从存储层上移到 Coordinator 层**：Coordinator 用 context_token 识别「是谁发起的这次写」、用 revision 对比识别「这期间有没有别人写过」。token 与 revision 都是必要条件，缺一任何一边都无法防住 session 劫持或静默覆盖。
+
+### 适用范围
+
+| 产物类型 | 是否走本协议 | 原因 |
+|---------|------------|------|
+| 需求文档 | 否 | 一 REQ 一份，单作者（author Agent + 需求提出者） |
+| Spec 飞书文档 | 否 | 一 REQ 一份，单作者（spec-author Agent），SPEC_LOCKED 后冻结 |
+| **ARCHITECTURE 项目级飞书文档** | **是** | 跨 REQ 共享、可被任意 Spec 会话演化 |
+| 设计系统飞书文档 | 是（Phase 2 启用） | 跨 REQ 共享 |
+| ACM 注册表（Phase 3 GitHub） | 否（Git 层面已有 merge 冲突机制） | Git 原生 CAS |
+
+### 对设计文档 / SKILL.md 的要求
+
+- 任何跨 REQ 共享产物的**上下文契约表**必须注明「通过 §七 并发写回契约保护」。
+- 相关 Agent 的 SKILL.md 必须显式写明：启动时保留 `context_token` 与进入时 revision、写回后再次拉取 revision、提交 callback 时同时回传；遇到 `token_invalid` / `revision_conflict` 的处理路径。
+
+---
+
+## 八、Callback 作为状态机唯一真相
+
+**背景**：Pre-Phase-2 测试中多次观察到 Agent 在飞书文档写完后，仅以自然语言回复「已完成」「请进入下一步」就结束会话，而没有调用 `send_openclaw_callback.py` 上报。由于 Coordinator 的状态机只响应 callback，这类会话在业务语义上等同于**未完成**，流程会静默卡死在当前状态，人工难以察觉。
+
+**约束**（适用于所有工作流层的所有 Agent）：
+
+1. **callback 是状态推进的唯一合法触发方式**。写入飞书文档、回复用户消息、输出审查报告——全部都不是状态推进，只是产出/观察动作。
+2. **本次会话的最终动作必须是 callback**。Agent 的 SKILL.md 必须在各终止分支显式写出：「本次会话最终动作必须是执行 `<具体 callback 命令>`」，并将这条作为硬约束放在输出节的显著位置。
+3. **callback 失败必须显式暴露**。HTTP 非 2xx（含 400 token 失效、409 revision 冲突）时必须按错误码处理后重试；仍失败则在回复中明确说明「callback 上报失败」并保留现场，**禁止伪装成已完成**。
+4. **不允许的行为必须包含**「不得在未成功调用 callback 的情况下结束会话——写入文档 / 输出文本 ≠ 流程推进，状态机只认 callback」。
+
+**为什么要把这条写进方法论**：AI Agent 天然倾向于以「自然语言回复」作为会话完成信号，而方法论依赖状态机作为流程真相。两者的语义裂缝必须靠约束词条强行对齐，不能靠 Agent 自觉。

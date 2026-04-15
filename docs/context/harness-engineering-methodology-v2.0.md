@@ -163,19 +163,22 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：
 项目级上下文横跨飞书和 GitHub 两个平面。Coordinator Service 是同步枢纽：
 
 ```
-飞书平面（人工协同轨）          GitHub 平面（自动化 Coding 轨）
-  需求文档集（需求历史层）   ←→   ARCHITECTURE.yaml（架构快照层）
-  UI 原型集（需求历史层）    ←→   ACM 注册表（功能契约层）
-  项目设计系统文档（视觉层） ←→   设计系统快照（视觉层镜像）
-                                CLAUDE.md（规范惯例层）
+飞书平面（人工协同轨 + Spec 层产出轨）     GitHub 平面（自动化 Coding 轨）
+  需求文档集（需求历史层）                  ACM 注册表（功能契约层）
+  UI 原型集（需求历史层）                   设计系统快照（视觉层镜像）
+  项目设计系统文档（视觉层）                CLAUDE.md（规范惯例层）
+  ARCHITECTURE 项目级文档（架构快照层）
 ```
 
-- **Coordinator Service**：管理飞书侧所有项目级资产；在 Spec 生成时导出快照到 GitHub
-- **checkpoint-handler**：维护 GitHub 侧 ACM 注册表、ARCHITECTURE.yaml
+- **Coordinator Service**：管理飞书侧所有项目级资产；在 Spec 生成时导出设计系统快照到 GitHub
+- **spec-author Agent**：在每条 REQ 的 Spec 阶段演化 ARCHITECTURE 飞书文档（读当前 YAML → 增量合并 → 覆盖写回）
+- **checkpoint-handler**：维护 GitHub 侧 ACM 注册表（Phase 3 引入）
 
-**关键约束**：UI 设计发生在代码仓库建立之前，设计系统的主存储必须在飞书；GitHub 快照在 Spec 生成时导出，供 AI Coding Agent 消费。
+**关键约束**：
+- ARCHITECTURE 是 **Spec 层的产出物**之一，不是前置基础设施;主存储在飞书(和需求文档、UI 原型同平面),跨 REQ 持续演化。GitHub 侧不需要 ARCHITECTURE.yaml 镜像(Harness/Impl 层未来若要消费,再走快照导出机制)。
+- UI 设计发生在代码仓库建立之前，设计系统的主存储必须在飞书；GitHub 快照在 Spec 生成时导出，供 AI Coding Agent 消费。
 
-所有更新 **append-only**，可追溯到触发它的 REQ ID。
+所有更新 **append-only** 或飞书原生 revision 版本化，可追溯到触发它的 REQ ID。
 
 #### 分层上下文传递契约
 
@@ -187,7 +190,7 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：
 
 | 层级                    | 内容                                        | 注入时机             |
 | --------------------- | ----------------------------------------- | ---------------- |
-| **热**（每 session 自动加载） | CLAUDE.md；ARCHITECTURE.yaml；当前 REQ 的 Spec | 进入编码 session 即加载 |
+| **热**（每 session 自动加载） | CLAUDE.md；ARCHITECTURE 项目级飞书文档当前 revision；当前 REQ 的 Spec | 进入编码 session 即加载 |
 | **温**（按 REQ 加载）       | 当前 REQ 的 ACM；技术范围有重叠的历史 ACM               | Spec 生成时注入       |
 | **冷**（按需查询）           | 完整 ACM 注册表；完整设计系统历史；ADR 归档                | 显式触发时查询          |
 
@@ -283,7 +286,7 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 
 | | 内容 |
 |---|---|
-| **输入** | APPROVED 需求文档（含技术范围声明）+ 高保真 UI 原型（`needs_ui = true` 时）+ 项目级上下文（ARCHITECTURE.yaml + ACM 注册表 + 设计系统快照） |
+| **输入** | APPROVED 需求文档（含技术范围声明）+ 高保真 UI 原型（`needs_ui = true` 时）+ 项目级上下文（ARCHITECTURE 飞书文档当前 revision + ACM 注册表 + 设计系统快照） |
 | **输出** | 四层 Spec（requirements.md + design.md + acceptance.yaml + tasks.md）+ 可选 design-ui.md；存入 `spec/REQ-{PROJECT}-{NNN}/` |
 | **完成标准** | 卡点1a（方案门）通过：Design 层经技术负责人确认，ACM 条目完整，兼容性检查无阻断冲突 |
 
@@ -311,7 +314,9 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 
 **Design 层是整个链路唯一需要深度人工判断的文件**：接口契约（路径/请求/响应/错误码）+ 数据模型变更 + 架构接合点（复用哪些模块，新建什么）+ 兼容性影响（与历史 ACM 的冲突分析）。
 
-**注入的三类项目级上下文**：`ARCHITECTURE.yaml`（现有模块和接口）+ ACM 注册表（历史验收约束）+ 设计系统快照（UI 技术规格来源，`needs_ui = true` 时）
+**注入的三类项目级上下文**：ARCHITECTURE 飞书文档（现有模块和接口，本层读取并演化）+ ACM 注册表（历史验收约束）+ 设计系统快照（UI 技术规格来源，`needs_ui = true` 时）
+
+**ARCHITECTURE 的特殊性**：与 ACM / 设计系统快照不同，ARCHITECTURE 在本层不仅是被消费的输入，同时也是被演化的输出——spec-author 每次撰写 Spec 时必须读取当前 YAML、基于本次 Spec 的架构决策做增量合并、覆盖写回同一份飞书文档。并发安全通过「context_token + 写前/写后 revision round-trip」保证，详见 [infra/context-chain-principle.md §七](infra/context-chain-principle.md#七并发写回契约)。
 
 实现细节见 [layers/spec-harness-layer.md](layers/spec-harness-layer.md)。
 
@@ -486,16 +491,26 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 
 已完成：Coordinator Service 部署（`admin@47.251.81.45:8004`）、Author/Reviewer Agent 接入、Bitable 状态流转、正式文档 section-rewrite。
 
-### Pre-Phase-2：需求层稳固与 ARCHITECTURE.yaml 注入（当前进行中）
+### Pre-Phase-2：需求层稳固与 ARCHITECTURE 作为 Spec 产出物（已完成 ✅）
 
-目标：在启动需求层→规格层桥接之前，补齐需求层存在的信息漂移风险和项目级上下文缺口，避免问题带入下一阶段。
+目标：在启动需求层→规格层桥接之前，补齐需求层存在的信息漂移风险和项目级上下文缺口，澄清 ARCHITECTURE 的归属定位，避免错误假设带入 Phase 2。
 
-关键任务：
-- **ARCHITECTURE.yaml 注入链路**：`fetch-context` 返回项目级 `github_repo_url`，spec-author 在启动时通过 GitHub API 读取 ARCHITECTURE.yaml 并注入上下文
-- **既有项目 `github_repo_url` 绑定机制**：创建群引导流程中补充 GitHub 仓库绑定步骤，project_configs 持久化
-- **SPEC_DRAFTING 超时提醒**：防止 Spec 会话长时间无进展，Coordinator 侧定时扫描
-- **ARCHITECTURE.yaml 启动脚本**：针对已有仓库通过 `bootstrap_architecture.py` 扫描生成初版
-- **文档体系清理**：方法论、层次契约、现有环境文档的冲突/冗余统一，作为 Phase 2 实现的干净底座
+**关键结论（相对 v2.0 初稿的修正）**：
+- **ARCHITECTURE 定位反转**：原计划将 ARCHITECTURE.yaml 作为 Spec 层的**前置输入**（通过 bootstrap 脚本/Coordinator bootstrap 在项目接入时预置到 GitHub）。实践中发现两个前置假设都站不住：当前项目产出边界只到 Spec 不触及 Impl，GitHub 仓库可能不存在；bootstrap 阶段尚无任何需求沉淀，空骨架对 Spec 决策无价值。因此重新定位：**ARCHITECTURE 是 Spec 层的核心产出物之一，随每条 REQ 的 Spec 迭代演化**，主存储落在飞书项目级文档。GitHub 绑定 / Bootstrapper / Onboarding 流程全部拆除。
+- **Spec 层独立上下文端点**：需求层 `fetch-context` 不含 `architecture_doc_url`/revision；新增 `/queries/openclaw/spec-context` 端点（CLI 子命令 `spec-context`），返回 `architecture_doc_url` + `architecture_doc_revision` + `context_token`，状态门控 `APPROVED | SPEC_DRAFTING`。
+- **context_token + revision round-trip**：Spec 层写回 ARCHITECTURE 飞书文档存在并发竞争，必须走「进入时 revision → 写回 → 再次读取获得写后 revision → 回传」握手，Coordinator 据此决定是否接受 spec-submit。见 [infra/context-chain-principle.md §七](infra/context-chain-principle.md#七并发写回契约)。
+- **Callback 即状态机唯一真相**：写完飞书文档 ≠ 流程推进，状态机只认 `send_openclaw_callback.py` 的 HTTP 2xx。所有 Agent SKILL.md 强制要求「本次会话最终动作必须是 callback」，未成功上报即视为未完成,不允许伪装成已完成。
+
+已完成关键产出：
+- Spec 层两份核心产出物（Spec 文档 + ARCHITECTURE 飞书文档）端到端跑通，含 context_token/revision 并发保护
+- 四个 OpenClaw Agent SKILL.md 统一加入「状态机驱动硬约束」措辞
+- 需求层 section-level 幂等重写稳定；Bitable schema v1.2 就绪
+
+**Pre-Phase-2 已知遗留**（收口时登记到 session memory，不阻塞 Phase 2 启动）：
+- `needs_ui` 两阶段 UI 流程尚未实现（APPROVED 时仅占位创建空设计系统文档）
+- `architecture_doc_url` 持久化依赖 state.json 容器卷，重启丢失风险待治理
+- `scripts/sync_bitable_schema_v12.py` 存在 field_type 类型 bug（生产表已手工对齐）
+- OpenClaw 服务端 agent 配置除 SKILL.md / callback CLI 外未纳入仓库版本化
 
 ### Phase 2：需求层→规格层桥接（待启动，依赖 Pre-Phase-2 完成）
 

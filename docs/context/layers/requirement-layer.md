@@ -364,3 +364,16 @@
 | 锁定时刻 | 进入 APPROVED 时锁定；回炉会解锁 | SPEC_LOCKED 时锁定；只允许通过新 `spec_version` 修改，不原地改 |
 
 **不允许的耦合**：禁止用 `requirement_version` 推算 `spec_version`，也禁止用 `spec_version` 反推需求变更次数。二者在时间线上独立演进，仅通过 `based_on_requirement_version` 字段建立追溯。
+
+---
+
+## 九、Callback 作为状态机唯一真相
+
+本层所有 Agent（author / reviewer）遵循 [context-chain-principle.md §八](../infra/context-chain-principle.md#八callback-作为状态机唯一真相) 约束：
+
+- 需求 author Agent 完成字段补全后，**最终动作必须是** `author-ready` callback；写完飞书文档 ≠ 流程推进。
+- 需求 reviewer Agent 完成审查后，**最终动作必须是** `review-event --event review_ready_for_human_confirmation | review_returned_for_revision` callback；输出审查报告文本 ≠ 流程推进。
+- HTTP 非 2xx 必须立即重试；仍失败则显式说明「callback 上报失败」并保留现场，**禁止伪装成已完成**。
+- 各 Agent 的 SKILL.md 必须把「不得在未成功调用 callback 的情况下结束会话」列入「不允许的行为」。
+
+**背景**：Pre-Phase-2 测试中多次观察到 Agent 以自然语言回复「已提交」「请等待审查」就结束会话而未调 callback，Coordinator 状态机不会推进，流程静默卡死。此约束是方法论级硬要求，不随 Agent 具体实现变化。

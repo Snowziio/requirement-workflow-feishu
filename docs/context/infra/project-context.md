@@ -5,37 +5,33 @@
 
 ---
 
-## 一、ARCHITECTURE.yaml 格式与生命周期
+## 一、ARCHITECTURE 文档格式与生命周期
+
+> **定位**（Pre-Phase-2 校准）：ARCHITECTURE 是 **Spec 层的核心产出物之一**，不是前置基础设施。每个项目一份飞书文档，跨 REQ 共享、随每条 REQ 的 Spec 迭代演化，与需求文档、设计系统文档位于同一平面。GitHub 侧不再维护 ARCHITECTURE.yaml 镜像（Harness/Impl 层未来若需消费，再走 Spec 生成时的快照导出机制，类比设计系统快照）。
 
 ### 存储与总体生命周期
 
-- **存储位置**：GitHub 仓库根目录 `ARCHITECTURE.yaml`
-- **权威来源**：始终以仓库 main 分支最新 commit 的版本为准；Coordinator 通过 GitHub API 按需读取，不在本地缓存作权威
-- **更新节奏**：
-  - **初始化**：项目首次接入方法论时一次性建立（见下方"初始化三路径"）
-  - **增量更新**：每次 Impl PR 合并时由 checkpoint-handler 基于 design.md 变更追加/修改对应节（接口新增、模块新增、数据模型变更）
-  - **校核**：周期性（建议每月）由 spec-reviewer Agent 在 Spec 审查时比对 ARCHITECTURE.yaml 声明与实际代码导出，发现漂移时向项目群提醒
-
-### 初始化三路径
-
-ARCHITECTURE.yaml 的首次建立按项目形态选择路径，三者互斥：
-
-| 路径 | 适用场景 | 建立方式 | 责任方 |
-|---|---|---|---|
-| **Path A（新项目 scaffold）** | 使用 `harness-scaffold` 模板新建的项目 | 模板中自带骨架 ARCHITECTURE.yaml（`services: []` / `modules: []` / `data_models: []`，仅填 `tech_stack`）；首次 Impl PR 合并后由 checkpoint-handler 自动填充 | scaffold 模板 + 项目创建者 |
-| **Path B（既有仓库接入）** | 已有代码的存量仓库首次引入方法论 | 运行 `scripts/bootstrap_architecture.py` 对仓库做一次 AI 扫描，生成初版 ARCHITECTURE.yaml，由技术负责人 review 后合并 | 技术负责人（手动触发） |
-| **Path C（Coordinator 引导初始化）** | 通过飞书创建群 onboarding 流程绑定 GitHub 仓库时 | `ProjectBootstrapper` 调 GitHub API 在 main 分支创建最小 ARCHITECTURE.yaml（仅 `project` + `tech_stack` 占位），明确标记 `status: bootstrap`；后续 Path A 或 Path B 的流程补全内容 | Coordinator（自动） |
-
-三路径之间的选择由 `project_configs` 的 `bootstrap_path` 字段记录（`scaffold` / `existing_scan` / `coordinator_bootstrap`），不允许中途切换路径。
+- **存储位置**：飞书项目级 docx，`document_id` 登记在 Coordinator 的 `project_configs.architecture_doc_id`
+- **权威来源**：始终以飞书文档最新 revision 为准；Coordinator 持有 URL 与最近一次写后 revision 作为状态元数据，不缓存文档内容
+- **诞生**：项目**首条 REQ 进入 Spec 阶段**（APPROVED → SPEC_DRAFTING 过渡）时，Coordinator 以类目模板（template_version）为骨架创建飞书文档；不需要独立的 bootstrap/onboarding 流程
+- **演化**：每条 REQ 的 Spec 阶段，spec-author Agent 通过 `/queries/openclaw/spec-context` 端点获取当前 revision 与 context_token → `feishu_fetch_doc` 读取当前 YAML → 基于本次 Spec 决策做增量合并 → `feishu_update_doc` 覆盖写回 → 再次拉 revision → 在 `spec-submit` callback 回传 context_token 与写后 revision（详见 [context-chain-principle.md §七](context-chain-principle.md#七并发写回契约)）
+- **冻结**：无。ARCHITECTURE 永远随项目演进
+- **原生版本历史**：依赖飞书 docx 的原生 revision 机制追溯；不再需要 GitHub commit 历史兜底
 
 ### 更新责任边界（防漂移）
 
 | 操作 | 允许的责任方 | 禁止的责任方 |
 |---|---|---|
-| 新增 service / module / data_model 条目 | checkpoint-handler（Impl PR 合并后自动）；bootstrap_architecture.py（初始化时） | spec-author、spec-reviewer、requirement-author、人工直接 commit（除 bootstrap 合并 PR 外） |
-| 修改 `introduced_in` / `spec_version` 字段 | checkpoint-handler | 所有其他 |
-| 变更 `tech_stack` | 人工（提交独立 PR，需技术负责人 approve） | 任何 Agent |
-| 删除条目 | 人工（独立 PR + 理由记录在 PR description） | 任何 Agent、任何 Hook |
+| 首次创建骨架文档 | Coordinator（首条 REQ 进入 SPEC_DRAFTING 时自动） | 任何 Agent、任何 Hook、人工手建 |
+| 新增 / 修改 service / module / data_model 条目 | **spec-author Agent**（在 Spec 阶段按增量合并规则写回） | spec-reviewer、requirement-author、人工直接编辑飞书文档 |
+| 修改 `introduced_in` / `spec_version` 字段 | spec-author Agent | 所有其他 |
+| 变更 `tech_stack` | 人工（通过类目模板升级或独立飞书文档编辑，需技术负责人确认） | 任何 Agent |
+| 删除条目 | 人工（独立编辑 + 理由记录在飞书评论） | 任何 Agent |
+| 校核 | spec-reviewer Agent 在 Spec 审查时比对 Spec §8.2「项目级上下文消费声明」是否如实引用当前 ARCHITECTURE 片段 | — |
+
+### 并发安全
+
+ARCHITECTURE 是**唯一跨 REQ 共享的项目级飞书产出物**，并发保护走 context_token + revision round-trip 握手。Coordinator 在 `spec-submit` 校验失败（`token_invalid` / `revision_conflict`）时拒绝状态推进，Agent 必须重读 ARCHITECTURE 后再提交。
 
 ### 格式示例
 
@@ -312,12 +308,13 @@ interaction_patterns:
 | REQ APPROVED | Bitable REQ 索引（状态更新） | Coordinator | 更新字段 |
 | UI 设计第二阶段确认 | 飞书设计系统文档（append 新组件 + 决策日志） | Coordinator | Append-only |
 | UI 设计第二阶段确认 | Bitable 高保真原型链接 | Coordinator | 更新字段 |
+| 首条 REQ 进入 SPEC_DRAFTING | **ARCHITECTURE 项目级飞书文档（骨架创建）** | Coordinator | 一次性 create（类目模板） |
+| Spec 撰写（每条 REQ） | **ARCHITECTURE 项目级飞书文档（增量演化）** | spec-author Agent | 覆盖写（保留飞书原生 revision 历史）；走 context_token + revision 握手 |
 | Spec 生成触发（卡点1a 前） | 飞书设计系统快照导出 → GitHub `specs/design-system-snapshot.yaml` | Coordinator | 覆盖写（快照） |
 | 卡点1a 通过 | ACM 注册表新增条目（status: locked） | checkpoint-handler | Append |
 | 卡点1a 通过 | Bitable 状态 → SPEC_LOCKED，记录卡点1a 时间 | checkpoint-handler | 更新字段 |
 | 卡点1b 通过 | ACM 注册表更新条目（status: finalized，回填 test_file/test_function） | checkpoint-handler | 更新字段 |
 | 卡点1b 通过 | Bitable 状态 → HARNESS_READY，记录卡点1b 时间 | checkpoint-handler | 更新字段 |
-| Impl PR 合并 | ARCHITECTURE.yaml（新接口/模块/数据模型） | checkpoint-handler Hook | 更新对应节点 |
 | 架构决策发生 | ADR 文档（docs/decisions/ADR-{N}-*.md） | 人工写入 | 新建文件 |
 | 项目交付 | 飞书知识库（客户档案 + 经验总结） | 人工整理 | 新建文档 |
 

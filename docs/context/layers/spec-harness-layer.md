@@ -9,27 +9,42 @@
 
 > 遵循 [infra/context-chain-principle.md](../infra/context-chain-principle.md) 规定的五问格式。
 
-### Spec 子层消费（来自需求层）
+### Spec 子层消费（来自需求层 + 项目级）
+
+**唯一合法上下文入口**：`/queries/openclaw/spec-context` 端点（CLI 子命令 `spec-context`），状态门控 `APPROVED | SPEC_DRAFTING`。不要用需求层的 `fetch-context`——它不返回 `architecture_doc_url` / `architecture_doc_revision` / `context_token`。
 
 | 上下文产物 | 来源 | 读取机制 |
 |-----------|------|---------|
-| 需求文档 8 字段 | 飞书文档（document_id） | feishu_fetch_doc(document_id) |
-| latest_review_summary | Coordinator state | fetch-context 接口 |
-| ARCHITECTURE.yaml | GitHub 仓库 | GitHub API |
-| tech_stack（技术栈） | Coordinator state（project_config） | fetch-context 接口 |
-| 设计系统快照 | GitHub 仓库（needs_ui = true 时） | GitHub API |
-| 高保真 UI 原型链接 | Bitable（needs_ui = true 时） | fetch-context 接口 |
+| 需求文档 8 字段 | 飞书文档（requirement_document_url） | feishu_fetch_doc(document_id) |
+| latest_review_summary | Coordinator state | spec-context 端点 |
+| **ARCHITECTURE 飞书文档** | 飞书项目级 docx（architecture_doc_url） | feishu_fetch_doc + 进入时 architecture_doc_revision |
+| **context_token** | Coordinator 签发 | spec-context 端点响应 |
+| tech_stack / category / template_version | Coordinator state（project_config） | spec-context 端点 |
+| 设计系统快照 | （needs_ui = true 时，Phase 2 启用） | — |
+| 高保真 UI 原型链接 | Bitable（needs_ui = true 时） | spec-context 端点 |
 
-### Spec 子层产出（传递给 Harness 子层）
+### Spec 子层产出（本层双产出物）
 
 | 上下文产物 | 内容 | 存储位置 | 更新策略 |
 |-----------|------|---------|---------|
-| design.md | 接口契约 + 数据模型 + 架构接合点 + 上下文消费声明 | GitHub PR（spec/REQ-xxx/） | SPEC_LOCKED 后不可修改 |
-| requirements.md | EARS 格式用户故事 | GitHub PR（spec/REQ-xxx/） | 同上 |
-| acceptance.yaml | 所有 AC 定义（含 source_req_id、source_field 引用） | GitHub PR（spec/REQ-xxx/） | 同上 |
-| tasks.md | 实现任务分解 | GitHub PR（spec/REQ-xxx/） | 同上 |
-| spec_document_url | Spec PR URL | Coordinator state | 卡点1a 确认时写入 |
+| Spec 飞书文档（9 节） | 背景/API 入参/API 出参/异常/测试策略/性能/实现范围/架构设计（含 §8.2 项目级上下文消费声明）/数据模型 | 飞书 docx（spec_document_id） | 每节覆盖写；SPEC_LOCKED 后冻结 |
+| **ARCHITECTURE 演化版本** | 本轮增量合并后的全量 YAML | **同一份项目级飞书文档**（architecture_doc_id） | 覆盖写（保留飞书原生 revision 历史）；走 context_token + revision 握手 |
+| spec_document_url | Spec 飞书文档 URL | Coordinator state | spec_start 回传 |
+| architecture_doc_revision（写后） | ARCHITECTURE 飞书文档写回后的新 revision | Coordinator state | spec-submit 回传，与 context_token 一并校验 |
 | spec_review_summary | Spec 审查结论 | Coordinator state | 每次 Spec 审查完成后更新 |
+
+> **Phase 3 接入点**：Harness 子层启动时，如果需要消费 ARCHITECTURE，由 Coordinator 在卡点 1a 前导出当前飞书文档到 GitHub `specs/architecture-snapshot.yaml`（类比设计系统快照），不让 Harness/Impl Agent 直接读飞书。本文 Spec 子层暂不涉及此导出。
+
+### 并发写回契约
+
+ARCHITECTURE 是**跨 REQ 共享的项目级产出物**，并发保护必须走 [context-chain-principle.md §七](../infra/context-chain-principle.md#七并发写回契约) 的握手协议：
+
+1. spec-context 端点获取 `architecture_doc_url` + 进入时 `architecture_doc_revision` + `context_token`，必须保存
+2. 写回 ARCHITECTURE 后再次调 spec-context 取写后 revision
+3. `spec-submit` 同时回传 `context_token` 与写后 revision
+4. Coordinator 校验失败（`token_invalid` / `revision_conflict`）→ 重新从 Step 1 拉取再合并提交
+
+**Callback 即状态机真相**：写完 Spec 飞书文档 + 写回 ARCHITECTURE ≠ 流程推进。未成功调用 `spec-submit` callback，Coordinator 不会推进到 `SPEC_DRAFTING_SUBMITTED`。SKILL.md 必须将「本次会话最终动作必须是 `spec-submit` callback」作为硬约束。见 [context-chain-principle.md §八](../infra/context-chain-principle.md#八callback-作为状态机唯一真相)。
 
 ### Harness 子层消费（来自 Spec 子层）
 
