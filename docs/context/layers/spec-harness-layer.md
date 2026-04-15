@@ -11,7 +11,7 @@
 
 ### Spec 子层消费（来自需求层 + 项目级）
 
-**唯一合法上下文入口**：`/queries/openclaw/spec-context` 端点（CLI 子命令 `spec-context`），状态门控 `APPROVED | SPEC_DRAFTING`。不要用需求层的 `fetch-context`——它不返回 `architecture_doc_url` / `architecture_doc_revision` / `context_token`。
+**唯一合法上下文入口**：`/queries/openclaw/spec-context` 端点（CLI 子命令 `spec-context`），状态门控 `requirement.status == APPROVED && spec_status ∈ {null, SPEC_DRAFTING}`。不要用需求层的 `fetch-context`——它不返回 `architecture_doc_url` / `architecture_doc_revision` / `context_token`。
 
 | 上下文产物 | 来源 | 读取机制 |
 |-----------|------|---------|
@@ -31,6 +31,7 @@
 | **ARCHITECTURE 演化版本** | 本轮增量合并后的全量 YAML | **同一份项目级飞书文档**（architecture_doc_id） | 覆盖写（保留飞书原生 revision 历史）；走 context_token + revision 握手 |
 | spec_document_url | Spec 飞书文档 URL | Coordinator state | spec_start 回传 |
 | architecture_doc_revision（写后） | ARCHITECTURE 飞书文档写回后的新 revision | Coordinator state | spec-submit 回传，与 context_token 一并校验 |
+| spec_author_summary | spec-author 上报的 9 节完稿摘要（区别于审查结论） | Coordinator state | `spec_submit` 事件写入 |
 | spec_review_summary | Spec 审查结论 | Coordinator state | 每次 Spec 审查完成后更新 |
 
 > **Phase 3 接入点**：Harness 子层启动时，如果需要消费 ARCHITECTURE，由 Coordinator 在卡点 1a 前导出当前飞书文档到 GitHub `specs/architecture-snapshot.yaml`（类比设计系统快照），不让 Harness/Impl Agent 直接读飞书。本文 Spec 子层暂不涉及此导出。
@@ -392,7 +393,7 @@ compatibility:
    → 使用 Claude Code 生成四层 Spec 到 spec/REQ-PROJECT-001/ 目录
    → git push → 创建 PR，PR 标题含 REQ ID
 3. 开发者触发：Bitable 状态 → SPEC_DRAFTING，记录 Spec PR 链接
-4. checkpoint-handler 发送卡点1a 飞书卡片
+4. Coordinator 发送卡点 1a 飞书卡片
 ```
 
 ### 阶段 B：半自动化（Phase 2 交付目标）
@@ -406,7 +407,7 @@ compatibility:
    → 调用 Spec 转化 Agent：生成四层 Spec
    → GitHub API：创建分支 spec/REQ-PROJECT-001，commit 所有文件，创建 PR
    → Bitable：状态 → SPEC_DRAFTING，记录 PR 链接
-   → checkpoint-handler：触发卡点1a 飞书卡片
+   → Coordinator：触发卡点 1a 飞书卡片
 ```
 
 ### 卡点1a 飞书卡片内容
@@ -610,40 +611,24 @@ P0 全覆盖：✅（4/4）
 
 ---
 
-## 四、Spec 子状态机与 fallback
+## 四、Spec 子状态机
 
-需求主态在 APPROVED 后不再变化（见 [requirement-layer.md](requirement-layer.md) §一）。规格层 Spec 子层引入独立的子状态字段 `spec_status`（Bitable 字段名：`Spec状态`，枚举：`NONE` / `SPEC_DRAFTING` / `SPEC_LOCKED` / `SPEC_REJECTED`），不覆盖需求主态。
+需求主态在 APPROVED 后不再变化（见 [requirement-layer.md](requirement-layer.md) §一）。规格层 Spec 子层引入独立的子状态字段 `spec_status`（Bitable 字段名：`Spec状态`），取值：空（未进入规格层） / `SPEC_DRAFTING` / `SPEC_LOCKED` / `SPEC_REJECTED`。子状态机与需求主态机正交——`spec_abort` 或 `checkpoint_1a_reject` 均**不会**回写 `requirement.status`。
 
 ### 子状态转移表
 
 | 当前 `spec_status` | 事件 | 目标 | 触发方 | 说明 |
 |---|---|---|---|---|
-| NONE | spec_start | SPEC_DRAFTING | Coordinator 收到 spec-author Agent 的 `spec_start` 回调 | 同时创建飞书 Spec 文档，写入 `spec_document_url` |
-| SPEC_DRAFTING | spec_submit | SPEC_DRAFTING（保持）| spec-author 上报 9 节完稿 | 仅更新 `spec_review_summary`，不立即转 SPEC_LOCKED |
+| （空） | spec_start | SPEC_DRAFTING | Coordinator 收到 spec-author Agent 的 `spec_start` 回调 | 同时创建飞书 Spec 文档，写入 `spec_document_url` |
+| SPEC_DRAFTING | spec_submit | SPEC_DRAFTING（保持）| spec-author 上报 9 节完稿 | 更新 `spec_author_summary`，不立即转 SPEC_LOCKED |
 | SPEC_DRAFTING | ai_review_reject | SPEC_DRAFTING（保持）| spec-reviewer 审查未通过 | spec-author 继续修改；回合数计入 `spec_iteration_round` |
 | SPEC_DRAFTING | ai_review_pass | SPEC_DRAFTING（保持）| spec-reviewer 通过 | 等待人工卡点1a |
 | SPEC_DRAFTING | checkpoint_1a_pass | SPEC_LOCKED | 人（飞书卡片"确认提交"按钮） | 触发飞书 9 节 → GitHub 四文件转化；飞书 Spec 文档自此只读 |
-| SPEC_DRAFTING | checkpoint_1a_reject | SPEC_DRAFTING（保持）| 人（飞书卡片"返回修改"按钮）| spec-author 继续迭代 |
-| SPEC_DRAFTING | spec_abort | SPEC_REJECTED | 人（显式放弃）或超时清理 | **需求主态回到 DRAFTING**（见下方 §"需求回炉 fallback"） |
+| SPEC_DRAFTING | checkpoint_1a_reject | SPEC_REJECTED | 人（飞书卡片"返回修改"按钮）| 仅作历史留档；需人工决定是否重新 `spec_start` |
+| SPEC_DRAFTING | spec_abort | SPEC_REJECTED | 人（显式放弃）或超时清理 | 仅作历史留档；不回退 `requirement.status` |
 | SPEC_LOCKED | — | （终态） | — | 任何进一步变更走"Spec 版本演进"（新 spec_version），不改现有 SPEC_LOCKED |
 
-### 需求回炉 fallback（跨态降级）
-
-若 Spec 阶段发现需求本身存在不可修复问题（字段不完整 / 技术范围声明与现实严重不符 / 核心验收标准无法落实），允许从 Spec 子状态机降级回需求主态机：
-
-触发条件（任一）：
-- 技术负责人在 Spec 讨论中主动判定"需求需要重做"，向 Coordinator 发送 `spec_to_requirement_rework` 事件
-- spec-reviewer 连续 3 轮 `ai_review_reject` 且共同根因指向需求层字段（由 Coordinator 聚合判定）
-
-执行动作（Coordinator 原子执行）：
-1. `spec_status` → SPEC_REJECTED（标记当前 Spec 草稿作废）
-2. `requirement.status`：APPROVED → DRAFTING（需求主态回炉）
-3. 将 `spec_review_summary` 作为 "需求层需关注的问题" 写入需求文档的讨论追溯节
-4. 通知 author 私聊：需求已回炉，请继续补全
-5. 飞书 Spec 文档保留（只读，标记 `[已作废 · SPEC_REJECTED]`），供审计追溯
-6. 同一 REQ ID 继续使用；若后续再次进入 Spec 阶段，`spec_version` 从 v1 重新开始（上个作废版本保留为 v0.rejected）
-
-该 fallback 是**唯一允许从规格层回退到需求层的路径**，必须经 Coordinator 记录事件日志，不得由 Agent 直接改写状态。
+> **注**：`spec_abort` / `checkpoint_1a_reject` 只置 `spec_status = SPEC_REJECTED` 并通知人；不触发需求层回炉。需求层若真需要返工，需由人工显式在需求层触发相应事件，不在本子状态机范围内。
 
 ---
 
@@ -656,3 +641,4 @@ P0 全覆盖：✅（4/4）
 | 新增能力 | 新 Spec 目录（新 REQ ID 或新 spec_version）|
 | 性能改进 | 新 spec_version，变更 AC 标记 `breaking_change: true` |
 | BREAKING CHANGE | 必须在 ACM compatibility 节声明，触发 ACM 注册表兼容性告警 |
+	

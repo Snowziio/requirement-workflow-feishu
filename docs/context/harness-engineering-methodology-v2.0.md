@@ -138,9 +138,11 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：
 
 | 覆盖层 | 工作流服务 | 说明 |
 |---|---|---|
-| 需求层 | Coordinator Service | 需求层首个参考实现（`Snowziio/requirement-workflow-feishu`） |
-| 规格层-B → 交付层 | checkpoint-handler | 卡点卡片、CI 触发、PR 创建 |
+| 需求层 + 规格层-A | Coordinator Service | 需求层首个参考实现（`Snowziio/requirement-workflow-feishu`）；规格层-A 复用同一服务，延伸出 Spec 子状态机（见 §4.2）并负责卡点 1a 卡片 |
+| 规格层-B → 交付层 | checkpoint-handler | 卡点 1b/2/3 卡片、CI 触发、PR 创建 |
 | 生成→验证→集成→交付层 | *待建* | 按同一模板扩展 |
+
+对应的能力层 Agent（当前已落地或规划中）：需求层为 OpenClaw author / reviewer；规格层-A 为 spec-author / spec-reviewer；规格层-B 起由 Claude Code CLI / GitHub Actions 接管。
 
 **引入这条原则的教训**：v1.2 曾将 OpenClaw 作为主编排器，但 OpenClaw 的 session 按群绑定，无法跨群共享状态，也无法持久化跨进程状态。根因是把"能力层"错当"Workflow Service 层"来用。三层分离原则从架构上杜绝此类错误。
 
@@ -211,12 +213,12 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：
 
 人的判断集中在四个预定义的卡点。卡点之外，人不介入执行。
 
-| 卡点 | 名称 | 层 | 判断内容 | 判断权 |
-|---|---|---|---|---|
-| ⚡ 1a | 方案门 | 规格层-A | Design 层（接口契约 + 数据模型 + 架构接合点）是否合理；ACM 是否合理 | 技术负责人 |
-| ⚡ 1b | Harness 门 | 规格层-B | 每个 AC 是否有对应测试；历史回归是否覆盖 | 技术负责人 |
-| ⚡ 2 | 质量门 | 验证层 | CI 全量通过后，是否合并 PR | 技术负责人 |
-| ⚡ 3 | 发布门 | 集成层 | Staging 功能 Demo 验收后，是否发布到客户环境 | 产品/客户负责人 |
+| 卡点 | 名称 | 层 | 事件名 | 判断内容 | 判断权 |
+|---|---|---|---|---|---|
+| ⚡ 1a | 方案门 | 规格层-A | `checkpoint_1a_pass` / `checkpoint_1a_reject` | Design 层（接口契约 + 数据模型 + 架构接合点）是否合理；ACM 是否合理 | 技术负责人 |
+| ⚡ 1b | Harness 门 | 规格层-B | `checkpoint_1b_pass` / `checkpoint_1b_reject` | 每个 AC 是否有对应测试；历史回归是否覆盖 | 技术负责人 |
+| ⚡ 2 | 质量门 | 验证层 | `checkpoint_2_pass` / `checkpoint_2_reject` | CI 全量通过后，是否合并 PR | 技术负责人 |
+| ⚡ 3 | 发布门 | 集成层 | `checkpoint_3_pass` / `checkpoint_3_reject` | Staging 功能 Demo 验收后，是否发布到客户环境 | 产品/客户负责人 |
 
 **卡点的共同性质**：
 - 飞书消息卡片发送，卡片上有操作按钮
@@ -280,7 +282,7 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 
 > **实现状态**：⚙️ 设计完成，待实现（Phase 2）｜**细节文件**：[layers/spec-harness-layer.md](layers/spec-harness-layer.md)
 
-**驱动者**：checkpoint-handler（卡点1a 后）+ Spec 转化 Agent（Phase 2 半自动化）
+**驱动者**：Coordinator Service（Workflow Service 层，承载 Spec 子状态机 + 卡点 1a 卡片）+ OpenClaw spec-author / spec-reviewer Agent（能力层）
 
 **目标**：将 APPROVED 需求文档转化为 GitHub 中锁定的四层 Spec，为 AI Coding Agent 提供精确技术约定。
 
@@ -291,6 +293,33 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 | **完成标准** | 卡点1a（方案门）通过：Design 层经技术负责人确认，ACM 条目完整，兼容性检查无阻断冲突 |
 
 **核心机制**：
+
+**Spec 子状态机 + 双闸门**：Spec 子状态机是需求层 6 态机的下挂子状态，仅在 `requirement.status == APPROVED` 时生效。spec-author 撰写飞书 9 节 Spec 草稿 → spec-reviewer 自动审查（通过/驳回可多轮迭代）→ 卡点 1a 人工方案门锁定 Spec。子状态机与需求层正交：Spec 驳回或中止**不会**回写 `requirement.status`，需求层 APPROVED 门控保持不变。
+
+```
+                 spec_start
+      null ─────────────────────► SPEC_DRAFTING
+       ▲                            │   ▲
+       │                            │   │  ai_review_reject
+       │                            │   └──────────────  (留在 SPEC_DRAFTING，
+       │                            │                    spec-author 重写)
+       │                            │
+       │                  ai_review_pass
+       │                            │
+       │                            ▼
+       │                    （等待卡点 1a）
+       │                            │
+       │         checkpoint_1a_pass │
+       │                            ▼
+       │                      SPEC_LOCKED ──► 进入规格层-B
+       │
+       │         checkpoint_1a_reject / spec_abort
+       └──────────────────── SPEC_REJECTED
+                                 （仅作历史留档，不回退需求层状态；
+                                  需人工决定是否重启 spec_start）
+```
+
+事件命名：`spec_start` / `spec_submit` / `ai_review_pass` / `ai_review_reject` / `checkpoint_1a_pass` / `checkpoint_1a_reject` / `spec_abort`。
 
 **单向转化门**：飞书（需求空间，发散、自由）→ 卡点1a（人工桥接）→ GitHub（锁定空间，确定性、自动化管道）。转化后 GitHub 是唯一权威。
 
