@@ -269,6 +269,7 @@ def test_spec_submit_sends_card_to_project_group():
         "event": "spec_submit",
         "summary": "9节已完成",
         "spec_document_url": "https://feishu.cn/docx/spec_doc",
+        "architecture_doc_revision": "rev-20260415-001",
     }).encode()
     status, payload = app.handle_openclaw_spec_turn_callback(submit_body)
     assert status == 200

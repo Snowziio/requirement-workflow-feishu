@@ -1,14 +1,15 @@
 from requirement_workflow_v12.coordinator_service import CoordinatorService
-from requirement_workflow_v12.project_config import OnboardingState, ProjectConfig
+from requirement_workflow_v12.project_config import ProjectConfig
 
 
 def _make_service(project: str = "PROJ") -> CoordinatorService:
     svc = CoordinatorService()
     svc.project_configs[project] = ProjectConfig(
-        github_repo_url="https://github.com/org/repo",
-        is_new_project=True,
+        category="saas-ai-automation",
+        template_version="saas-ai-automation.v1",
+        architecture_doc_id="doc_t",
+        architecture_doc_url="https://feishu.example/docx/doc_t",
         tech_stack={},
-        onboarding_state=OnboardingState.COMPLETE,
     )
     return svc
 
