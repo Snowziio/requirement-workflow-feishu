@@ -29,6 +29,43 @@ def test_spec_start_blocked_when_already_locked():
     assert not decision.allowed
 
 
+def test_checkpoint_1a_pass_transitions_drafting_to_transforming():
+    decision = apply_spec_event(SpecStatus.DRAFTING, SpecEvent.CHECKPOINT_1A_PASS)
+    assert decision.allowed
+    assert decision.next_status == SpecStatus.TRANSFORMING
+
+
+def test_transform_converged_transitions_to_locked():
+    decision = apply_spec_event(SpecStatus.TRANSFORMING, SpecEvent.TRANSFORM_CONVERGED)
+    assert decision.allowed
+    assert decision.next_status == SpecStatus.LOCKED
+
+
+def test_transform_deadlock_keeps_transforming():
+    """Deadlock must stay in TRANSFORMING; never roll back to DRAFTING.
+
+    Rationale: human already confirmed the Spec at checkpoint 1a; rolling
+    back would invalidate that confirmation. Coordinator handles deadlock
+    by writing a manual ticket, not by changing state.
+    """
+    decision = apply_spec_event(SpecStatus.TRANSFORMING, SpecEvent.TRANSFORM_DEADLOCK)
+    assert decision.allowed
+    assert decision.next_status == SpecStatus.TRANSFORMING
+
+
+def test_checkpoint_1a_pass_blocked_in_transforming():
+    """Re-firing checkpoint_1a_pass once already in TRANSFORMING is invalid."""
+    decision = apply_spec_event(SpecStatus.TRANSFORMING, SpecEvent.CHECKPOINT_1A_PASS)
+    assert not decision.allowed
+
+
+def test_spec_review_events_blocked_in_transforming():
+    """Spec review events belong to the DRAFTING phase, not TRANSFORMING."""
+    for event in (SpecEvent.SPEC_REVIEW_PASS, SpecEvent.SPEC_REVIEW_REJECT):
+        decision = apply_spec_event(SpecStatus.TRANSFORMING, event)
+        assert not decision.allowed, f"{event} must be rejected while TRANSFORMING"
+
+
 def test_requirement_has_spec_fields():
     req = Requirement(req_id="REQ-X-001", name="test", project="X", summary="s", creator="c")
     assert hasattr(req, "spec_document_id")
