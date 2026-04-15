@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 import uuid
@@ -56,7 +57,9 @@ def list_fields(client: lark.Client, app_token: str, table_id: str) -> dict[str,
 
 
 def build_field_payload(spec: BitableFieldSpec, *, field_id: str = "") -> AppTableField:
-    builder = AppTableFieldBuilder().field_name(spec.name).type(spec.field_type)
+    # bitable_type is the int enum expected by lark-oapi; spec.field_type is the
+    # human-readable string label from the JSON schema and must NOT be passed here.
+    builder = AppTableFieldBuilder().field_name(spec.name).type(spec.bitable_type)
     if field_id:
         builder = builder.field_id(field_id)
     return builder.build()
@@ -95,7 +98,18 @@ def ensure_success(response, action: str) -> None:
         raise RuntimeError(f"Failed to {action}: {response.code} {response.msg}")
 
 
-def main() -> int:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Sync Bitable schema to v1.2 spec.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print intended create/update actions without calling Lark APIs.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
     app_token = required_env("FEISHU_BITABLE_APP_TOKEN")
     table_id = required_env("FEISHU_BITABLE_TABLE_ID")
     client = build_client()
@@ -103,20 +117,47 @@ def main() -> int:
 
     current_fields = list_fields(client, app_token, table_id)
     print(f"[info] current field count: {len(current_fields)}")
+    if args.dry_run:
+        print("[info] dry-run mode — no changes will be applied")
+
+    planned_creates: list[str] = []
+    planned_updates: list[str] = []
+    skipped: list[str] = []
 
     for spec in field_specs:
         existing = current_fields.get(spec.name)
         if existing is None:
-            create_field(client, app_token, table_id, spec)
+            planned_creates.append(spec.name)
+            if args.dry_run:
+                print(f"[dry-run create] {spec.name} type={spec.bitable_type}")
+            else:
+                create_field(client, app_token, table_id, spec)
             continue
 
-        if existing.type != spec.field_type:
-            update_field(client, app_token, table_id, existing.field_id, spec)
+        # existing.type is the int enum; compare against spec.bitable_type
+        # (not spec.field_type which is a string label).
+        if existing.type != spec.bitable_type:
+            planned_updates.append(spec.name)
+            if args.dry_run:
+                print(
+                    f"[dry-run update] {spec.name} "
+                    f"existing_type={existing.type} → {spec.bitable_type}"
+                )
+            else:
+                update_field(client, app_token, table_id, existing.field_id, spec)
             continue
 
-        print(f"[skip] {spec.name}")
+        skipped.append(spec.name)
+        if args.dry_run:
+            print(f"[dry-run skip] {spec.name}")
 
-    print("[done] Bitable schema synced to v1.2")
+    print(
+        f"[summary] create={len(planned_creates)} update={len(planned_updates)} skip={len(skipped)}"
+    )
+    if args.dry_run:
+        print("[done] dry-run complete; no changes were made")
+    else:
+        print("[done] Bitable schema synced to v1.2")
     return 0
 
 

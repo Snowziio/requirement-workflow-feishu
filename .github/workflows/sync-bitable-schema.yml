@@ -2,6 +2,12 @@ name: Sync Bitable Schema
 
 on:
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run in dry-run mode (print diff only, no API writes)."
+        type: boolean
+        required: false
+        default: true
 
 jobs:
   sync:
@@ -23,4 +29,9 @@ jobs:
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           FEISHU_BITABLE_APP_TOKEN: ${{ secrets.FEISHU_BITABLE_APP_TOKEN }}
           FEISHU_BITABLE_TABLE_ID: ${{ secrets.FEISHU_BITABLE_TABLE_ID }}
-        run: python scripts/sync_bitable_schema_v12.py
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            python scripts/sync_bitable_schema_v12.py --dry-run
+          else
+            python scripts/sync_bitable_schema_v12.py
+          fi
