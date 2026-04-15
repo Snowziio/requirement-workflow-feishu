@@ -15,6 +15,7 @@ from .protocols import (
     CreationRequest,
     CreationResponse,
 )
+from .spec_state_machine import SpecEvent, SpecStatus, apply_spec_event
 from .state_machine import Event, apply_event
 
 
@@ -116,7 +117,7 @@ class CoordinatorService:
             if (
                 req.project == project
                 and req.req_id != exclude_req_id
-                and req.status == WorkflowStatus.SPEC_DRAFTING
+                and req.spec_status == SpecStatus.DRAFTING
             ):
                 return True
         return False
@@ -393,22 +394,22 @@ class CoordinatorService:
             requirement.document_url = payload.document_url
         requirement.latest_writeback_at = utc_now()
 
-        if requirement.status == WorkflowStatus.SPEC_DRAFTING:
-            # Spec layer review branch
+        if requirement.spec_status == SpecStatus.DRAFTING:
+            # Spec layer review branch — 走 spec 子状态机，不动 requirement.status
             if event_name == "ai_review_pass":
-                decision = apply_event(requirement.status, Event.AI_REVIEW_PASS)
+                decision = apply_spec_event(requirement.spec_status, SpecEvent.SPEC_REVIEW_PASS)
                 if not decision.allowed:
                     raise ValueError(decision.message)
-                requirement.status = decision.next_status
+                requirement.spec_status = decision.next_status
                 requirement.spec_review_summary = payload.review_summary
                 requirement.current_phase = "Spec 已锁定"
                 requirement.current_owner = "coordinator-service"
                 requirement.current_role_label = "需求协调服务"
             else:  # ai_review_reject
-                decision = apply_event(requirement.status, Event.AI_REVIEW_REJECT)
+                decision = apply_spec_event(requirement.spec_status, SpecEvent.SPEC_REVIEW_REJECT)
                 if not decision.allowed:
                     raise ValueError(decision.message)
-                requirement.status = decision.next_status
+                requirement.spec_status = decision.next_status
                 requirement.spec_review_summary = payload.review_summary
                 requirement.current_phase = "Spec 撰写"
                 requirement.current_owner = "spec-agent"
@@ -439,8 +440,10 @@ class CoordinatorService:
                 requirement.latest_question = "AI review 已通过，请进行人工确认。"
         else:
             raise ValueError(
-                f"当前状态 {requirement.status.value} 不支持 review 事件。"
-                "review callback 只能在 AI_REVIEW 或 SPEC_DRAFTING 状态使用。"
+                f"当前状态 status={requirement.status.value} "
+                f"spec_status={requirement.spec_status.value if requirement.spec_status else 'None'} "
+                "不支持 review 事件。review callback 只能在 requirement.status=AI_REVIEW "
+                "或 requirement.spec_status=SPEC_DRAFTING 时使用。"
             )
 
         requirement.touch()
@@ -585,10 +588,14 @@ class CoordinatorService:
         requirement = self.requirements.get(req_id)
         if requirement is None:
             raise ValueError(f"未知需求：{req_id}")
-        decision = apply_event(requirement.status, Event.SPEC_START)
+        if requirement.status != WorkflowStatus.APPROVED:
+            raise ValueError(
+                f"spec_start 需要 requirement.status=APPROVED，当前：{requirement.status.value}"
+            )
+        decision = apply_spec_event(requirement.spec_status, SpecEvent.SPEC_START)
         if not decision.allowed:
             raise ValueError(decision.message)
-        requirement.status = decision.next_status
+        requirement.spec_status = decision.next_status
         requirement.spec_document_id = spec_document_id
         requirement.spec_document_url = spec_document_url
         requirement.current_phase = "Spec 撰写"
@@ -596,9 +603,10 @@ class CoordinatorService:
         requirement.current_role_label = "Spec 撰写 Agent"
         requirement.touch()
         LOGGER.info(
-            "Spec start accepted req_id=%s status=%s spec_document_id=%s",
+            "Spec start accepted req_id=%s status=%s spec_status=%s spec_document_id=%s",
             requirement.req_id,
             requirement.status.value,
+            requirement.spec_status.value if requirement.spec_status else "None",
             spec_document_id,
         )
         return requirement
@@ -607,9 +615,10 @@ class CoordinatorService:
         requirement = self.requirements.get(req_id)
         if requirement is None:
             raise ValueError(f"未知需求：{req_id}")
-        if requirement.status != WorkflowStatus.SPEC_DRAFTING:
+        if requirement.spec_status != SpecStatus.DRAFTING:
+            current = requirement.spec_status.value if requirement.spec_status else "None"
             raise ValueError(
-                f"spec_submit 只能在 SPEC_DRAFTING 状态执行，当前状态：{requirement.status.value}"
+                f"spec_submit 只能在 spec_status=SPEC_DRAFTING 状态执行，当前：{current}"
             )
         requirement.spec_review_summary = summary
         requirement.touch()

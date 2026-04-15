@@ -3,29 +3,29 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from requirement_workflow_v12.models import WorkflowStatus, Requirement
-from requirement_workflow_v12.state_machine import Event, apply_event
+from requirement_workflow_v12.spec_state_machine import SpecEvent, SpecStatus, apply_spec_event
 
 
-def test_spec_start_transitions_approved_to_spec_drafting():
-    decision = apply_event(WorkflowStatus.APPROVED, Event.SPEC_START)
+def test_spec_start_transitions_none_to_spec_drafting():
+    decision = apply_spec_event(None, SpecEvent.SPEC_START)
     assert decision.allowed
-    assert decision.next_status == WorkflowStatus.SPEC_DRAFTING
+    assert decision.next_status == SpecStatus.DRAFTING
 
 
-def test_ai_review_pass_in_spec_drafting_transitions_to_spec_locked():
-    decision = apply_event(WorkflowStatus.SPEC_DRAFTING, Event.AI_REVIEW_PASS)
+def test_spec_review_pass_in_spec_drafting_transitions_to_spec_locked():
+    decision = apply_spec_event(SpecStatus.DRAFTING, SpecEvent.SPEC_REVIEW_PASS)
     assert decision.allowed
-    assert decision.next_status == WorkflowStatus.SPEC_LOCKED
+    assert decision.next_status == SpecStatus.LOCKED
 
 
-def test_ai_review_reject_in_spec_drafting_stays_spec_drafting():
-    decision = apply_event(WorkflowStatus.SPEC_DRAFTING, Event.AI_REVIEW_REJECT)
+def test_spec_review_reject_in_spec_drafting_stays_spec_drafting():
+    decision = apply_spec_event(SpecStatus.DRAFTING, SpecEvent.SPEC_REVIEW_REJECT)
     assert decision.allowed
-    assert decision.next_status == WorkflowStatus.SPEC_DRAFTING
+    assert decision.next_status == SpecStatus.DRAFTING
 
 
-def test_spec_start_blocked_in_non_approved_status():
-    decision = apply_event(WorkflowStatus.DRAFTING, Event.SPEC_START)
+def test_spec_start_blocked_when_already_locked():
+    decision = apply_spec_event(SpecStatus.LOCKED, SpecEvent.SPEC_START)
     assert not decision.allowed
 
 
@@ -45,7 +45,8 @@ def test_store_round_trips_spec_fields():
     from requirement_workflow_v12.models import Requirement, WorkflowStatus
 
     req = Requirement(req_id="REQ-S-001", name="Spec 测试", project="S", summary="s", creator="c")
-    req.status = WorkflowStatus.SPEC_DRAFTING
+    req.status = WorkflowStatus.APPROVED
+    req.spec_status = SpecStatus.DRAFTING
     req.spec_document_id = "doctoken123"
     req.spec_document_url = "https://feishu.cn/docx/doctoken123"
     req.spec_review_summary = "Spec 审查通过"
@@ -55,7 +56,8 @@ def test_store_round_trips_spec_fields():
         store.save_snapshot({"REQ-S-001": req}, {}, {})
         reqs, _, _, _ = store.load_snapshot()
         loaded = reqs["REQ-S-001"]
-        assert loaded.status == WorkflowStatus.SPEC_DRAFTING
+        assert loaded.status == WorkflowStatus.APPROVED
+        assert loaded.spec_status == SpecStatus.DRAFTING
         assert loaded.spec_document_id == "doctoken123"
         assert loaded.spec_document_url == "https://feishu.cn/docx/doctoken123"
         assert loaded.spec_review_summary == "Spec 审查通过"
@@ -106,7 +108,8 @@ def _make_approved_requirement():
 def test_submit_spec_start_transitions_to_spec_drafting():
     svc, req_id = _make_approved_requirement()
     req = svc.submit_spec_start(req_id, spec_document_id="docabc", spec_document_url="https://feishu.cn/docx/docabc")
-    assert req.status == WorkflowStatus.SPEC_DRAFTING
+    assert req.status == WorkflowStatus.APPROVED
+    assert req.spec_status == SpecStatus.DRAFTING
     assert req.spec_document_id == "docabc"
     assert req.spec_document_url == "https://feishu.cn/docx/docabc"
     assert req.current_phase == "Spec 撰写"
@@ -128,7 +131,7 @@ def test_submit_spec_submit_stores_summary():
     svc, req_id = _make_approved_requirement()
     svc.submit_spec_start(req_id, spec_document_id="doc1", spec_document_url="https://feishu.cn/docx/doc1")
     req = svc.submit_spec_submit(req_id, summary="Spec 初稿完成，9节均已填写")
-    assert req.status == WorkflowStatus.SPEC_DRAFTING  # no state change
+    assert req.spec_status == SpecStatus.DRAFTING  # no state change
     assert req.spec_review_summary == "Spec 初稿完成，9节均已填写"
 
 
@@ -138,7 +141,7 @@ def test_spec_review_pass_transitions_to_spec_locked():
     req = svc.submit_review_event_payload(AgentReviewEventPayload(
         req_id=req_id, event="ai_review_pass", review_summary="Spec 质量达标",
     ))
-    assert req.status == WorkflowStatus.SPEC_LOCKED
+    assert req.spec_status == SpecStatus.LOCKED
     assert req.spec_review_summary == "Spec 质量达标"
 
 
@@ -148,7 +151,7 @@ def test_spec_review_reject_stays_spec_drafting():
     req = svc.submit_review_event_payload(AgentReviewEventPayload(
         req_id=req_id, event="ai_review_reject", review_summary="API 入参缺少字段名",
     ))
-    assert req.status == WorkflowStatus.SPEC_DRAFTING
+    assert req.spec_status == SpecStatus.DRAFTING
     assert req.spec_review_summary == "API 入参缺少字段名"
 
 
@@ -238,13 +241,15 @@ def test_spec_start_callback_creates_doc_and_transitions_state():
     status, payload = app.handle_openclaw_spec_turn_callback(body)
     assert status == 200
     assert payload["ok"] is True
-    assert payload["status"] == "SPEC_DRAFTING"
+    assert payload["status"] == "APPROVED"
+    assert payload["spec_status"] == "SPEC_DRAFTING"
     assert "spec_document_id" in payload
     assert "spec_document_url" in payload
     assert "requirement_document_url" in payload
     req = app.service.get_requirement(req_id)
     assert req is not None
-    assert req.status == WorkflowStatus.SPEC_DRAFTING
+    assert req.status == WorkflowStatus.APPROVED
+    assert req.spec_status == SpecStatus.DRAFTING
     assert req.spec_document_id == f"spec_doc_{req_id}"
 
 
@@ -293,7 +298,7 @@ def test_review_result_on_spec_drafting_transitions_to_spec_locked():
     assert status == 200
     req = app.service.get_requirement(req_id)
     assert req is not None
-    assert req.status == WorkflowStatus.SPEC_LOCKED
+    assert req.spec_status == SpecStatus.LOCKED
 
 
 def test_spec_locked_sends_notification_card_to_project_group():

@@ -16,6 +16,7 @@ from .config import Settings, load_settings
 from .coordinator_service import CoordinatorService
 from .feishu_gateway import FeishuGateway
 from .models import DISCUSSION_FIELDS, Requirement, ReviewFinding, ReviewResult, WorkflowStatus
+from .spec_state_machine import SpecStatus
 from .project_config import ProjectConfig
 from .protocols import (
     AgentAuthorEventPayload,
@@ -737,9 +738,9 @@ class CoordinatorRuntimeApp:
             )
             self._sync_requirement_outputs(requirement)
             self._save_state()
-            if requirement.status == WorkflowStatus.SPEC_LOCKED:
+            if requirement.spec_status == SpecStatus.LOCKED:
                 self._dispatch_transition_notifications(requirement, trigger="spec_locked")
-            elif requirement.status == WorkflowStatus.SPEC_DRAFTING and normalized_event == "ai_review_reject":
+            elif requirement.spec_status == SpecStatus.DRAFTING and normalized_event == "ai_review_reject":
                 self._dispatch_transition_notifications(requirement, trigger="spec_review_reject")
             else:
                 self._dispatch_transition_notifications(requirement, trigger=normalized_event)
@@ -951,16 +952,18 @@ class CoordinatorRuntimeApp:
                 "ok": True,
                 "req_id": req_id,
                 "status": requirement.status.value,
+                "spec_status": requirement.spec_status.value if requirement.spec_status else None,
                 "spec_document_id": requirement.spec_document_id,
                 "spec_document_url": requirement.spec_document_url,
                 "requirement_document_url": requirement.document_url,
             }
 
         if event == "spec_submit":
-            if requirement.status != WorkflowStatus.SPEC_DRAFTING:
+            if requirement.spec_status != SpecStatus.DRAFTING:
+                spec_label = requirement.spec_status.value if requirement.spec_status else "None"
                 return 400, {
                     "error": "invalid_state",
-                    "message": f"spec_submit 只能在 SPEC_DRAFTING 状态执行，当前状态：{requirement.status.value}",
+                    "message": f"spec_submit 只能在 spec_status=SPEC_DRAFTING 状态执行，当前：{spec_label}",
                 }
             if not architecture_doc_revision:
                 return 400, {
@@ -1056,8 +1059,9 @@ class CoordinatorRuntimeApp:
             requirement = self.service.get_requirement(req_id)
             if requirement is None:
                 return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
-            if requirement.status not in {WorkflowStatus.APPROVED, WorkflowStatus.SPEC_DRAFTING}:
-                return 200, {"toast": {"type": "error", "content": f"当前需求不处于 Spec 撰写阶段（状态：{requirement.status.value}）。"}}
+            if requirement.status != WorkflowStatus.APPROVED or requirement.spec_status not in {None, SpecStatus.DRAFTING}:
+                spec_label = requirement.spec_status.value if requirement.spec_status else "None"
+                return 200, {"toast": {"type": "error", "content": f"当前需求不处于 Spec 撰写阶段（status={requirement.status.value} spec_status={spec_label}）。"}}
             target_user_id, receive_id_type = self._resolve_operator_receive_target(operator)
             if not target_user_id:
                 return 200, {"toast": {"type": "error", "content": "无法识别当前点击人身份，请手动私聊 Spec 撰写助手。"}}
@@ -1079,8 +1083,9 @@ class CoordinatorRuntimeApp:
             requirement = self.service.get_requirement(req_id)
             if requirement is None:
                 return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
-            if requirement.status != WorkflowStatus.SPEC_DRAFTING:
-                return 200, {"toast": {"type": "error", "content": f"当前需求不处于 Spec 审查阶段（状态：{requirement.status.value}）。"}}
+            if requirement.spec_status != SpecStatus.DRAFTING:
+                spec_label = requirement.spec_status.value if requirement.spec_status else "None"
+                return 200, {"toast": {"type": "error", "content": f"当前需求不处于 Spec 审查阶段（status={requirement.status.value} spec_status={spec_label}）。"}}
             target_user_id, receive_id_type = self._resolve_operator_receive_target(operator)
             if not target_user_id:
                 return 200, {"toast": {"type": "error", "content": "无法识别当前点击人身份，请手动私聊 Spec 审查助手。"}}

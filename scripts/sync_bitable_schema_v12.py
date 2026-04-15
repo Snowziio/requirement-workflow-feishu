@@ -10,6 +10,8 @@ import lark_oapi as lark
 from lark_oapi.api.bitable.v1 import (
     AppTableField,
     AppTableFieldBuilder,
+    AppTableFieldProperty,
+    AppTableFieldPropertyOption,
     CreateAppTableFieldRequest,
     ListAppTableFieldRequest,
     UpdateAppTableFieldRequest,
@@ -56,10 +58,24 @@ def list_fields(client: lark.Client, app_token: str, table_id: str) -> dict[str,
         page_token = data.page_token or ""
 
 
+def build_field_property(spec: BitableFieldSpec) -> AppTableFieldProperty | None:
+    # single_select 需要携带 options；其他类型目前无需 property。
+    if spec.field_type == "single_select" and spec.options:
+        options = [
+            AppTableFieldPropertyOption.builder().name(opt).build()
+            for opt in spec.options
+        ]
+        return AppTableFieldProperty.builder().options(options).build()
+    return None
+
+
 def build_field_payload(spec: BitableFieldSpec, *, field_id: str = "") -> AppTableField:
     # bitable_type is the int enum expected by lark-oapi; spec.field_type is the
     # human-readable string label from the JSON schema and must NOT be passed here.
     builder = AppTableFieldBuilder().field_name(spec.name).type(spec.bitable_type)
+    prop = build_field_property(spec)
+    if prop is not None:
+        builder = builder.property(prop)
     if field_id:
         builder = builder.field_id(field_id)
     return builder.build()
@@ -136,12 +152,20 @@ def main(argv: list[str] | None = None) -> int:
 
         # existing.type is the int enum; compare against spec.bitable_type
         # (not spec.field_type which is a string label).
-        if existing.type != spec.bitable_type:
+        type_mismatch = existing.type != spec.bitable_type
+        options_mismatch = False
+        if spec.field_type == "single_select" and spec.options:
+            existing_prop = getattr(existing, "property", None)
+            existing_options = getattr(existing_prop, "options", None) or []
+            existing_names = tuple(opt.name for opt in existing_options)
+            options_mismatch = existing_names != spec.options
+        if type_mismatch or options_mismatch:
             planned_updates.append(spec.name)
             if args.dry_run:
                 print(
                     f"[dry-run update] {spec.name} "
-                    f"existing_type={existing.type} → {spec.bitable_type}"
+                    f"existing_type={existing.type} → {spec.bitable_type} "
+                    f"options_mismatch={options_mismatch}"
                 )
             else:
                 update_field(client, app_token, table_id, existing.field_id, spec)

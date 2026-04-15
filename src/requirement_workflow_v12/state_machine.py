@@ -7,6 +7,8 @@ from .models import WorkflowStatus
 
 
 class Event(str, Enum):
+    """需求层 Workflow Service 事件集合。规格层事件在 `spec_state_machine.SpecEvent`。"""
+
     CREATE_REQUIREMENT = "create_requirement"
     AUTHOR_SUBMIT = "author_submit"
     AI_REVIEW_REJECT = "ai_review_reject"
@@ -15,7 +17,6 @@ class Event(str, Enum):
     HUMAN_CONFIRM_NO = "human_confirm_no"
     FINAL_REVIEW_PASS = "final_review_pass"
     FINAL_REVIEW_REJECT = "final_review_reject"
-    SPEC_START = "spec_start"
 
 
 @dataclass
@@ -35,9 +36,6 @@ TRANSITIONS: dict[tuple[WorkflowStatus, Event], WorkflowStatus] = {
     (WorkflowStatus.HUMAN_CONFIRM, Event.HUMAN_CONFIRM_YES): WorkflowStatus.FINAL_REVIEW,
     (WorkflowStatus.FINAL_REVIEW, Event.FINAL_REVIEW_PASS): WorkflowStatus.APPROVED,
     (WorkflowStatus.FINAL_REVIEW, Event.FINAL_REVIEW_REJECT): WorkflowStatus.DRAFTING,
-    (WorkflowStatus.APPROVED, Event.SPEC_START): WorkflowStatus.SPEC_DRAFTING,
-    (WorkflowStatus.SPEC_DRAFTING, Event.AI_REVIEW_PASS): WorkflowStatus.SPEC_LOCKED,
-    (WorkflowStatus.SPEC_DRAFTING, Event.AI_REVIEW_REJECT): WorkflowStatus.SPEC_DRAFTING,
 }
 
 

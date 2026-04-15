@@ -35,19 +35,48 @@
     },
     {
       "name": "状态",
-      "field_type": "text",
+      "field_type": "single_select",
       "required": true,
       "writer": "coordinator",
       "readers": ["author", "reviewer", "ops"],
-      "description": "状态机主状态，仅使用 DRAFTING / AI_REVIEW / HUMAN_CONFIRM / FINAL_REVIEW / APPROVED 五个值。"
+      "options": [
+        "CREATED",
+        "DRAFTING",
+        "AI_REVIEW",
+        "HUMAN_CONFIRM",
+        "FINAL_REVIEW",
+        "APPROVED"
+      ],
+      "description": "需求层状态机主状态（6 态）。规格层子状态不写入此列。"
+    },
+    {
+      "name": "Spec 阶段",
+      "field_type": "single_select",
+      "required": false,
+      "writer": "coordinator",
+      "readers": ["author", "reviewer", "ops"],
+      "options": [
+        "SPEC_DRAFTING",
+        "SPEC_LOCKED"
+      ],
+      "description": "规格层子状态机当前状态。未进入规格层时为空。"
     },
     {
       "name": "当前阶段",
-      "field_type": "text",
+      "field_type": "single_select",
       "required": true,
       "writer": "coordinator",
       "readers": ["author", "reviewer", "ops"],
-      "description": "面向人的当前阶段展示，与五态主状态语义一致。"
+      "options": [
+        "需求构造",
+        "AI Review",
+        "人工确认",
+        "正式审查",
+        "需求已批准",
+        "Spec 撰写",
+        "Spec 已锁定"
+      ],
+      "description": "面向人的当前阶段展示。"
     },
     {
       "name": "当前轮次",
@@ -59,11 +88,21 @@
     },
     {
       "name": "当前讨论字段",
-      "field_type": "text",
+      "field_type": "single_select",
       "required": true,
       "writer": "coordinator",
       "readers": ["author", "reviewer", "ops"],
-      "description": "当前聚焦的讨论字段。"
+      "options": [
+        "问题描述",
+        "使用场景",
+        "输入",
+        "输出",
+        "边界",
+        "验收标准",
+        "非功能要求",
+        "技术范围声明"
+      ],
+      "description": "当前聚焦的讨论字段，取值来自 DISCUSSION_FIELDS。"
     },
     {
       "name": "当前Owner",
@@ -75,10 +114,18 @@
     },
     {
       "name": "当前接手角色",
-      "field_type": "text",
+      "field_type": "single_select",
       "required": true,
       "writer": "coordinator",
       "readers": ["author", "reviewer", "ops"],
+      "options": [
+        "需求协调服务",
+        "需求构造Agent",
+        "需求审查Agent",
+        "人工确认",
+        "正式审查",
+        "Spec 撰写 Agent"
+      ],
       "description": "当前接手角色的人类可读标签。"
     },
     {
@@ -131,7 +178,7 @@
     },
     {
       "name": "需求文档链接",
-      "field_type": "text",
+      "field_type": "url",
       "required": false,
       "writer": "coordinator",
       "readers": ["author", "reviewer", "ops"],
@@ -139,11 +186,11 @@
     },
     {
       "name": "最近一次写回时间",
-      "field_type": "text",
+      "field_type": "datetime",
       "required": false,
       "writer": "coordinator",
       "readers": ["author", "reviewer", "ops"],
-      "description": "Coordinator 最近一次成功写回状态的 ISO 时间戳。"
+      "description": "Coordinator 最近一次成功写回状态的时间戳（毫秒）。"
     }
   ]
 }

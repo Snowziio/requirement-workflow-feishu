@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 
+from .spec_state_machine import SpecStatus
+
 
 DISCUSSION_FIELDS = [
     "问题描述",
@@ -22,6 +24,11 @@ def utc_now() -> datetime:
 
 
 class WorkflowStatus(str, Enum):
+    """需求层主状态机枚举（Workflow Service 层职责范围）。
+
+    规格层子状态（SPEC_DRAFTING / SPEC_LOCKED）由 `SpecStatus` 承载，
+    不得合并进本枚举。"""
+
     CREATED = "CREATED"
     DRAFTING = "DRAFTING"
     DISCUSSION_ROUTING = "DRAFTING"
@@ -34,8 +41,6 @@ class WorkflowStatus(str, Enum):
     REVIEWING = "FINAL_REVIEW"
     APPROVED = "APPROVED"
     REQ_APPROVED = "APPROVED"
-    SPEC_DRAFTING = "SPEC_DRAFTING"
-    SPEC_LOCKED = "SPEC_LOCKED"
 
 
 @dataclass
@@ -109,6 +114,7 @@ class Requirement:
     needs_ui: bool = False
     hifi_prototype_url: str = ""
     hifi_prototype_confirmed: bool = False
+    spec_status: SpecStatus | None = None
     spec_document_id: str = ""
     spec_document_url: str = ""
     spec_review_summary: str = ""

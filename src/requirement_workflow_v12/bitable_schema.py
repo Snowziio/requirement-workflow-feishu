@@ -17,12 +17,18 @@ PROJECT_CONFIG_SCHEMA_PATH = (
 
 BITABLE_FIELD_TYPE_TEXT = 1
 BITABLE_FIELD_TYPE_NUMBER = 2
+BITABLE_FIELD_TYPE_SINGLE_SELECT = 3
+BITABLE_FIELD_TYPE_DATETIME = 5
 BITABLE_FIELD_TYPE_CHECKBOX = 7
+BITABLE_FIELD_TYPE_URL = 15
 
 BITABLE_FIELD_TYPE_MAP = {
     "text": BITABLE_FIELD_TYPE_TEXT,
     "number": BITABLE_FIELD_TYPE_NUMBER,
+    "single_select": BITABLE_FIELD_TYPE_SINGLE_SELECT,
+    "datetime": BITABLE_FIELD_TYPE_DATETIME,
     "checkbox": BITABLE_FIELD_TYPE_CHECKBOX,
+    "url": BITABLE_FIELD_TYPE_URL,
 }
 
 
@@ -34,6 +40,7 @@ class BitableFieldSpec:
     writer: str
     readers: tuple[str, ...]
     description: str
+    options: tuple[str, ...] = ()
 
     @property
     def bitable_type(self) -> int:
@@ -46,6 +53,7 @@ class ProjectConfigFieldSpec:
     field_type: str
     required: bool
     description: str
+    options: tuple[str, ...] = ()
 
     @property
     def bitable_type(self) -> int:
@@ -91,6 +99,7 @@ def load_bitable_field_specs() -> tuple[BitableFieldSpec, ...]:
             writer=str(item.get("writer", "")),
             readers=tuple(str(reader) for reader in item.get("readers", [])),
             description=str(item.get("description", "")),
+            options=tuple(str(opt) for opt in item.get("options", [])),
         )
         for item in payload.get("fields", [])
     )
@@ -108,6 +117,20 @@ def coordinator_managed_field_names() -> tuple[str, ...]:
     return tuple(spec.name for spec in coordinator_managed_field_specs())
 
 
+def _url_payload(url: str) -> dict[str, str] | str:
+    # Bitable URL 字段期望 {"link": "...", "text": "..."}；空值直接写空串。
+    if not url:
+        return ""
+    return {"link": url, "text": url}
+
+
+def _datetime_to_ms(value) -> int | str:
+    # Bitable datetime 字段期望毫秒时间戳 int；空值写空串。
+    if value is None:
+        return ""
+    return int(value.timestamp() * 1000)
+
+
 def build_coordinator_record_fields(requirement: "Requirement") -> dict[str, object]:
     field_extractors = {
         "REQ ID": lambda req: req.req_id,
@@ -115,6 +138,7 @@ def build_coordinator_record_fields(requirement: "Requirement") -> dict[str, obj
         "项目代号": lambda req: req.project,
         "需求简述": lambda req: req.summary,
         "状态": lambda req: req.status.value,
+        "Spec 阶段": lambda req: req.spec_status.value if req.spec_status else "",
         "当前阶段": lambda req: req.current_phase,
         "当前轮次": lambda req: req.current_round,
         "当前讨论字段": lambda req: req.current_discussion_field,
@@ -126,8 +150,8 @@ def build_coordinator_record_fields(requirement: "Requirement") -> dict[str, obj
         "最近一次review结论": lambda req: req.latest_review_summary,
         "AI Ready": lambda req: req.ai_ready,
         "Human Confirmed": lambda req: req.human_confirmed,
-        "需求文档链接": lambda req: req.document_url,
-        "最近一次写回时间": lambda req: req.latest_writeback_at.isoformat() if req.latest_writeback_at else "",
+        "需求文档链接": lambda req: _url_payload(req.document_url),
+        "最近一次写回时间": lambda req: _datetime_to_ms(req.latest_writeback_at),
     }
     expected_names = set(coordinator_managed_field_names())
     actual_names = set(field_extractors)

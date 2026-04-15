@@ -5,12 +5,12 @@ import time
 from dataclasses import dataclass
 
 from .models import WorkflowStatus
+from .spec_state_machine import SpecStatus
 
 
-SPEC_CONTEXT_ALLOWED_STATUSES = {
-    WorkflowStatus.APPROVED,
-    WorkflowStatus.SPEC_DRAFTING,
-}
+# Spec-context 端点准入：requirement 必须 APPROVED；spec 子状态必须是 None（尚未开始）
+# 或 DRAFTING（重入握手）。SPEC_LOCKED 不允许再次拉取上下文。
+SPEC_CONTEXT_ALLOWED_SPEC_STATUSES = {None, SpecStatus.DRAFTING}
 
 
 class SpecContextGateError(Exception):
@@ -26,7 +26,7 @@ class SpecContextMisconfigured(Exception):
 
 
 class ConcurrentSpecInProgress(Exception):
-    """Another REQ in the same project currently holds SPEC_DRAFTING."""
+    """Another REQ in the same project currently holds spec_status=SPEC_DRAFTING."""
 
 
 @dataclass
@@ -45,9 +45,16 @@ class SpecContextBuilder:
         if requirement is None:
             raise ValueError(f"未知需求：{req_id}")
 
-        if requirement.status not in SPEC_CONTEXT_ALLOWED_STATUSES:
+        if (
+            requirement.status != WorkflowStatus.APPROVED
+            or requirement.spec_status not in SPEC_CONTEXT_ALLOWED_SPEC_STATUSES
+        ):
+            spec_label = (
+                requirement.spec_status.value if requirement.spec_status else "None"
+            )
             raise SpecContextGateError(
-                f"当前状态 {requirement.status.value} 不允许获取 spec-context",
+                f"当前状态 status={requirement.status.value} spec_status={spec_label} "
+                "不允许获取 spec-context",
                 current_status=requirement.status.value,
             )
 
@@ -61,7 +68,7 @@ class SpecContextBuilder:
             requirement.project, exclude_req_id=req_id
         ):
             raise ConcurrentSpecInProgress(
-                f"项目 {requirement.project} 已有另一条需求处于 SPEC_DRAFTING，请先等待其锁定。"
+                f"项目 {requirement.project} 已有另一条需求处于 spec_status=SPEC_DRAFTING，请先等待其锁定。"
             )
 
         revision = self._gateway.fetch_document_revision(project_cfg.architecture_doc_id)
@@ -75,6 +82,7 @@ class SpecContextBuilder:
             "project": requirement.project,
             "category": project_cfg.category,
             "status": requirement.status.value,
+            "spec_status": requirement.spec_status.value if requirement.spec_status else None,
             "needs_ui": requirement.needs_ui,
             "hifi_prototype_url": requirement.hifi_prototype_url,
             "design_system_snapshot": None,

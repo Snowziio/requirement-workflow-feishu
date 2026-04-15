@@ -15,6 +15,7 @@ from .models import (
     utc_now,
 )
 from .project_config import ProjectConfig
+from .spec_state_machine import SpecStatus
 
 LEGACY_STATUS_ALIASES = {
     "DISCUSSION_ROUTING": WorkflowStatus.DRAFTING.value,
@@ -76,6 +77,12 @@ class JsonStateStore:
         human_review_history_payload = data.get("human_review_history", [])
         raw_status = str(data.get("status", WorkflowStatus.CREATED.value))
         normalized_status = LEGACY_STATUS_ALIASES.get(raw_status, raw_status)
+        raw_spec_status = data.get("spec_status")
+        spec_status: SpecStatus | None
+        if raw_spec_status in (None, ""):
+            spec_status = None
+        else:
+            spec_status = SpecStatus(str(raw_spec_status))
         requirement = Requirement(
             req_id=data["req_id"],
             name=data["name"],
@@ -106,6 +113,7 @@ class JsonStateStore:
             needs_ui=data.get("needs_ui", False),
             hifi_prototype_url=data.get("hifi_prototype_url", ""),
             hifi_prototype_confirmed=data.get("hifi_prototype_confirmed", False),
+            spec_status=spec_status,
             spec_document_id=data.get("spec_document_id", ""),
             spec_document_url=data.get("spec_document_url", ""),
             spec_review_summary=data.get("spec_review_summary", ""),

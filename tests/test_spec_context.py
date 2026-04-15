@@ -130,8 +130,10 @@ def test_build_rejects_when_project_not_initialized():
 def test_build_rejects_concurrent_spec_in_same_project():
     svc = _svc_with_req()
     from requirement_workflow_v12.models import Requirement
+    from requirement_workflow_v12.spec_state_machine import SpecStatus
     other = Requirement(req_id="REQ-2", name="n", project="ProjA", summary="s", creator="c")
-    other.status = WorkflowStatus.SPEC_DRAFTING
+    other.status = WorkflowStatus.APPROVED
+    other.spec_status = SpecStatus.DRAFTING
     svc.requirements["REQ-2"] = other
     gateway = MagicMock()
     gateway.fetch_document_revision.return_value = "rev-1"
@@ -141,9 +143,12 @@ def test_build_rejects_concurrent_spec_in_same_project():
 
 
 def test_build_allows_same_req_in_spec_drafting():
-    svc = _svc_with_req(status=WorkflowStatus.SPEC_DRAFTING)
+    from requirement_workflow_v12.spec_state_machine import SpecStatus
+    svc = _svc_with_req(status=WorkflowStatus.APPROVED)
+    svc.requirements["REQ-1"].spec_status = SpecStatus.DRAFTING
     gateway = MagicMock()
     gateway.fetch_document_revision.return_value = "rev-9"
     builder = SpecContextBuilder(service=svc, gateway=gateway)
     result = builder.build("REQ-1")
-    assert result.context["status"] == "SPEC_DRAFTING"
+    assert result.context["status"] == "APPROVED"
+    assert result.context["spec_status"] == "SPEC_DRAFTING"
