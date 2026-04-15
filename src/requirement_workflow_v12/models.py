@@ -107,12 +107,13 @@ class Requirement:
     review_history: list[ReviewResult] = field(default_factory=list)
     human_review_history: list[HumanReviewResult] = field(default_factory=list)
     needs_ui: bool = False
-    github_repo_url: str = ""
     hifi_prototype_url: str = ""
     hifi_prototype_confirmed: bool = False
     spec_document_id: str = ""
     spec_document_url: str = ""
     spec_review_summary: str = ""
+    active_spec_context_token: str = ""
+    spec_context_snapshot_revision: str = ""
     updated_at: datetime = field(default_factory=utc_now)
 
     def touch(self) -> None:

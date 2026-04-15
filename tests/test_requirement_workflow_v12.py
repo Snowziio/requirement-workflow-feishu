@@ -1060,9 +1060,10 @@ def test_requirement_new_fields_default():
     from requirement_workflow_v12.models import Requirement
     req = Requirement(req_id="REQ-X-001", name="test", project="X", summary="s", creator="u")
     assert req.needs_ui is False
-    assert req.github_repo_url == ""
     assert req.hifi_prototype_url == ""
     assert req.hifi_prototype_confirmed is False
+    assert req.active_spec_context_token == ""
+    assert req.spec_context_snapshot_revision == ""
 
 
 def test_config_github_settings():
