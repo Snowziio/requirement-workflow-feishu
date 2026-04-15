@@ -1093,6 +1093,23 @@ class CoordinatorRuntimeApp:
         if requirement is None:
             return 404, {"error": "not_found", "message": f"未知需求：{req_id}"}
 
+        context_token = str(payload.get("context_token", "")).strip()
+        architecture_commit_sha = str(payload.get("architecture_commit_sha", "")).strip()
+
+        if not context_token:
+            return 400, {
+                "error": "missing_context_token",
+                "message": "必须先调 /queries/openclaw/spec-context 获取 context_token。",
+            }
+        if (
+            requirement.active_spec_context_token
+            and context_token != requirement.active_spec_context_token
+        ):
+            return 409, {
+                "error": "stale_context_token",
+                "message": "context_token 已过期，请重新调 spec-context。",
+            }
+
         if event == "spec_start":
             if requirement.status != WorkflowStatus.APPROVED:
                 return 400, {
@@ -1138,6 +1155,11 @@ class CoordinatorRuntimeApp:
                     "error": "invalid_state",
                     "message": f"spec_submit 只能在 SPEC_DRAFTING 状态执行，当前状态：{requirement.status.value}",
                 }
+            if not architecture_commit_sha:
+                return 400, {
+                    "error": "missing_commit_sha",
+                    "message": "spec_submit 必须回传 architecture_commit_sha。",
+                }
             try:
                 requirement = self.service.submit_spec_submit(req_id, summary=summary)
             except ValueError as exc:
@@ -1145,6 +1167,9 @@ class CoordinatorRuntimeApp:
 
             if spec_document_url_from_payload:
                 requirement.spec_document_url = spec_document_url_from_payload
+
+            requirement.spec_context_snapshot_sha = architecture_commit_sha
+            requirement.active_spec_context_token = ""
 
             self._save_state()
             self._dispatch_transition_notifications(requirement, trigger="spec_submitted")

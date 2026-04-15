@@ -297,3 +297,55 @@ def test_spec_context_endpoint_missing_github_token_returns_500(tmp_path):
     status, payload = app.handle_openclaw_spec_context_query(body)
     assert status == 500
     assert payload["error"] == "github_auth_missing"
+
+
+def test_spec_start_rejects_missing_context_token():
+    app, req = _make_app_with_req(None)
+    req.active_spec_context_token = "spec_ctx_REQ-SC-001_1_aaaa"
+    body = _jsonmod.dumps({
+        "req_id": req.req_id, "event": "spec_start", "summary": "go",
+    }).encode()
+    status, payload = app.handle_openclaw_spec_turn_callback(body)
+    assert status == 400
+    assert payload["error"] == "missing_context_token"
+
+
+def test_spec_start_rejects_stale_context_token():
+    app, req = _make_app_with_req(None)
+    req.active_spec_context_token = "spec_ctx_CURRENT"
+    body = _jsonmod.dumps({
+        "req_id": req.req_id, "event": "spec_start", "summary": "go",
+        "context_token": "spec_ctx_OLD",
+    }).encode()
+    status, payload = app.handle_openclaw_spec_turn_callback(body)
+    assert status == 409
+    assert payload["error"] == "stale_context_token"
+
+
+def test_spec_submit_rejects_missing_commit_sha():
+    app, req = _make_app_with_req(None)
+    req.status = WorkflowStatus.SPEC_DRAFTING
+    req.active_spec_context_token = "tok"
+    body = _jsonmod.dumps({
+        "req_id": req.req_id, "event": "spec_submit", "summary": "done",
+        "context_token": "tok",
+    }).encode()
+    status, payload = app.handle_openclaw_spec_turn_callback(body)
+    assert status == 400
+    assert payload["error"] == "missing_commit_sha"
+
+
+def test_spec_submit_writes_sha_and_clears_token():
+    app, req = _make_app_with_req(None)
+    req.status = WorkflowStatus.SPEC_DRAFTING
+    req.active_spec_context_token = "tok"
+    body = _jsonmod.dumps({
+        "req_id": req.req_id, "event": "spec_submit", "summary": "done",
+        "context_token": "tok",
+        "architecture_commit_sha": "sha-locked",
+    }).encode()
+    status, payload = app.handle_openclaw_spec_turn_callback(body)
+    assert status == 200
+    assert req.spec_context_snapshot_sha == "sha-locked"
+    assert req.active_spec_context_token == ""
+    assert req.status == WorkflowStatus.SPEC_DRAFTING
