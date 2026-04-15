@@ -86,7 +86,9 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py --req-id "{req_id}" 
 
 所有 `pending_fields` 均已填写后，询问用户：「所有字段已完成，是否确认提交审查？」
 
-用户确认后，发送 callback：
+**⚠️ 状态机驱动硬约束:** 用户确认后，本次会话的最终动作**必须**是执行下面的 callback。**禁止仅回复"已提交"/"等待审查"等文本就结束会话**——未成功调用 callback,Coordinator 不会推进状态,流程会卡死。
+
+callback 调用失败(非 2xx)时必须立即重试,如仍失败则在回复中明确说明"callback 上报失败"并保留现场,禁止伪装成已完成。
 
 ```bash
 python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
@@ -106,3 +108,4 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
 - 不修改「需求概览」节的内容（由 Coordinator 写入，保持原样）
 - 不推进审查状态（状态由 Coordinator 管理）
 - 不在 callback 前修改事件名称
+- **不得在未成功调用 `author-ready` callback 的情况下结束会话**——输出"已提交"文本 ≠ 流程真的推进了,状态机只认 callback

@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 AUTHOR_ENDPOINT = "/callbacks/openclaw/author-turn"
 REVIEW_ENDPOINT = "/callbacks/openclaw/review-result"
 CONTEXT_QUERY_ENDPOINT = "/queries/openclaw/requirement-context"
+SPEC_CONTEXT_QUERY_ENDPOINT = "/queries/openclaw/spec-context"
 SPEC_TURN_ENDPOINT = "/callbacks/openclaw/spec-turn"
 DEFAULT_COORDINATOR_BASE_URL = "http://127.0.0.1:8004"
 
@@ -131,6 +132,7 @@ def build_parser() -> argparse.ArgumentParser:
     review_parser.add_argument("--review-result", default="", help="Optional external review result label")
 
     subparsers.add_parser("fetch-context", help="Query requirement context for an agent by req_id")
+    subparsers.add_parser("spec-context", help="Query spec-layer context (architecture_doc_url, revision, context_token) for Spec Agent by req_id")
 
     spec_start_parser = subparsers.add_parser("spec-start", help="Notify Coordinator that Spec Agent has started drafting")
     spec_start_parser.add_argument("--summary", required=True, help="Brief summary for Coordinator logs")
@@ -157,6 +159,9 @@ def main() -> int:
         payload = build_author_payload(args)
     elif args.mode == "fetch-context":
         endpoint = CONTEXT_QUERY_ENDPOINT
+        payload = build_context_query_payload(args)
+    elif args.mode == "spec-context":
+        endpoint = SPEC_CONTEXT_QUERY_ENDPOINT
         payload = build_context_query_payload(args)
     elif args.mode in ("spec-start", "spec-submit"):
         endpoint = SPEC_TURN_ENDPOINT

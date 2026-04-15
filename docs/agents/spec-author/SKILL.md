@@ -16,8 +16,10 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
   --base-url "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}" \
   --secret "${OPENCLAW_CALLBACK_SECRET:-}" \
   --req-id "{req_id}" \
-  fetch-context
+  spec-context
 ```
+
+> ⚠️ 必须用 `spec-context` 子命令，不要用 `fetch-context`。`fetch-context` 只返回需求层上下文（pending_fields 等），不含 `architecture_doc_url`。
 
 响应结构：
 
@@ -116,6 +118,10 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
 
 **Step 4：9 节均完成且 ARCHITECTURE 已写回后调 spec_submit**
 
+**⚠️ 状态机驱动硬约束:** 9 节写完 + ARCHITECTURE 写回后,本次会话的**最终动作必须是执行下面的 `spec-submit` callback**。**禁止仅回复"Spec 已完成"/"已写入文档"等文本就结束会话**——未成功调用 callback,Coordinator 不会推进到 `SPEC_DRAFTING_SUBMITTED`,流程会卡死。
+
+callback 调用失败(非 2xx,含 400 token 失效 / 409 revision 冲突)时必须立即按错误码处理:token 失效 → 回到 Step 1 重新拉取 spec-context 再重试;revision 冲突 → 重新读当前 ARCHITECTURE 合并后再提交。禁止放弃、禁止伪装成已完成。
+
 **必须回传 context_token 与写后 architecture_doc_revision**：
 
 ```bash
@@ -143,3 +149,4 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
 - 不修改需求文档（只读）
 - 不跳过任何节（9 节全部必须非空）
 - 不得把 ARCHITECTURE 演化放到 Step 3 之前（必须先读原文再增量合并；覆盖写前确保未漏既有模块）
+- **不得在未成功调用 `spec-submit` callback 的情况下结束会话**——写完文档 ≠ 流程推进,状态机只认 callback

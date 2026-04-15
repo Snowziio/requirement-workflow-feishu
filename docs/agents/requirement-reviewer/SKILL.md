@@ -67,6 +67,10 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py --req-id "{req_id}" 
 
 ## 输出
 
+**⚠️ 状态机驱动硬约束:** 审查结论形成后,本次会话的**最终动作必须是执行下列 callback 之一**(二选一,不可同时发、不可都不发)。**禁止仅输出审查报告文本就结束会话**——未成功调用 callback,Coordinator 不会推进状态,流程会卡死。
+
+callback 调用失败(非 2xx)时必须立即重试,如仍失败则在回复中明确说明"callback 上报失败"并保留现场,禁止伪装成已完成。
+
 审查完成后，发送 callback：
 
 **通过（ai_review_pass）**：
@@ -95,3 +99,4 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
 - 不与用户多轮沟通（单次审查，直接上报）
 - 不推进人工确认或正式审查（event 只能是上述两种）
 - 不猜测缺失信息（按实际内容审查，有疑问记入 summary）
+- **不得在未成功调用 callback 的情况下结束会话**——输出审查报告 ≠ 流程推进,状态机只认 callback
