@@ -1,0 +1,1 @@
+../../../../../docs/agents/spec-reviewer/SKILL.md

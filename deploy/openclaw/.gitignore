@@ -1,0 +1,15 @@
+# Rendered (secrets-bearing) artifacts must never enter the repo.
+# Only *.template files and plain *.md content are allowed under deploy/openclaw/.
+openclaw.json
+agents/*/models.json
+*.rendered
+*.local.json
+
+# Runtime state from the server that does not belong in version control.
+workspace/agents/*/inbox/
+workspace/agents/*/drafts/
+workspace/agents/*/confirmed/
+workspace/agents/*/logs/
+workspace/agents/*/memory/
+workspace/agents/*/HEARTBEAT.md
+workspace/agents/*/*.bak-*

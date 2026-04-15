@@ -1,0 +1,469 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.3.13",
+    "lastTouchedAt": "2026-04-08T16:01:53.091Z"
+  },
+  "wizard": {
+    "lastRunAt": "2026-03-07T15:27:49.372Z",
+    "lastRunVersion": "2026.2.9",
+    "lastRunCommand": "doctor",
+    "lastRunMode": "local"
+  },
+  "browser": {
+    "enabled": true,
+    "headless": true
+  },
+  "auth": {
+    "profiles": {
+      "google:default": {
+        "provider": "google",
+        "mode": "api_key"
+      }
+    }
+  },
+  "acp": {
+    "enabled": true,
+    "dispatch": {
+      "enabled": true
+    },
+    "backend": "acpx",
+    "defaultAgent": "codex",
+    "allowedAgents": [
+      "pi",
+      "claude",
+      "codex",
+      "opencode",
+      "gemini",
+      "kimi"
+    ],
+    "maxConcurrentSessions": 8,
+    "stream": {
+      "coalesceIdleMs": 300,
+      "maxChunkChars": 1200
+    },
+    "runtime": {
+      "ttlMinutes": 120
+    }
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "minimax": {
+        "baseUrl": "https://api.minimaxi.com/anthropic",
+        "apiKey": "${MINIMAX_API_KEY}",
+        "api": "anthropic-messages",
+        "models": [
+          {
+            "id": "MiniMax-M2.5",
+            "name": "MiniMax M2.5",
+            "reasoning": true,
+            "input": [
+              "text"
+            ],
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "MiniMax-M2.7",
+            "name": "MiniMax M2.7",
+            "reasoning": true,
+            "input": [
+              "text"
+            ],
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "minimax/MiniMax-M2.7",
+        "fallbacks": [
+          "google/gemini-3.1-pro-preview"
+        ]
+      },
+      "models": {
+        "google/gemini-3.1-pro-preview": {},
+        "minimax/MiniMax-M2.5": {
+          "alias": "MiniMax Fallback"
+        },
+        "minimax/MiniMax-M2.7": {
+          "alias": "MiniMax M2.7"
+        }
+      },
+      "workspace": "/home/admin/.openclaw/workspace",
+      "memorySearch": {
+        "enabled": true,
+        "sources": [
+          "memory"
+        ],
+        "extraPaths": [
+          "/home/admin/.openclaw/shared-memory"
+        ],
+        "experimental": {
+          "sessionMemory": false
+        },
+        "sync": {
+          "onSessionStart": true,
+          "onSearch": true,
+          "watch": true,
+          "watchDebounceMs": 1500
+        }
+      },
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "timeoutSeconds": 180,
+      "heartbeat": {
+        "every": "2h"
+      },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8,
+        "maxSpawnDepth": 2,
+        "maxChildrenPerAgent": 6,
+        "runTimeoutSeconds": 1800,
+        "announceTimeoutMs": 60000
+      }
+    },
+    "list": [
+      {
+        "id": "ai-ops-router",
+        "name": "需求流程运维助手",
+        "workspace": "/home/admin/.openclaw/workspace/agents/ai-ops-router",
+        "agentDir": "/home/admin/.openclaw/agents/ai-ops-router/agent",
+        "model": "minimax/MiniMax-M2.7",
+        "identity": {
+          "name": "需求流程运维助手",
+          "theme": "需求流程排障、人工兜底、运维检查，不承担主编排",
+          "emoji": "🧭"
+        }
+      },
+      {
+        "id": "ai-founder-brief",
+        "name": "需求构造助手",
+        "workspace": "/home/admin/.openclaw/workspace/agents/ai-founder-brief",
+        "agentDir": "/home/admin/.openclaw/agents/ai-founder-brief/agent",
+        "model": "minimax/MiniMax-M2.7",
+        "identity": {
+          "name": "需求构造助手",
+          "theme": "私聊需求构造、逐轮澄清、结构化归一化输出",
+          "emoji": "📝"
+        }
+      },
+      {
+        "id": "ai-meeting-closeout",
+        "name": "需求审查助手",
+        "workspace": "/home/admin/.openclaw/workspace/agents/ai-meeting-closeout",
+        "agentDir": "/home/admin/.openclaw/agents/ai-meeting-closeout/agent",
+        "model": "minimax/MiniMax-M2.7",
+        "identity": {
+          "name": "需求审查助手",
+          "theme": "每轮需求审查、AI Ready判断、可选UI设计审查",
+          "emoji": "🔍"
+        }
+      },
+      {
+        "id": "ai-investment-assistant",
+        "name": "AI投资人助理",
+        "workspace": "/home/admin/.openclaw/workspace/agents/ai-investment-assistant",
+        "agentDir": "/home/admin/.openclaw/agents/ai-investment-assistant/agent",
+        "identity": {
+          "name": "AI投资人助理",
+          "theme": "冷静、审慎、信息密度高、以投资决策支持为目标",
+          "emoji": "📈"
+        },
+        "tools": {
+          "profile": "full",
+          "elevated": {
+            "enabled": true,
+            "allowFrom": {
+              "feishu": [
+                "*"
+              ]
+            }
+          },
+          "exec": {
+            "host": "gateway",
+            "security": "full",
+            "ask": "off",
+            "timeoutSec": 180
+          }
+        }
+      },
+      {
+        "id": "spec-author",
+        "name": "Spec 撰写助手",
+        "workspace": "/home/admin/.openclaw/workspace/agents/spec-author",
+        "agentDir": "/home/admin/.openclaw/agents/spec-author/agent",
+        "model": "minimax/MiniMax-M2.7",
+        "identity": {
+          "name": "Spec 撰写助手",
+          "theme": "根据已审查需求自动生成技术规格文档（9节），完成后上报 Coordinator",
+          "emoji": "📐"
+        }
+      },
+      {
+        "id": "spec-reviewer",
+        "name": "Spec 审查助手",
+        "workspace": "/home/admin/.openclaw/workspace/agents/spec-reviewer",
+        "agentDir": "/home/admin/.openclaw/agents/spec-reviewer/agent",
+        "model": "minimax/MiniMax-M2.7",
+        "identity": {
+          "name": "Spec 审查助手",
+          "theme": "对 Spec 文档按 6+2+1 维度进行质量审查，单次上报 pass/reject 结论",
+          "emoji": "🔬"
+        }
+      }
+    ]
+  },
+  "tools": {
+    "sessions": {
+      "visibility": "all"
+    },
+    "agentToAgent": {
+      "enabled": true
+    },
+    "elevated": {
+      "enabled": true,
+      "allowFrom": {
+        "feishu": [
+          "*"
+        ]
+      }
+    },
+    "exec": {
+      "host": "gateway",
+      "security": "full",
+      "ask": "off",
+      "timeoutSec": 180
+    }
+  },
+  "bindings": [
+    {
+      "agentId": "ai-investment-assistant",
+      "match": {
+        "channel": "feishu",
+        "accountId": "investment-assistant"
+      }
+    },
+    {
+      "agentId": "ai-ops-router",
+      "match": {
+        "channel": "feishu",
+        "accountId": "ops-router"
+      }
+    },
+    {
+      "agentId": "ai-founder-brief",
+      "match": {
+        "channel": "feishu",
+        "accountId": "founder-brief"
+      }
+    },
+    {
+      "agentId": "ai-meeting-closeout",
+      "match": {
+        "channel": "feishu",
+        "accountId": "meeting-closeout"
+      }
+    },
+    {
+      "agentId": "spec-author",
+      "match": {
+        "channel": "feishu",
+        "accountId": "spec-author"
+      }
+    },
+    {
+      "agentId": "spec-reviewer",
+      "match": {
+        "channel": "feishu",
+        "accountId": "spec-reviewer"
+      }
+    }
+  ],
+  "messages": {
+    "ackReactionScope": "group-mentions"
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "session": {
+    "dmScope": "per-account-channel-peer",
+    "agentToAgent": {
+      "maxPingPongTurns": 4
+    }
+  },
+  "channels": {
+    "feishu": {
+      "enabled": true,
+      "connectionMode": "websocket",
+      "requireMention": true,
+      "replyInThread": "enabled",
+      "groupSessionScope": "group_topic",
+      "dmPolicy": "allowlist",
+      "allowFrom": [
+        "ou_8458f69b18e95e5b785f8f4452cfacd9",
+        "ou_00c4407a26a14c7a9f778c32e63bd2a5",
+        "ou_11070bfb9fca4cd2e195100aa8e21afa"
+      ],
+      "groupPolicy": "open",
+      "accounts": {
+        "ops-router": {
+          "appId": "cli_a94fdc9e0d78dbd6",
+          "appSecret": "KkVWlce6CF6MRnrxObu0fbrFk6c5TuXe",
+          "dmPolicy": "allowlist",
+          "allowFrom": [
+            "ou_8458f69b18e95e5b785f8f4452cfacd9"
+          ],
+          "groupPolicy": "open"
+        },
+        "founder-brief": {
+          "appId": "cli_a94fdca0b5b8dbce",
+          "appSecret": "S2K7EJhDuaiCWZ06rZH6bfbbp8jKiCMN",
+          "dmPolicy": "allowlist",
+          "allowFrom": [
+            "ou_00c4407a26a14c7a9f778c32e63bd2a5"
+          ],
+          "groupPolicy": "open"
+        },
+        "meeting-closeout": {
+          "appId": "cli_a94fdcc983f89bc3",
+          "appSecret": "tNczoG0EUTmAnYVvLacGkdIirH4wUMne",
+          "dmPolicy": "allowlist",
+          "allowFrom": [
+            "ou_11070bfb9fca4cd2e195100aa8e21afa"
+          ],
+          "groupPolicy": "open"
+        },
+        "spec-author": {
+          "appId": "cli_a954a1cc87f89ccb",
+          "appSecret": "cg0uqZYMkerNwcBlNOff4b47LWz7drxz",
+          "dmPolicy": "open",
+          "groupPolicy": "open"
+        },
+        "spec-reviewer": {
+          "appId": "cli_a954a32d62f89bef",
+          "appSecret": "7nRATtjvPkw4oJFC9JFTNhXXMEyitWe2",
+          "dmPolicy": "open",
+          "groupPolicy": "open"
+        }
+      },
+      "groups": {
+        "*": {
+          "enabled": false,
+          "requireMention": true,
+          "replyInThread": "enabled",
+          "groupSessionScope": "group_topic"
+        },
+        "oc_603fd52ee073a1487e2d76acc1e6b9f5": {
+          "enabled": true,
+          "requireMention": true,
+          "replyInThread": "enabled",
+          "groupSessionScope": "group_topic",
+          "allowFrom": [
+            "ou_8458f69b18e95e5b785f8f4452cfacd9"
+          ]
+        },
+        "oc_978b7c999296cafc666a3603cb3c9baa": {
+          "enabled": true,
+          "requireMention": true,
+          "replyInThread": "enabled",
+          "groupSessionScope": "group_topic",
+          "allowFrom": [
+            "ou_00c4407a26a14c7a9f778c32e63bd2a5"
+          ]
+        },
+        "oc_ea9fa7a2468ce04ead5e91c3ec123bee": {
+          "enabled": true,
+          "requireMention": true,
+          "replyInThread": "enabled",
+          "groupSessionScope": "group_topic",
+          "allowFrom": [
+            "ou_11070bfb9fca4cd2e195100aa8e21afa"
+          ]
+        }
+      }
+    },
+    "qqbot": {
+      "enabled": true,
+      "allowFrom": [
+        "*"
+      ],
+      "appId": "1903510893",
+      "clientSecret": "eEcnkU0INErGRO7c"
+    }
+  },
+  "canvasHost": {
+    "enabled": true,
+    "liveReload": false
+  },
+  "gateway": {
+    "port": 12413,
+    "mode": "local",
+    "bind": "loopback",
+    "controlUi": {
+      "allowedOrigins": [
+        "https://www.vibemodel.cc",
+        "http://127.0.0.1:18986",
+        "http://localhost:18986"
+      ],
+      "dangerouslyAllowHostHeaderOriginFallback": true
+    },
+    "auth": {
+      "mode": "token",
+      "token": "${OPENCLAW_NODE_AUTH_TOKEN}"
+    },
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    },
+    "nodes": {}
+  },
+  "skills": {
+    "entries": {
+      "nano-banana-pro": {
+        "apiKey": "${NANO_BANANA_PRO_API_KEY}"
+      }
+    }
+  },
+  "plugins": {
+    "entries": {
+      "task-bus": {
+        "enabled": true,
+        "config": {
+          "enabled": true,
+          "tasksRoot": "/home/admin/.openclaw/runtime/tasks"
+        }
+      },
+      "feishu": {
+        "enabled": false
+      },
+      "acpx": {
+        "enabled": true
+      },
+      "openclaw-qqbot": {
+        "enabled": true
+      },
+      "openclaw-lark": {
+        "enabled": true
+      }
+    },
+    "installs": {
+      "task-bus": {
+        "source": "path",
+        "sourcePath": "/home/admin/.openclaw/local-plugins/task-bus",
+        "installPath": "/home/admin/.openclaw/extensions/task-bus",
+        "version": "0.1.0",
+        "installedAt": "2026-03-06T03:22:24.502Z"
+      }
+    }
+  }
+}

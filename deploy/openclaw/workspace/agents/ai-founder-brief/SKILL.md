@@ -1,0 +1,1 @@
+../../../../../docs/agents/requirement-author/SKILL.md
