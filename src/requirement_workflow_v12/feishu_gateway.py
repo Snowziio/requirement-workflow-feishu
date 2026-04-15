@@ -245,6 +245,83 @@ class FeishuGateway:
             document_url=f"{self.settings.feishu_base_url}/docx/{document.document_id}",
         )
 
+    def create_architecture_document(self, project: str) -> CreatedDocument | None:
+        if not self.settings.feishu_doc_folder_token:
+            return None
+        title = f"{project} 架构快照 ARCHITECTURE"
+        LOGGER.info("Feishu create_architecture_document project=%s title=%s", project, title)
+        request = (
+            CreateDocumentRequest.builder()
+            .request_body(
+                CreateDocumentRequestBody.builder()
+                .folder_token(self.settings.feishu_doc_folder_token)
+                .title(title)
+                .build()
+            )
+            .build()
+        )
+        response = self.client.docx.v1.document.create(request)
+        self._ensure_success(response, "create architecture document")
+        document = response.data.document
+        LOGGER.info(
+            "Feishu created architecture document project=%s document_id=%s",
+            project,
+            document.document_id,
+        )
+        return CreatedDocument(
+            document_id=document.document_id,
+            document_url=f"{self.settings.feishu_base_url}/docx/{document.document_id}",
+        )
+
+    def write_document_text(self, document_id: str, content: str) -> None:
+        """Append the given text as a single code-like block to the document."""
+        LOGGER.info(
+            "Feishu write_document_text document_id=%s content_bytes=%d",
+            document_id,
+            len(content.encode("utf-8")),
+        )
+        block = (
+            Block.builder()
+            .block_type(self.BLOCK_TYPE_TEXT)
+            .text(self._rich_text(content))
+            .build()
+        )
+        request = (
+            CreateDocumentBlockChildrenRequest.builder()
+            .document_id(document_id)
+            .block_id(document_id)
+            .request_body(
+                CreateDocumentBlockChildrenRequestBody.builder()
+                .children([block])
+                .build()
+            )
+            .build()
+        )
+        response = self.client.docx.v1.document_block_children.create(request)
+        self._ensure_success(response, "write document text")
+
+    def fetch_document_revision(self, document_id: str) -> str:
+        """Return a revision marker for the document.
+
+        Uses the raw_content endpoint's revision_id when available; otherwise
+        falls back to a wall-clock timestamp marker so the Coordinator always
+        has something to persist for auditing.
+        """
+        import time as _time
+        try:
+            response = self.client.docx.v1.document.raw_content(document_id)
+            self._ensure_success(response, "fetch document revision")
+            revision_id = getattr(response.data, "revision_id", None)
+            if revision_id is not None:
+                return f"rev-{revision_id}"
+        except Exception as exc:  # pragma: no cover - SDK variance
+            LOGGER.warning(
+                "Failed to query revision for document_id=%s, falling back to timestamp: %s",
+                document_id,
+                exc,
+            )
+        return f"ts-{int(_time.time() * 1000)}"
+
     def bitable_url(self) -> str:
         if not self.settings.feishu_bitable_app_token:
             return ""
