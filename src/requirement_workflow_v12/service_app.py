@@ -1330,11 +1330,8 @@ class CoordinatorRuntimeApp:
                                 "placeholder": {"tag": "plain_text", "content": "要解决什么问题，期望得到什么结果"},
                             },
                             {
-                                "tag": "select_static",
-                                "name": "category",
-                                "required": False,
-                                "width": "fill",
-                                "label": {
+                                "tag": "div",
+                                "text": {
                                     "tag": "plain_text",
                                     "content": (
                                         "项目类目（首次为该项目创建需求时必填；"
@@ -1342,6 +1339,12 @@ class CoordinatorRuntimeApp:
                                         "，已有项目可留空）"
                                     ),
                                 },
+                            },
+                            {
+                                "tag": "select_static",
+                                "name": "category",
+                                "required": False,
+                                "width": "fill",
                                 "placeholder": {"tag": "plain_text", "content": "选择项目类目"},
                                 "options": category_options,
                             },
