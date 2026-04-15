@@ -113,6 +113,8 @@ class Requirement:
     spec_document_id: str = ""
     spec_document_url: str = ""
     spec_review_summary: str = ""
+    active_spec_context_token: str = ""
+    spec_context_snapshot_sha: str = ""
     updated_at: datetime = field(default_factory=utc_now)
 
     def touch(self) -> None:

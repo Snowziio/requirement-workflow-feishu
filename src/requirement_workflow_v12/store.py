@@ -112,6 +112,8 @@ class JsonStateStore:
             spec_document_id=data.get("spec_document_id", ""),
             spec_document_url=data.get("spec_document_url", ""),
             spec_review_summary=data.get("spec_review_summary", ""),
+            active_spec_context_token=data.get("active_spec_context_token", ""),
+            spec_context_snapshot_sha=data.get("spec_context_snapshot_sha", ""),
             discussion_history=[self._discussion_turn_from_payload(item) for item in discussion_history_payload],
             review_history=[self._review_result_from_payload(item) for item in review_history_payload],
             human_review_history=[
