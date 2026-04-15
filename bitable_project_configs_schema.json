@@ -1,0 +1,49 @@
+{
+  "version": "v1",
+  "table_name": "ProjectConfigs",
+  "description": "Per-project metadata persisted as the single source of truth for Coordinator project_configs.",
+  "fields": [
+    {
+      "name": "项目名",
+      "field_type": "text",
+      "required": true,
+      "description": "项目唯一主键(对应 ProjectConfig.project)。"
+    },
+    {
+      "name": "类别",
+      "field_type": "text",
+      "required": true,
+      "description": "项目类别,如 backend / frontend / ai-agent。"
+    },
+    {
+      "name": "模板版本",
+      "field_type": "text",
+      "required": true,
+      "description": "ARCHITECTURE 模板版本标识。"
+    },
+    {
+      "name": "架构文档ID",
+      "field_type": "text",
+      "required": true,
+      "description": "飞书 ARCHITECTURE 文档的 document_id。"
+    },
+    {
+      "name": "架构文档URL",
+      "field_type": "text",
+      "required": true,
+      "description": "飞书 ARCHITECTURE 文档的完整 URL。"
+    },
+    {
+      "name": "技术栈JSON",
+      "field_type": "text",
+      "required": false,
+      "description": "tech_stack 字段的 JSON 字符串(dict[str, str])。"
+    },
+    {
+      "name": "设计系统文档ID",
+      "field_type": "text",
+      "required": false,
+      "description": "该项目的设计系统文档 document_id(可空)。"
+    }
+  ]
+}

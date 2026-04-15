@@ -38,21 +38,23 @@ class JsonStateStore:
         requirements: dict[str, Requirement],
         active_req_by_user: dict[str, str],
         project_groups: dict[str, str],
-        project_configs: dict[str, ProjectConfig] | None = None,
     ) -> None:
+        # project_configs is NOT persisted here anymore — the Bitable ProjectConfigs
+        # table is the single source of truth. Coordinator loads it at startup via
+        # FeishuGateway.list_project_configs() and upserts on every mutation.
         payload = {
             "requirements": {req_id: asdict(req) for req_id, req in requirements.items()},
             "active_req_by_user": active_req_by_user,
             "project_groups": project_groups,
-            "project_configs": {
-                name: asdict(cfg) for name, cfg in (project_configs or {}).items()
-            },
         }
         self.path.write_text(json.dumps(payload, ensure_ascii=False, default=str, indent=2))
 
     def load_snapshot(
         self,
     ) -> tuple[dict[str, Requirement], dict[str, str], dict[str, str], dict[str, ProjectConfig]]:
+        # project_configs is returned as an empty dict for backward compatibility
+        # with callers that still unpack 4 values; real data comes from the
+        # Bitable ProjectConfigs table, not from state.json.
         if not self.path.exists():
             return {}, {}, {}, {}
 
@@ -61,15 +63,11 @@ class JsonStateStore:
             req_id: self._requirement_from_payload(data)
             for req_id, data in payload.get("requirements", {}).items()
         }
-        project_configs = {
-            name: ProjectConfig.from_dict(data)
-            for name, data in payload.get("project_configs", {}).items()
-        }
         return (
             requirements,
             payload.get("active_req_by_user", {}),
             payload.get("project_groups", {}),
-            project_configs,
+            {},
         )
 
     def _requirement_from_payload(self, data: dict) -> Requirement:

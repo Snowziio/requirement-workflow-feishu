@@ -11,6 +11,9 @@ if TYPE_CHECKING:
 
 
 SCHEMA_PATH = Path(__file__).resolve().parents[2] / "bitable_schema_v12.json"
+PROJECT_CONFIG_SCHEMA_PATH = (
+    Path(__file__).resolve().parents[2] / "bitable_project_configs_schema.json"
+)
 
 BITABLE_FIELD_TYPE_TEXT = 1
 BITABLE_FIELD_TYPE_NUMBER = 2
@@ -35,6 +38,46 @@ class BitableFieldSpec:
     @property
     def bitable_type(self) -> int:
         return BITABLE_FIELD_TYPE_MAP[self.field_type]
+
+
+@dataclass(frozen=True)
+class ProjectConfigFieldSpec:
+    name: str
+    field_type: str
+    required: bool
+    description: str
+
+    @property
+    def bitable_type(self) -> int:
+        return BITABLE_FIELD_TYPE_MAP[self.field_type]
+
+
+PROJECT_CONFIG_FIELD_PROJECT = "项目名"
+PROJECT_CONFIG_FIELD_CATEGORY = "类别"
+PROJECT_CONFIG_FIELD_TEMPLATE_VERSION = "模板版本"
+PROJECT_CONFIG_FIELD_ARCH_DOC_ID = "架构文档ID"
+PROJECT_CONFIG_FIELD_ARCH_DOC_URL = "架构文档URL"
+PROJECT_CONFIG_FIELD_TECH_STACK_JSON = "技术栈JSON"
+PROJECT_CONFIG_FIELD_DESIGN_SYSTEM_DOC_ID = "设计系统文档ID"
+
+
+@lru_cache(maxsize=1)
+def load_project_config_field_specs() -> tuple[ProjectConfigFieldSpec, ...]:
+    payload = json.loads(PROJECT_CONFIG_SCHEMA_PATH.read_text(encoding="utf-8"))
+    return tuple(
+        ProjectConfigFieldSpec(
+            name=str(item["name"]),
+            field_type=str(item["field_type"]),
+            required=bool(item.get("required", False)),
+            description=str(item.get("description", "")),
+        )
+        for item in payload.get("fields", [])
+    )
+
+
+def project_config_table_name() -> str:
+    payload = json.loads(PROJECT_CONFIG_SCHEMA_PATH.read_text(encoding="utf-8"))
+    return str(payload.get("table_name", "ProjectConfigs"))
 
 
 @lru_cache(maxsize=1)

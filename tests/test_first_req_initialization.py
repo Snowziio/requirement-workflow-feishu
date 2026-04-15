@@ -27,6 +27,8 @@ def _make_app_with_stub_gateway(tmp_path):
     gateway.create_project_group.side_effect = Exception("skip")
     gateway.create_requirement_record.return_value = None
     gateway.create_requirement_document.return_value = None
+    gateway.list_project_configs.return_value = {}
+    gateway.upsert_project_config.side_effect = lambda project, cfg: cfg
 
     service = CoordinatorService()
     store = JsonStateStore(settings.state_store_path)

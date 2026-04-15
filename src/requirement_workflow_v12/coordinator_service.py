@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+from typing import Callable
 
 from .models import DISCUSSION_FIELDS, DiscussionTurn, HumanReviewResult, Requirement, ReviewResult, WorkflowStatus, utc_now
 from .project_config import ProjectConfig
@@ -44,6 +45,20 @@ class CoordinatorService:
         self.requirements: dict[str, Requirement] = {}
         self.active_req_by_user: dict[str, str] = {}
         self.project_configs: dict[str, ProjectConfig] = {}
+        self._project_config_persister: Callable[[str, ProjectConfig], ProjectConfig] | None = None
+
+    def set_project_config_persister(
+        self, persister: Callable[[str, ProjectConfig], ProjectConfig] | None
+    ) -> None:
+        self._project_config_persister = persister
+
+    def _persist_project_config(self, project: str) -> None:
+        if self._project_config_persister is None:
+            return
+        cfg = self.project_configs.get(project)
+        if cfg is None:
+            return
+        self._project_config_persister(project, cfg)
 
     def restore_snapshot(
         self,
@@ -82,11 +97,13 @@ class CoordinatorService:
             tech_stack=dict(tech_stack),
         )
         self.project_configs[project] = cfg
+        self._persist_project_config(project)
         return cfg
 
     def set_design_system_doc(self, project: str, doc_id: str) -> None:
         if project in self.project_configs:
             self.project_configs[project].design_system_doc_id = doc_id
+            self._persist_project_config(project)
 
     def should_create_design_system(self, project: str) -> bool:
         cfg = self.project_configs.get(project)

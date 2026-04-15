@@ -8,7 +8,12 @@ from typing import Any
 
 try:  # pragma: no cover - optional during tests before runtime deps are installed
     import lark_oapi as lark
-    from lark_oapi.api.bitable.v1 import AppTableRecord, CreateAppTableRecordRequest, UpdateAppTableRecordRequest
+    from lark_oapi.api.bitable.v1 import (
+        AppTableRecord,
+        CreateAppTableRecordRequest,
+        ListAppTableRecordRequest,
+        UpdateAppTableRecordRequest,
+    )
     from lark_oapi.api.docx.v1 import (
         Block,
         CreateDocumentBlockChildrenRequest,
@@ -24,6 +29,7 @@ except ImportError:  # pragma: no cover - optional during tests before runtime d
     lark = None
     AppTableRecord = Any
     CreateAppTableRecordRequest = Any
+    ListAppTableRecordRequest = Any
     UpdateAppTableRecordRequest = Any
     Block = Any
     CreateDocumentBlockChildrenRequest = Any
@@ -39,8 +45,18 @@ except ImportError:  # pragma: no cover - optional during tests before runtime d
     CreateMessageRequestBody = Any
 
 from .config import Settings
-from .bitable_schema import build_coordinator_record_fields
+from .bitable_schema import (
+    PROJECT_CONFIG_FIELD_ARCH_DOC_ID,
+    PROJECT_CONFIG_FIELD_ARCH_DOC_URL,
+    PROJECT_CONFIG_FIELD_CATEGORY,
+    PROJECT_CONFIG_FIELD_DESIGN_SYSTEM_DOC_ID,
+    PROJECT_CONFIG_FIELD_PROJECT,
+    PROJECT_CONFIG_FIELD_TECH_STACK_JSON,
+    PROJECT_CONFIG_FIELD_TEMPLATE_VERSION,
+    build_coordinator_record_fields,
+)
 from .models import Requirement
+from .project_config import ProjectConfig
 
 
 LOGGER = logging.getLogger(__name__)
@@ -383,6 +399,161 @@ class FeishuGateway:
         response = self.client.docx.v1.document_block_children.create(request)
         if not response.success():
             LOGGER.warning("Failed to append design decision: %s", response.msg)
+
+    # ── Project configs (Bitable-backed single source of truth) ───────────
+
+    def _project_configs_table_configured(self) -> bool:
+        return bool(
+            self.settings.feishu_bitable_app_token
+            and self.settings.feishu_bitable_project_configs_table_id
+        )
+
+    def _project_config_to_fields(self, cfg: ProjectConfig, project: str) -> dict[str, object]:
+        return {
+            PROJECT_CONFIG_FIELD_PROJECT: project,
+            PROJECT_CONFIG_FIELD_CATEGORY: cfg.category,
+            PROJECT_CONFIG_FIELD_TEMPLATE_VERSION: cfg.template_version,
+            PROJECT_CONFIG_FIELD_ARCH_DOC_ID: cfg.architecture_doc_id,
+            PROJECT_CONFIG_FIELD_ARCH_DOC_URL: cfg.architecture_doc_url,
+            PROJECT_CONFIG_FIELD_TECH_STACK_JSON: json.dumps(
+                cfg.tech_stack, ensure_ascii=False
+            ),
+            PROJECT_CONFIG_FIELD_DESIGN_SYSTEM_DOC_ID: cfg.design_system_doc_id or "",
+        }
+
+    @staticmethod
+    def _extract_field_text(raw: object) -> str:
+        if isinstance(raw, str):
+            return raw
+        if isinstance(raw, list):
+            parts: list[str] = []
+            for item in raw:
+                if isinstance(item, dict):
+                    text = item.get("text")
+                    if isinstance(text, str):
+                        parts.append(text)
+                elif isinstance(item, str):
+                    parts.append(item)
+            return "".join(parts)
+        if raw is None:
+            return ""
+        return str(raw)
+
+    def list_project_configs(self) -> dict[str, ProjectConfig]:
+        """Load all ProjectConfig rows from the Bitable project configs table.
+
+        Returns empty dict when the table is not configured, so boot can proceed
+        on first-ever start before the one-shot init workflow has run.
+        """
+        if not self._project_configs_table_configured():
+            LOGGER.warning(
+                "Bitable project configs table not configured; skipping load "
+                "(FEISHU_BITABLE_PROJECT_CONFIGS_TABLE_ID missing)"
+            )
+            return {}
+
+        configs: dict[str, ProjectConfig] = {}
+        page_token = ""
+        while True:
+            builder = (
+                ListAppTableRecordRequest.builder()
+                .app_token(self.settings.feishu_bitable_app_token)
+                .table_id(self.settings.feishu_bitable_project_configs_table_id)
+                .page_size(100)
+            )
+            if page_token:
+                builder = builder.page_token(page_token)
+            response = self.client.bitable.v1.app_table_record.list(builder.build())
+            self._ensure_success(response, "list project_configs records")
+            data = response.data
+            for item in data.items or []:
+                fields = item.fields or {}
+                project = self._extract_field_text(fields.get(PROJECT_CONFIG_FIELD_PROJECT))
+                if not project:
+                    LOGGER.warning(
+                        "Skipping project_configs row without project name record_id=%s",
+                        item.record_id,
+                    )
+                    continue
+                tech_stack_raw = self._extract_field_text(
+                    fields.get(PROJECT_CONFIG_FIELD_TECH_STACK_JSON)
+                )
+                try:
+                    tech_stack = json.loads(tech_stack_raw) if tech_stack_raw else {}
+                    if not isinstance(tech_stack, dict):
+                        tech_stack = {}
+                except json.JSONDecodeError:
+                    LOGGER.warning(
+                        "Invalid tech_stack JSON for project=%s record_id=%s; resetting to empty dict",
+                        project,
+                        item.record_id,
+                    )
+                    tech_stack = {}
+                design_system_doc_id = self._extract_field_text(
+                    fields.get(PROJECT_CONFIG_FIELD_DESIGN_SYSTEM_DOC_ID)
+                ) or None
+                configs[project] = ProjectConfig(
+                    category=self._extract_field_text(fields.get(PROJECT_CONFIG_FIELD_CATEGORY)),
+                    template_version=self._extract_field_text(
+                        fields.get(PROJECT_CONFIG_FIELD_TEMPLATE_VERSION)
+                    ),
+                    architecture_doc_id=self._extract_field_text(
+                        fields.get(PROJECT_CONFIG_FIELD_ARCH_DOC_ID)
+                    ),
+                    architecture_doc_url=self._extract_field_text(
+                        fields.get(PROJECT_CONFIG_FIELD_ARCH_DOC_URL)
+                    ),
+                    tech_stack=tech_stack,
+                    design_system_doc_id=design_system_doc_id,
+                    bitable_record_id=item.record_id or "",
+                )
+            if not data.has_more:
+                break
+            page_token = data.page_token or ""
+        LOGGER.info("Loaded %d project_configs rows from Bitable", len(configs))
+        return configs
+
+    def upsert_project_config(self, project: str, cfg: ProjectConfig) -> ProjectConfig:
+        """Create or update the row for `project` and return cfg with record_id set."""
+        if not self._project_configs_table_configured():
+            LOGGER.warning(
+                "Bitable project configs table not configured; upsert for project=%s is a no-op",
+                project,
+            )
+            return cfg
+        fields = self._project_config_to_fields(cfg, project)
+        if cfg.bitable_record_id:
+            request = (
+                UpdateAppTableRecordRequest.builder()
+                .app_token(self.settings.feishu_bitable_app_token)
+                .table_id(self.settings.feishu_bitable_project_configs_table_id)
+                .record_id(cfg.bitable_record_id)
+                .request_body(AppTableRecord.builder().fields(fields).build())
+                .build()
+            )
+            response = self.client.bitable.v1.app_table_record.update(request)
+            self._ensure_success(response, "update project_configs record")
+            LOGGER.info(
+                "Updated project_configs record project=%s record_id=%s",
+                project,
+                cfg.bitable_record_id,
+            )
+            return cfg
+        request = (
+            CreateAppTableRecordRequest.builder()
+            .app_token(self.settings.feishu_bitable_app_token)
+            .table_id(self.settings.feishu_bitable_project_configs_table_id)
+            .request_body(AppTableRecord.builder().fields(fields).build())
+            .build()
+        )
+        response = self.client.bitable.v1.app_table_record.create(request)
+        self._ensure_success(response, "create project_configs record")
+        record_id = response.data.record.record_id
+        LOGGER.info(
+            "Created project_configs record project=%s record_id=%s", project, record_id
+        )
+        cfg.bitable_record_id = record_id
+        return cfg
 
     def _ensure_success(self, response, action: str) -> None:
         if not response.success():

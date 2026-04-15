@@ -15,6 +15,9 @@ class Settings:
     feishu_log_level: str = os.environ.get("FEISHU_LOG_LEVEL", "INFO")
     feishu_bitable_app_token: str = os.environ.get("FEISHU_BITABLE_APP_TOKEN", "")
     feishu_bitable_table_id: str = os.environ.get("FEISHU_BITABLE_TABLE_ID", "")
+    feishu_bitable_project_configs_table_id: str = os.environ.get(
+        "FEISHU_BITABLE_PROJECT_CONFIGS_TABLE_ID", ""
+    )
     feishu_doc_folder_token: str = os.environ.get("FEISHU_DOC_FOLDER_TOKEN", "")
     feishu_base_url: str = os.environ.get("FEISHU_BASE_URL", "https://my.feishu.cn")
     feishu_user_id_type: str = os.environ.get("FEISHU_USER_ID_TYPE", "open_id")

@@ -1,32 +1,27 @@
+import json
 import sys
 import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from requirement_workflow_v12.project_config import ProjectConfig
 from requirement_workflow_v12.store import JsonStateStore
 
 
-def test_store_round_trips_project_config():
-    cfg = ProjectConfig(
-        category="public-web-site",
-        template_version="public-web-site.v1",
-        architecture_doc_id="doc_pw",
-        architecture_doc_url="https://feishu.example/docx/doc_pw",
-        tech_stack={"language": "python"},
-    )
+def test_save_snapshot_does_not_persist_project_configs():
+    """ProjectConfig lives in Bitable, not state.json — save_snapshot must not write it."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        store = JsonStateStore(f"{tmpdir}/state.json")
-        store.save_snapshot({}, {}, {}, {"MyProj": cfg})
-        _, _, _, loaded = store.load_snapshot()
-        assert loaded["MyProj"].category == "public-web-site"
-        assert loaded["MyProj"].architecture_doc_id == "doc_pw"
-        assert loaded["MyProj"].tech_stack == {"language": "python"}
+        path = Path(tmpdir) / "state.json"
+        store = JsonStateStore(str(path))
+        store.save_snapshot({}, {"user": "req_1"}, {"MyProj": "chat_1"})
+        payload = json.loads(path.read_text())
+        assert "project_configs" not in payload
+        assert payload["active_req_by_user"] == {"user": "req_1"}
+        assert payload["project_groups"] == {"MyProj": "chat_1"}
 
 
-def test_store_ignores_legacy_project_config_fields():
-    import json
+def test_load_snapshot_ignores_legacy_project_configs():
+    """Pre-migration state.json may still carry project_configs — load must skip it."""
     with tempfile.TemporaryDirectory() as tmpdir:
         path = Path(tmpdir) / "state.json"
         path.write_text(json.dumps({
@@ -39,11 +34,9 @@ def test_store_ignores_legacy_project_config_fields():
                     "template_version": "miniprogram.v1",
                     "architecture_doc_id": "doc_l",
                     "architecture_doc_url": "https://feishu.example/docx/doc_l",
-                    "github_repo_url": "https://github.com/org/legacy",
-                    "onboarding_state": "COMPLETE",
                 }
             },
         }, ensure_ascii=False))
         store = JsonStateStore(str(path))
-        _, _, _, loaded = store.load_snapshot()
-        assert loaded["LegacyProj"].category == "miniprogram"
+        _, _, _, project_configs = store.load_snapshot()
+        assert project_configs == {}

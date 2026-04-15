@@ -93,9 +93,24 @@ class CoordinatorRuntimeApp:
         self.store = store or JsonStateStore(settings.state_store_path)
         self.service = service or CoordinatorService()
         self.gateway = gateway or FeishuGateway(settings)
-        requirements, active_req_by_user, project_groups, project_configs = self.store.load_snapshot()
-        if service is None or requirements or active_req_by_user or project_groups:
+        requirements, active_req_by_user, project_groups, _legacy_project_configs = self.store.load_snapshot()
+        project_configs: dict = {}
+        list_fn = getattr(self.gateway, "list_project_configs", None)
+        if callable(list_fn):
+            try:
+                project_configs = list_fn() or {}
+            except Exception as exc:
+                LOGGER.error(
+                    "Failed to load project_configs from Bitable at startup: %s. "
+                    "project_configs will be empty; spec-context calls will fail until the table is reachable.",
+                    exc,
+                )
+                project_configs = {}
+        if service is None or requirements or active_req_by_user or project_groups or project_configs:
             self.service.restore_snapshot(requirements, active_req_by_user, project_groups, project_configs)
+        upsert_fn = getattr(self.gateway, "upsert_project_config", None)
+        if callable(upsert_fn):
+            self.service.set_project_config_persister(upsert_fn)
         self._health_server: HTTPServer | None = None
         self._observed_creation_group_chat_id = settings.creation_group_chat_id
         self._pending_form_payloads: dict[str, CreationFormPayload] = {}
@@ -1960,7 +1975,6 @@ class CoordinatorRuntimeApp:
             self.service.requirements,
             self.service.active_req_by_user,
             self.service.project_groups,
-            self.service.project_configs,
         )
 
     def _is_feishu_chat_id(self, value: str) -> bool:
