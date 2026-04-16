@@ -89,6 +89,7 @@ class SpecTransformOrchestrator:
         max_rounds: int = 3,
         max_soft_retries: int = 2,
         max_race_retries: int = 3,
+        on_deadlock=None,
     ):
         self._gateway = gateway
         self._registry = registry
@@ -97,6 +98,7 @@ class SpecTransformOrchestrator:
         self._max_rounds = max_rounds
         self._max_soft_retries = max_soft_retries
         self._max_race_retries = max_race_retries
+        self._on_deadlock_cb = on_deadlock
         self._rounds: dict[str, RoundContext] = {}
 
     def on_enter_transforming(
@@ -148,6 +150,8 @@ class SpecTransformOrchestrator:
                 "event": "recovery_deadlock",
                 "reason": "no in-memory round context (likely after restart)",
             })
+            if self._on_deadlock_cb is not None:
+                self._on_deadlock_cb(req_id, "recovery")
             return "deadlock"
         ctx.last_transformer_payload = payload
         result = run_gate(payload, ctx.snapshot)
@@ -185,6 +189,9 @@ class SpecTransformOrchestrator:
             self._trace.append(req_id, {
                 "event": "deadlock", "reason": "max_rounds",
             })
+            self._rounds.pop(req_id, None)
+            if self._on_deadlock_cb is not None:
+                self._on_deadlock_cb(req_id, "max_rounds")
             return "deadlock"
         ctx.round_index += 1
         ctx.soft_retry_count = 0
@@ -198,6 +205,8 @@ class SpecTransformOrchestrator:
             self._trace.append(req_id, {
                 "event": "recovery_deadlock", "reason": "no round context",
             })
+            if self._on_deadlock_cb is not None:
+                self._on_deadlock_cb(req_id, "recovery")
             return "deadlock"
         self._trace.append(req_id, {
             "event": "reviewer_verdict",

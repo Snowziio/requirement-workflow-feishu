@@ -200,3 +200,32 @@ def test_handle_reviewer_verdict_without_round_context_deadlocks(tmp_path):
     orch = _orch(tmp_path)
     action = orch.handle_reviewer_verdict("R", "converged", [])
     assert action == "deadlock"
+
+
+def test_deadlock_callback_invoked(tmp_path):
+    from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
+    called = []
+    orch = SpecTransformOrchestrator(
+        gateway=MagicMock(), registry=MagicMock(), feishu=MagicMock(),
+        trace_dir=tmp_path,
+        on_deadlock=lambda req, reason: called.append((req, reason)),
+    )
+    ctx = RoundContext(snapshot=_blank_snap())
+    ctx.round_index = 3
+    orch._rounds["R"] = ctx
+    action = orch.handle_reviewer_verdict("R", "reject", [])
+    assert action == "deadlock"
+    assert called == [("R", "max_rounds")]
+
+
+def test_recovery_deadlock_callback_invoked(tmp_path):
+    from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
+    called = []
+    orch = SpecTransformOrchestrator(
+        gateway=MagicMock(), registry=MagicMock(), feishu=MagicMock(),
+        trace_dir=tmp_path,
+        on_deadlock=lambda req, reason: called.append((req, reason)),
+    )
+    action = orch.handle_transformer_output("R", {})
+    assert action == "deadlock"
+    assert called == [("R", "recovery")]

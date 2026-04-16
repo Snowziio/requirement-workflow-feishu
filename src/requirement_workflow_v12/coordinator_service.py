@@ -612,6 +612,15 @@ class CoordinatorService:
         )
         return requirement
 
+    def _on_spec_deadlock(self, req_id: str, reason: str) -> None:
+        r = self.requirements.get(req_id)
+        if r is None:
+            return
+        from .spec_state_machine import SpecEvent, apply_spec_event
+        decision = apply_spec_event(r.spec_status, SpecEvent.TRANSFORM_DEADLOCK)
+        if decision.allowed:
+            r.spec_deadlocked = True
+
     def spec_restart(self, req_id: str) -> Requirement:
         """Reset Spec state for re-entry. Allowed only in DRAFTING or
         TRANSFORMING(deadlocked=True). Archives current Spec doc URL and

@@ -67,3 +67,28 @@ def test_submit_checkpoint_1a_pass_transitions_to_transforming():
     svc.submit_checkpoint_1a_pass("R1")
     assert svc.requirements["R1"].spec_status is SpecStatus.TRANSFORMING
     svc.spec_orchestrator.on_enter_transforming.assert_called_once()
+
+
+def test_on_spec_deadlock_sets_spec_deadlocked_flag_in_transforming():
+    svc = CoordinatorService()
+    r = Requirement(req_id="REQ-T-1", name="n", project="T", summary="s", creator="c")
+    r.status = WorkflowStatus.APPROVED
+    r.spec_status = SpecStatus.TRANSFORMING
+    svc.requirements[r.req_id] = r
+    svc._on_spec_deadlock("REQ-T-1", "max_rounds")
+    assert r.spec_deadlocked is True
+
+
+def test_on_spec_deadlock_noop_when_req_missing():
+    svc = CoordinatorService()
+    svc._on_spec_deadlock("DOES-NOT-EXIST", "max_rounds")
+
+
+def test_on_spec_deadlock_does_not_set_flag_when_not_in_transforming():
+    svc = CoordinatorService()
+    r = Requirement(req_id="REQ-T-2", name="n", project="T", summary="s", creator="c")
+    r.status = WorkflowStatus.APPROVED
+    r.spec_status = SpecStatus.DRAFTING
+    svc.requirements[r.req_id] = r
+    svc._on_spec_deadlock("REQ-T-2", "max_rounds")
+    assert r.spec_deadlocked is False
