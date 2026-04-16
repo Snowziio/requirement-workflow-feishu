@@ -47,6 +47,7 @@ class CoordinatorService:
         self.active_req_by_user: dict[str, str] = {}
         self.project_configs: dict[str, ProjectConfig] = {}
         self._project_config_persister: Callable[[str, ProjectConfig], ProjectConfig] | None = None
+        self.spec_orchestrator = None
 
     def set_project_config_persister(
         self, persister: Callable[[str, ProjectConfig], ProjectConfig] | None
@@ -667,6 +668,25 @@ class CoordinatorService:
             requirement.latest_review_summary,
         )
         return requirement
+
+    def submit_checkpoint_1a_pass(self, req_id: str) -> Requirement:
+        r = self.requirements[req_id]
+        decision = apply_spec_event(r.spec_status, SpecEvent.CHECKPOINT_1A_PASS)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+        r.spec_status = decision.next_status
+        cfg = self.project_configs.get(r.project)
+        if cfg is None or not getattr(cfg, "scaffold_repo", None):
+            raise ValueError(f"项目 {r.project} 未配置 scaffold_repo")
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(
+            self.spec_orchestrator.on_enter_transforming(
+                req_id=req_id,
+                project_repo=cfg.scaffold_repo,
+                spec_doc_id=r.spec_document_id,
+            )
+        )
+        return r
 
     def _next_req_id(self, project: str) -> str:
         count = sum(1 for item in self.requirements.values() if item.project == project) + 1

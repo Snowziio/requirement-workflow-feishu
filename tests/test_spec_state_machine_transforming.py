@@ -43,3 +43,28 @@ def test_requirement_default_spec_deadlocked_is_false():
     r = Requirement(req_id="R", name="n", project="p", summary="s", creator="c")
     assert r.spec_deadlocked is False
     assert r.spec_transform_snapshot is None
+
+
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
+from requirement_workflow_v12.coordinator_service import CoordinatorService
+
+
+def test_submit_checkpoint_1a_pass_transitions_to_transforming():
+    svc = CoordinatorService()
+    r = Requirement(req_id="R1", name="n", project="P", summary="s", creator="c")
+    r.status = WorkflowStatus.APPROVED
+    r.spec_status = SpecStatus.DRAFTING
+    r.spec_document_id = "doc-1"
+    svc.requirements["R1"] = r
+
+    svc.spec_orchestrator = MagicMock()
+    svc.spec_orchestrator.on_enter_transforming = AsyncMock(return_value=None)
+    svc.project_configs = MagicMock()
+    cfg = MagicMock(); cfg.scaffold_repo = "owner/repo"
+    svc.project_configs.get.return_value = cfg
+
+    svc.submit_checkpoint_1a_pass("R1")
+    assert svc.requirements["R1"].spec_status is SpecStatus.TRANSFORMING
+    svc.spec_orchestrator.on_enter_transforming.assert_awaited_once()
