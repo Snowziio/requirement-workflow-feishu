@@ -181,6 +181,8 @@ class CoordinatorRuntimeApp:
                     status, payload = app.handle_openclaw_spec_context_query(raw_body, headers=headers)
                 elif self.path == "/callbacks/openclaw/spec-turn":
                     status, payload = app.handle_openclaw_spec_turn_callback(raw_body, headers=headers)
+                elif self.path == "/callbacks/openclaw/spec-transform":
+                    status, payload = app.handle_openclaw_spec_transform_callback(raw_body, headers=headers)
                 else:
                     status, payload = 404, {"error": "not_found"}
                 body = json.dumps(payload, ensure_ascii=False).encode()
@@ -1003,6 +1005,51 @@ class CoordinatorRuntimeApp:
             return 200, {"ok": True, "message": "Spec 已提交，已通知项目群发起审查"}
 
         return 400, {"error": "invalid_event"}
+
+    def handle_openclaw_spec_transform_callback(
+        self,
+        raw_body: bytes,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, object]]:
+        auth_error = self._validate_openclaw_callback_auth(raw_body, headers=headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            payload = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return 400, {"error": "invalid_json"}
+
+        req_id = str(payload.get("req_id", "")).strip()
+        event = str(payload.get("event", "")).strip()
+        data = payload.get("data") or {}
+        if not req_id or not event:
+            return 400, {"error": "invalid_payload", "message": "req_id、event 为必填字段。"}
+        if not isinstance(data, dict):
+            return 400, {"error": "invalid_payload", "message": "data 必须是对象。"}
+
+        orch = self.service.spec_orchestrator
+        if orch is None:
+            return 503, {"error": "orchestrator_unavailable"}
+
+        try:
+            if event == "transformer_output":
+                action = orch.handle_transformer_output(req_id, data)
+            elif event == "reviewer_verdict":
+                verdict = str(data.get("verdict", "")).strip()
+                findings = data.get("findings", []) or []
+                if not verdict:
+                    return 400, {"error": "invalid_payload", "message": "reviewer_verdict 缺少 verdict。"}
+                action = orch.handle_reviewer_verdict(req_id, verdict, findings)
+            else:
+                return 400, {"error": f"unknown_event: {event}"}
+        except Exception as exc:
+            LOGGER.exception(
+                "Spec transform callback failed req_id=%s event=%s", req_id, event,
+            )
+            return 500, {"error": "spec_transform_failed", "message": str(exc)}
+
+        return 200, {"ok": True, "req_id": req_id, "next_action": action}
 
     def _handle_card_action_payload(self, payload: dict[str, object]) -> tuple[int, dict[str, object]]:
         LOGGER.info("Handling card payload: %s", payload)
