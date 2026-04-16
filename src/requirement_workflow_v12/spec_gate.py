@@ -50,7 +50,52 @@ def _check_ac_schedule_schema(payload) -> list[GateFinding]:
     return findings
 
 
+_TASK_LINE_RE = re.compile(r"^\s*[-*]?\s*T-\d{3,}\s+\S")
+
+
+def _check_tasks_md_format(payload) -> list[GateFinding]:
+    text = payload.get("tasks_md", "")
+    has_any = any(_TASK_LINE_RE.match(line) for line in text.splitlines())
+    if not has_any:
+        return [GateFinding(
+            "format", "tasks_md_format",
+            "no `T-NNN <subject>` lines found in tasks.md",
+        )]
+    return []
+
+
+def _check_path_consistency(payload) -> list[GateFinding]:
+    findings: list[GateFinding] = []
+    try:
+        doc = yaml.safe_load(payload["ac_schedule_yaml"]) or {}
+    except yaml.YAMLError:
+        return findings
+    files = payload.get("harness_files", {})
+    for ac in doc.get("acs", []) or []:
+        if not isinstance(ac, dict):
+            continue
+        path = ac.get("test_file")
+        if not path:
+            continue
+        if path not in files:
+            findings.append(GateFinding(
+                "format", "path_consistency",
+                f"AC {ac.get('id')} test_file '{path}' not present in harness payload",
+            ))
+            continue
+        ac_id = ac.get("id", "")
+        if f"@pytest.mark.ac('{ac_id}')" not in files[path] \
+           and f'@pytest.mark.ac("{ac_id}")' not in files[path]:
+            findings.append(GateFinding(
+                "format", "path_consistency",
+                f"AC {ac_id}: test_file present but lacks @pytest.mark.ac",
+            ))
+    return findings
+
+
 def run_gate(payload: dict, snapshot) -> GateResult:
     findings: list[GateFinding] = []
     findings.extend(_check_ac_schedule_schema(payload))
+    findings.extend(_check_tasks_md_format(payload))
+    findings.extend(_check_path_consistency(payload))
     return GateResult(passed=len(findings) == 0, findings=findings)
