@@ -93,3 +93,44 @@ def test_run_gate_fails_on_test_file_not_in_harness_payload():
     }
     result = run_gate(payload, _snap())
     assert any(f.rule == "path_consistency" for f in result.findings)
+
+
+def test_run_gate_fails_when_round_zero_recall_missing_active_ac():
+    snap = TransformContextSnapshot(
+        req_id="REQ-P-1", spec_source_revision="r",
+        architecture_revision="a", acm_registry_revision="r",
+        acm_active_slice=["AC-001", "AC-002"], captured_at="2026-04-16",
+    )
+    payload = {
+        "design_md": "## supersedes\nno supersession\n",
+        "tasks_md": "T-001 init\n",
+        "ac_schedule_yaml": "version: 1\nacs: []\n",
+        "harness_files": {},
+        "supersedes_decl": [],
+        "round_zero_ac_ids": ["AC-001"],   # missing AC-002
+    }
+    result = run_gate(payload, snap)
+    finding = next(f for f in result.findings if f.rule == "round_zero_ac_recall")
+    assert finding.kind == "semantic"
+    assert "AC-002" in finding.detail
+
+
+def test_run_gate_fails_when_supersedes_decl_inconsistent():
+    snap = TransformContextSnapshot(
+        req_id="REQ-P-1", spec_source_revision="r",
+        architecture_revision="a", acm_registry_revision="r",
+        acm_active_slice=["AC-001"], captured_at="2026-04-16",
+    )
+    # design.md says supersedes AC-999 but AC-999 is not in active slice
+    payload = {
+        "design_md": "## supersedes\nReplaces AC-999\n",
+        "tasks_md": "T-001 init\n",
+        "ac_schedule_yaml": "version: 1\nacs: []\n",
+        "harness_files": {},
+        "supersedes_decl": [{"old_ac_id": "AC-999", "by_ac_id": "AC-100"}],
+        "round_zero_ac_ids": ["AC-001"],
+    }
+    result = run_gate(payload, snap)
+    finding = next(f for f in result.findings if f.rule == "supersedes_completeness")
+    assert finding.kind == "semantic"
+    assert "AC-999" in finding.detail

@@ -93,9 +93,37 @@ def _check_path_consistency(payload) -> list[GateFinding]:
     return findings
 
 
+def _check_round_zero_ac_recall(payload, snapshot) -> list[GateFinding]:
+    declared = set(payload.get("round_zero_ac_ids") or [])
+    expected = set(snapshot.acm_active_slice)
+    missing = expected - declared
+    if missing:
+        return [GateFinding(
+            "semantic", "round_zero_ac_recall",
+            f"Round 0 AC recall missing: {sorted(missing)}",
+        )]
+    return []
+
+
+def _check_supersedes_completeness(payload, snapshot) -> list[GateFinding]:
+    findings: list[GateFinding] = []
+    decls = payload.get("supersedes_decl") or []
+    active = set(snapshot.acm_active_slice)
+    for decl in decls:
+        old = decl.get("old_ac_id")
+        if old and old not in active:
+            findings.append(GateFinding(
+                "semantic", "supersedes_completeness",
+                f"supersedes target {old} not in current active slice",
+            ))
+    return findings
+
+
 def run_gate(payload: dict, snapshot) -> GateResult:
     findings: list[GateFinding] = []
     findings.extend(_check_ac_schedule_schema(payload))
     findings.extend(_check_tasks_md_format(payload))
     findings.extend(_check_path_consistency(payload))
+    findings.extend(_check_round_zero_ac_recall(payload, snapshot))
+    findings.extend(_check_supersedes_completeness(payload, snapshot))
     return GateResult(passed=len(findings) == 0, findings=findings)
