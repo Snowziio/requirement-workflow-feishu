@@ -11,6 +11,7 @@ NextAction = Literal[
     "soft_retry_transformer",
     "wake_reviewer",
     "wake_transformer_next_round",
+    "wake_transformer_regression_retry",
     "deadlock",
     "converged",
 ]
@@ -32,8 +33,10 @@ class RoundContext:
     round_index: int = 1
     soft_retry_count: int = 0
     race_retry_count: int = 0
+    regression_retry_count: int = 0
     last_transformer_payload: dict | None = None
     last_reviewer_findings: list[dict] = field(default_factory=list)
+    last_regression_missing: list[str] = field(default_factory=list)
 
 
 class TraceWriter:
@@ -89,6 +92,7 @@ class SpecTransformOrchestrator:
         max_rounds: int = 3,
         max_soft_retries: int = 2,
         max_race_retries: int = 3,
+        max_regression_retries: int = 1,
         on_deadlock=None,
         on_locked=None,
     ):
@@ -99,6 +103,7 @@ class SpecTransformOrchestrator:
         self._max_rounds = max_rounds
         self._max_soft_retries = max_soft_retries
         self._max_race_retries = max_race_retries
+        self._max_regression_retries = max_regression_retries
         self._on_deadlock_cb = on_deadlock
         self._on_locked_cb = on_locked
         self._rounds: dict[str, RoundContext] = {}
@@ -221,12 +226,26 @@ class SpecTransformOrchestrator:
             "round": ctx.round_index,
         })
         if verdict == "converged":
-            self._on_converged(req_id)
+            outcome = self._on_converged(req_id)
+            if outcome == "regression_retry":
+                return "wake_transformer_regression_retry"
+            if outcome == "deadlock":
+                return "deadlock"
             return "converged"
         ctx.last_reviewer_findings = findings
         return self._advance_round_or_deadlock(ctx, req_id)
 
-    def _on_converged(self, req_id: str) -> None:
+    def _on_converged(self, req_id: str) -> str:
+        """Drive ACM patch + regression scan + commit + PR. Returns one of:
+
+        - ``"locked"`` — Spec PR opened, ctx popped, on_locked fired.
+        - ``"regression_retry"`` — regression scan missed AC anchors but
+          ``regression_retry_count < max_regression_retries``; ctx kept,
+          ``last_regression_missing`` populated for caller to feed back to
+          the transformer (round保持).
+        - ``"deadlock"`` — terminal failure (regression exhausted, github
+          commit error, or ACM race giveup); ctx popped, on_deadlock fired.
+        """
         from .acm_registry import SupersedeDecl
         from .regression_scan import scan
         import yaml
@@ -255,14 +274,24 @@ class SpecTransformOrchestrator:
                     harness_files=payload["harness_files"],
                 )
                 if not regression.passed:
+                    if ctx.regression_retry_count < self._max_regression_retries:
+                        ctx.regression_retry_count += 1
+                        ctx.last_regression_missing = list(regression.missing)
+                        self._trace.append(req_id, {
+                            "event": "regression_retry",
+                            "attempt": ctx.regression_retry_count,
+                            "missing": regression.missing,
+                        })
+                        return "regression_retry"
                     self._trace.append(req_id, {
                         "event": "regression_failed",
+                        "reason": "max_regression_retries",
                         "missing": regression.missing,
                     })
                     self._rounds.pop(req_id, None)
                     if self._on_deadlock_cb is not None:
                         self._on_deadlock_cb(req_id, "regression_failed")
-                    return
+                    return "deadlock"
 
                 files = self._compose_pr_files(req_id, payload, patched)
                 try:
@@ -287,14 +316,14 @@ class SpecTransformOrchestrator:
                     self._rounds.pop(req_id, None)
                     if self._on_deadlock_cb is not None:
                         self._on_deadlock_cb(req_id, "github_commit_failed")
-                    return
+                    return "deadlock"
 
             if not committed:
                 self._trace.append(req_id, {"event": "acm_race_giveup"})
                 self._rounds.pop(req_id, None)
                 if self._on_deadlock_cb is not None:
                     self._on_deadlock_cb(req_id, "acm_race_giveup")
-                return
+                return "deadlock"
 
         owner, repo_name = project_repo.split("/", 1)
         pr = self._gateway.open_pull_request(
@@ -309,6 +338,7 @@ class SpecTransformOrchestrator:
         self._rounds.pop(req_id, None)
         if self._on_locked_cb is not None:
             self._on_locked_cb(req_id, pr.get("html_url"))
+        return "locked"
 
     def _compose_pr_files(self, req_id, payload, patched_registry) -> dict[str, str]:
         prefix = f"docs/specs/{req_id}"

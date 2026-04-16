@@ -127,7 +127,10 @@ def test_handle_transformer_output_pass_returns_wake_reviewer(tmp_path):
     )
     orch._rounds["R"] = RoundContext(snapshot=snap)
     payload = {
-        "design_md": "## supersedes\nno supersession\n",
+        "design_md": (
+            "# Design\n## 项目级上下文消费\n- ARCHITECTURE rev: x\n"
+            "## supersedes\nno supersession\n"
+        ),
         "tasks_md": "T-001 init\n",
         "ac_schedule_yaml": (
             "version: 1\nacs:\n"
@@ -142,7 +145,7 @@ def test_handle_transformer_output_pass_returns_wake_reviewer(tmp_path):
         "round_zero_ac_ids": [],
     }
     action = orch.handle_transformer_output("R", payload)
-    assert action == "wake_reviewer"
+    assert action == "wake_reviewer", orch._trace.read_all("R")
     trace = (tmp_path / "R.jsonl").read_text()
     assert "gate_pass" in trace
 
@@ -313,7 +316,8 @@ def test_on_enter_transforming_calls_create_branch_with_correct_kwargs(tmp_path)
     }
 
 
-def test_on_converged_regression_fail_deadlocks(tmp_path):
+def _make_regression_fail_orch(tmp_path, **orch_kwargs):
+    """Helper: orch where regression scan fails (AC-1 active but not anchored)."""
     from requirement_workflow_v12.acm_registry import AcmRegistry
     from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
     gateway = MagicMock()
@@ -322,11 +326,9 @@ def test_on_converged_regression_fail_deadlocks(tmp_path):
         "version: 3\nentries:\n  - {ac_id: AC-1, req_id: R, status: active, priority: P0}\n",
     ))
     registry = AcmRegistry(gateway=gateway)
-    called = []
     orch = SpecTransformOrchestrator(
         gateway=gateway, registry=registry, feishu=MagicMock(),
-        trace_dir=tmp_path,
-        on_deadlock=lambda req, reason: called.append(reason),
+        trace_dir=tmp_path, **orch_kwargs,
     )
     snap = TransformContextSnapshot(
         req_id="REQ-P-1", spec_source_revision="",
@@ -334,7 +336,6 @@ def test_on_converged_regression_fail_deadlocks(tmp_path):
         acm_active_slice=["AC-1"], captured_at="",
     )
     ctx = RoundContext(snapshot=snap)
-    # New AC anchored, but old AC-1 is NOT anchored AND NOT superseded → fail
     ctx.last_transformer_payload = {
         "design_md": "## supersedes\nno supersession\n",
         "tasks_md": "T-001 a\n",
@@ -352,7 +353,61 @@ def test_on_converged_regression_fail_deadlocks(tmp_path):
     }
     orch._rounds["REQ-P-1"] = ctx
     orch._project_repo_for = lambda req_id: "o/r"
-    orch._on_converged("REQ-P-1")
+    return orch, gateway, ctx
+
+
+def test_on_converged_regression_first_failure_soft_retries(tmp_path):
+    called = []
+    orch, gateway, ctx = _make_regression_fail_orch(
+        tmp_path, on_deadlock=lambda req, reason: called.append(reason),
+    )
+    outcome = orch._on_converged("REQ-P-1")
+    assert outcome == "regression_retry"
+    assert called == []  # no deadlock fired
+    assert ctx.regression_retry_count == 1
+    assert ctx.last_regression_missing == ["AC-1"]
+    assert "REQ-P-1" in orch._rounds  # ctx kept alive
+    gateway.commit_spec_pr_files.assert_not_called()
+    trace = (tmp_path / "REQ-P-1.jsonl").read_text()
+    assert "regression_retry" in trace
+
+
+def test_on_converged_regression_exhausted_deadlocks(tmp_path):
+    called = []
+    orch, gateway, ctx = _make_regression_fail_orch(
+        tmp_path, on_deadlock=lambda req, reason: called.append(reason),
+    )
+    ctx.regression_retry_count = 1  # already at max_regression_retries (default 1)
+    outcome = orch._on_converged("REQ-P-1")
+    assert outcome == "deadlock"
     assert called == ["regression_failed"]
+    assert "REQ-P-1" not in orch._rounds
     trace = (tmp_path / "REQ-P-1.jsonl").read_text()
     assert "regression_failed" in trace
+    assert "max_regression_retries" in trace
+
+
+def test_handle_reviewer_verdict_regression_retry_returns_wake_transformer(tmp_path):
+    orch, _gateway, _ctx = _make_regression_fail_orch(tmp_path)
+    action = orch.handle_reviewer_verdict("REQ-P-1", "converged", [])
+    assert action == "wake_transformer_regression_retry"
+
+
+def test_on_converged_regression_pass_after_soft_retry_locks(tmp_path):
+    """Sim: first call regression-retries; second call (with fixed payload) locks."""
+    orch, gateway, ctx = _make_regression_fail_orch(tmp_path)
+    gateway.commit_spec_pr_files = MagicMock(return_value="sha-x")
+    gateway.open_pull_request = MagicMock(
+        return_value={"number": 1, "html_url": "https://gh/pr/1"},
+    )
+    # First converged call: regression fails (AC-1 not anchored)
+    assert orch._on_converged("REQ-P-1") == "regression_retry"
+    # Transformer "fixes" the payload by anchoring AC-1
+    ctx.last_transformer_payload["harness_files"][
+        "harness/tests/REQ-P-1/test_ac1.py"
+    ] = "import pytest\n@pytest.mark.ac('AC-1')\ndef test(): pass\n"
+    # Second converged call: scan now passes, commit + PR fire
+    outcome = orch._on_converged("REQ-P-1")
+    assert outcome == "locked"
+    gateway.commit_spec_pr_files.assert_called_once()
+    gateway.open_pull_request.assert_called_once()
