@@ -53,6 +53,8 @@ REVIEW_CALLBACK_EVENT_ALIASES = {
     "review_ready_for_human_confirmation": "ai_review_pass",
 }
 
+SPEC_RESTART_RE = re.compile(r"^/spec\s+restart\s+(REQ-\S+)\s*$")
+
 
 @dataclass
 class MessageContext:
@@ -224,6 +226,10 @@ class CoordinatorRuntimeApp:
         if not text:
             return []
 
+        m = SPEC_RESTART_RE.match(text)
+        if m:
+            return self._handle_spec_restart_command(req_id=m.group(1), context=context)
+
         if self._is_creation_group_message(context):
             return self._handle_creation_group_message(context)
 
@@ -238,6 +244,18 @@ class CoordinatorRuntimeApp:
 
         self._observed_creation_group_chat_id = context.chat_id
         return [OutboundCard(receive_id=context.chat_id, card=self._build_requirement_creation_card(context))]
+
+    def _handle_spec_restart_command(self, *, req_id: str, context: MessageContext) -> list[OutboundMessage]:
+        try:
+            self.service.spec_restart(req_id)
+        except KeyError:
+            return [OutboundMessage(receive_id=context.chat_id, text=f"未找到 {req_id}")]
+        except ValueError as exc:
+            return [OutboundMessage(receive_id=context.chat_id, text=f"重启失败：{exc}")]
+        return [OutboundMessage(
+            receive_id=context.chat_id,
+            text=f"{req_id} 规格层已重置，请重新点击「启动 Spec 撰写」",
+        )]
 
     def _create_requirement_from_form(
         self,
