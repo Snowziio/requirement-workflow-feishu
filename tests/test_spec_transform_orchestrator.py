@@ -1,9 +1,10 @@
+import json
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from requirement_workflow_v12.spec_transform import (
-    TransformContextSnapshot, RoundContext,
+    TransformContextSnapshot, RoundContext, TraceWriter,
 )
 
 
@@ -29,3 +30,33 @@ def test_round_context_starts_at_round_one_with_zero_retries():
     assert ctx.round_index == 1
     assert ctx.soft_retry_count == 0
     assert ctx.race_retry_count == 0
+
+
+def test_trace_writer_appends_jsonl(tmp_path):
+    writer = TraceWriter(tmp_path)
+    writer.append("REQ-P-1", {"event": "transform_started", "round": 0})
+    writer.append("REQ-P-1", {"event": "gate_pass", "round": 1})
+    file = tmp_path / "REQ-P-1.jsonl"
+    lines = file.read_text().strip().splitlines()
+    assert len(lines) == 2
+    assert json.loads(lines[0])["event"] == "transform_started"
+    assert json.loads(lines[1])["round"] == 1
+
+
+def test_trace_writer_truncates_on_reset(tmp_path):
+    writer = TraceWriter(tmp_path)
+    writer.append("REQ-P-1", {"event": "x"})
+    writer.reset("REQ-P-1")
+    writer.append("REQ-P-1", {"event": "y"})
+    lines = (tmp_path / "REQ-P-1.jsonl").read_text().strip().splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["event"] == "y"
+
+
+def test_trace_writer_archive_renames_with_suffix(tmp_path):
+    writer = TraceWriter(tmp_path)
+    writer.append("REQ-P-1", {"event": "x"})
+    archived = writer.archive("REQ-P-1", suffix="deadlocked")
+    assert archived.exists()
+    assert "deadlocked" in archived.name
+    assert not (tmp_path / "REQ-P-1.jsonl").exists()
