@@ -70,3 +70,70 @@ class TraceWriter:
         if path.exists():
             path.rename(target)
         return target
+
+
+import datetime as _dt
+
+
+class SpecTransformOrchestrator:
+    """Coordinator-side game runner. Holds in-memory RoundContext per req_id.
+    Crash recovery is `/spec restart`; trace is audit-only."""
+
+    def __init__(
+        self,
+        *,
+        gateway,
+        registry,
+        feishu,
+        trace_dir: Path,
+        max_rounds: int = 3,
+        max_soft_retries: int = 2,
+        max_race_retries: int = 3,
+    ):
+        self._gateway = gateway
+        self._registry = registry
+        self._feishu = feishu
+        self._trace = TraceWriter(trace_dir)
+        self._max_rounds = max_rounds
+        self._max_soft_retries = max_soft_retries
+        self._max_race_retries = max_race_retries
+        self._rounds: dict[str, RoundContext] = {}
+
+    async def on_enter_transforming(
+        self,
+        *,
+        req_id: str,
+        project_repo: str,
+        spec_doc_id: str,
+    ) -> TransformContextSnapshot:
+        spec_rev = self._feishu.fetch_document_revision(spec_doc_id)
+        arch_sha, _ = await self._gateway.fetch_file_sha(
+            project_repo, "main", "ARCHITECTURE.yaml",
+        )
+        registry_sha, registry_text = await self._gateway.fetch_file_sha(
+            project_repo, "main", "acm-registry.yaml",
+        )
+        active = self._registry.parse_active_slice(registry_text)
+        snap = TransformContextSnapshot(
+            req_id=req_id,
+            spec_source_revision=spec_rev,
+            architecture_revision=arch_sha,
+            acm_registry_revision=registry_sha,
+            acm_active_slice=active,
+            captured_at=_dt.datetime.now(_dt.timezone.utc).isoformat(),
+        )
+        self._trace.reset(req_id)
+        self._trace.append(req_id, {
+            "event": "transform_started",
+            "snapshot": {
+                "spec_source_revision": snap.spec_source_revision,
+                "architecture_revision": snap.architecture_revision,
+                "acm_registry_revision": snap.acm_registry_revision,
+                "acm_active_slice": snap.acm_active_slice,
+            },
+        })
+        await self._gateway.create_branch(
+            project_repo, f"spec/{req_id}", base="main",
+        )
+        self._rounds[req_id] = RoundContext(snapshot=snap)
+        return snap
