@@ -189,3 +189,28 @@ class SpecTransformOrchestrator:
         ctx.round_index += 1
         ctx.soft_retry_count = 0
         return "wake_transformer_next_round"
+
+    def handle_reviewer_verdict(
+        self, req_id: str, verdict: str, findings: list[dict],
+    ) -> "NextAction":
+        ctx = self._rounds.get(req_id)
+        if ctx is None:
+            self._trace.append(req_id, {
+                "event": "recovery_deadlock", "reason": "no round context",
+            })
+            return "deadlock"
+        self._trace.append(req_id, {
+            "event": "reviewer_verdict",
+            "verdict": verdict,
+            "findings": findings,
+            "round": ctx.round_index,
+        })
+        if verdict == "converged":
+            self._on_converged(req_id)
+            return "converged"
+        ctx.last_reviewer_findings = findings
+        return self._advance_round_or_deadlock(ctx, req_id)
+
+    def _on_converged(self, req_id: str) -> None:
+        # Full converged path implemented in S6 (Task 27); placeholder so tests can monkeypatch.
+        self._trace.append(req_id, {"event": "converged_placeholder"})

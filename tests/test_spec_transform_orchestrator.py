@@ -158,3 +158,31 @@ def test_handle_transformer_output_format_fail_soft_retry(tmp_path):
     action1 = orch.handle_transformer_output("R", bad_payload)
     assert action1 == "soft_retry_transformer"
     assert orch._rounds["R"].soft_retry_count == 1
+
+
+def test_handle_reviewer_verdict_converged_returns_converged(tmp_path):
+    orch = _orch(tmp_path)
+    orch._rounds["R"] = RoundContext(snapshot=_blank_snap())
+    orch._on_converged = MagicMock()
+    action = orch.handle_reviewer_verdict("R", "converged", [])
+    assert action == "converged"
+    orch._on_converged.assert_called_once_with("R")
+
+
+def test_handle_reviewer_verdict_reject_consumes_round(tmp_path):
+    orch = _orch(tmp_path)
+    orch._rounds["R"] = RoundContext(snapshot=_blank_snap())
+    findings = [{"dimension": "completeness", "severity": "blocking", "detail": "x"}]
+    action = orch.handle_reviewer_verdict("R", "reject", findings)
+    assert action == "wake_transformer_next_round"
+    assert orch._rounds["R"].round_index == 2
+    assert orch._rounds["R"].last_reviewer_findings == findings
+
+
+def test_handle_reviewer_verdict_reject_at_max_rounds_deadlocks(tmp_path):
+    orch = _orch(tmp_path)
+    ctx = RoundContext(snapshot=_blank_snap())
+    ctx.round_index = 3
+    orch._rounds["R"] = ctx
+    action = orch.handle_reviewer_verdict("R", "reject", [])
+    assert action == "deadlock"
