@@ -123,6 +123,8 @@ class Requirement:
     spec_deadlocked: bool = False
     spec_transform_snapshot: dict | None = None
     spec_pr_url: str = ""
+    spec_source_revision: str = ""
+    transform_trace_digest: str = ""
     updated_at: datetime = field(default_factory=utc_now)
 
     def touch(self) -> None:

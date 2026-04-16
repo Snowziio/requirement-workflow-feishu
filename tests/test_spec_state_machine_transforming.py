@@ -143,6 +143,33 @@ def test_on_spec_locked_noop_when_req_missing():
     svc._on_spec_locked("DOES-NOT-EXIST", "https://gh/pr/X")  # must not raise
 
 
+def test_on_spec_locked_persists_audit_fields():
+    """Chunk D: orchestrator passes source_revision/trace_digest kwargs;
+    coordinator writes them onto the Requirement so /spec status can audit."""
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    from requirement_workflow_v12.models import (
+        Requirement, SpecStatus, WorkflowStatus,
+    )
+    svc = CoordinatorService()
+    req = Requirement(
+        req_id="REQ-AUDIT-1", project="P", name="n", summary="s",
+        creator="c", creator_user_id="u", creation_chat_id="c",
+    )
+    req.status = WorkflowStatus.APPROVED
+    req.spec_status = SpecStatus.TRANSFORMING
+    svc.requirements[req.req_id] = req
+    svc._on_spec_locked(
+        "REQ-AUDIT-1", "https://gh/pr/9",
+        source_revision="rev-feishu-42",
+        trace_digest="abcdef012345",
+        transform_round=3,
+    )
+    assert req.spec_status == SpecStatus.LOCKED
+    assert req.spec_pr_url == "https://gh/pr/9"
+    assert req.spec_source_revision == "rev-feishu-42"
+    assert req.transform_trace_digest == "abcdef012345"
+
+
 def test_project_repo_for_raises_when_no_scaffold_repo():
     from requirement_workflow_v12.coordinator_service import CoordinatorService
     from requirement_workflow_v12.models import Requirement

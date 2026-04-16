@@ -622,7 +622,15 @@ class CoordinatorService:
         if decision.allowed:
             r.spec_deadlocked = True
 
-    def _on_spec_locked(self, req_id: str, pr_url: str) -> None:
+    def _on_spec_locked(
+        self,
+        req_id: str,
+        pr_url: str,
+        *,
+        source_revision: str = "",
+        trace_digest: str = "",
+        transform_round: int = 0,
+    ) -> None:
         r = self.requirements.get(req_id)
         if r is None:
             return
@@ -631,6 +639,8 @@ class CoordinatorService:
         if decision.allowed:
             r.spec_status = decision.next_status
             r.spec_pr_url = pr_url
+            r.spec_source_revision = source_revision
+            r.transform_trace_digest = trace_digest
 
     def _project_repo_for(self, req_id: str) -> str:
         r = self.requirements[req_id]

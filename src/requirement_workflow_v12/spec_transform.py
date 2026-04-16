@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
+
+
+def _compute_trace_digest(text: str) -> str:
+    """Short audit digest for the per-REQ jsonl trace (sha256 prefix)."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
 NextAction = Literal[
@@ -326,18 +332,31 @@ class SpecTransformOrchestrator:
                 return "deadlock"
 
         owner, repo_name = project_repo.split("/", 1)
+        trace_digest = _compute_trace_digest(self._trace.read_all(req_id))
+        source_revision = ctx.snapshot.spec_source_revision
+        pr_body = (
+            f"Spec PR for {req_id}.\n\n"
+            f"spec_source_revision={source_revision} | "
+            f"transform_round={ctx.round_index} | "
+            f"transform_trace_digest={trace_digest}"
+        )
         pr = self._gateway.open_pull_request(
             owner=owner, repo=repo_name,
             head_branch=f"spec/{req_id}", base_branch="main",
             title=f"Spec: {req_id}",
-            body=f"Spec PR for {req_id}.\n\nRounds used: {ctx.round_index}",
+            body=pr_body,
         )
         self._trace.append(req_id, {
             "event": "locked", "pr_url": pr.get("html_url"),
         })
         self._rounds.pop(req_id, None)
         if self._on_locked_cb is not None:
-            self._on_locked_cb(req_id, pr.get("html_url"))
+            self._on_locked_cb(
+                req_id, pr.get("html_url"),
+                source_revision=source_revision,
+                trace_digest=trace_digest,
+                transform_round=ctx.round_index,
+            )
         return "locked"
 
     def _compose_pr_files(self, req_id, payload, patched_registry) -> dict[str, str]:

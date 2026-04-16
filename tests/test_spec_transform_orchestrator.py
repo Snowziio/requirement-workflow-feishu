@@ -393,6 +393,84 @@ def test_handle_reviewer_verdict_regression_retry_returns_wake_transformer(tmp_p
     assert action == "wake_transformer_regression_retry"
 
 
+def test_compute_trace_digest_is_stable_sha256_prefix():
+    from requirement_workflow_v12.spec_transform import _compute_trace_digest
+    assert _compute_trace_digest("") == _compute_trace_digest("")
+    d = _compute_trace_digest("hello\n")
+    assert len(d) == 12
+    assert d != _compute_trace_digest("hello")
+
+
+def test_on_converged_pr_body_carries_audit_fields_and_callback_kwargs(tmp_path):
+    """PR body must encode spec_source_revision/transform_round/transform_trace_digest;
+    on_locked callback must receive the same values as kwargs."""
+    from requirement_workflow_v12.acm_registry import AcmRegistry
+    from requirement_workflow_v12.spec_transform import (
+        SpecTransformOrchestrator, _compute_trace_digest,
+    )
+    gateway = MagicMock()
+    gateway.fetch_file_sha = MagicMock(return_value=(
+        "registry-sha-2",
+        "version: 3\nentries:\n  - {ac_id: AC-1, req_id: R, status: active, priority: P0}\n",
+    ))
+    gateway.commit_spec_pr_files = MagicMock(return_value="commit-sha")
+    gateway.open_pull_request = MagicMock(
+        return_value={"number": 7, "html_url": "https://gh/pr/7"},
+    )
+    captured: dict = {}
+
+    def on_locked(req_id, pr_url, **kwargs):
+        captured["req_id"] = req_id
+        captured["pr_url"] = pr_url
+        captured.update(kwargs)
+
+    registry = AcmRegistry(gateway=gateway)
+    orch = SpecTransformOrchestrator(
+        gateway=gateway, registry=registry, feishu=MagicMock(),
+        trace_dir=tmp_path, on_locked=on_locked,
+    )
+    snap = TransformContextSnapshot(
+        req_id="REQ-P-1", spec_source_revision="rev-feishu-42",
+        architecture_revision="a", acm_registry_revision="registry-sha-2",
+        acm_active_slice=["AC-1"], captured_at="2026-04-17",
+    )
+    ctx = RoundContext(snapshot=snap)
+    ctx.round_index = 2
+    ctx.last_transformer_payload = {
+        "design_md": "## supersedes\nno supersession\n",
+        "tasks_md": "T-001 init\n",
+        "ac_schedule_yaml": (
+            "version: 1\nacs:\n"
+            "  - {id: AC-100, title: t, priority: P0, given: g, expected: e, "
+            "test_file: harness/tests/REQ-P-1/test_x.py, test_function: test_x}\n"
+        ),
+        "harness_files": {
+            "harness/tests/REQ-P-1/test_x.py":
+                "import pytest\n@pytest.mark.ac('AC-1')\ndef test(): pass\n"
+                "@pytest.mark.ac('AC-100')\ndef test2(): pass\n",
+        },
+        "supersedes_decl": [],
+        "round_zero_ac_ids": ["AC-1"],
+    }
+    orch._rounds["REQ-P-1"] = ctx
+    orch._project_repo_for = lambda req_id: "o/r"
+
+    orch._on_converged("REQ-P-1")
+
+    pr_kwargs = gateway.open_pull_request.call_args.kwargs
+    body = pr_kwargs["body"]
+    assert "spec_source_revision=rev-feishu-42" in body
+    assert "transform_round=2" in body
+    assert "transform_trace_digest=" in body
+
+    # Callback received the audit fields
+    assert captured["source_revision"] == "rev-feishu-42"
+    assert captured["transform_round"] == 2
+    assert len(captured["trace_digest"]) == 12
+    # Digest in body matches digest passed to callback
+    assert f"transform_trace_digest={captured['trace_digest']}" in body
+
+
 def test_on_converged_regression_pass_after_soft_retry_locks(tmp_path):
     """Sim: first call regression-retries; second call (with fixed payload) locks."""
     orch, gateway, ctx = _make_regression_fail_orch(tmp_path)
