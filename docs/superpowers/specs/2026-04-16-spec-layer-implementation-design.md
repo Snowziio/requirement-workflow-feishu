@@ -4,7 +4,6 @@
 > **关联文档**：
 > - 方法论 [docs/context/harness-engineering-methodology-v2.0.md](../../context/harness-engineering-methodology-v2.0.md) §5.2 / §5.3
 > - 层规格 [docs/context/layers/spec-harness-layer.md](../../context/layers/spec-harness-layer.md)
-> - Epic [docs/context/epics/spec-transform-epic-2026-04.md](../../context/epics/spec-transform-epic-2026-04.md)
 > - 行业对齐 [docs/context/infra/harness-engineering-industry-alignment-2026-04-16.md](../../context/infra/harness-engineering-industry-alignment-2026-04-16.md)
 >
 > **范围**：本文规划规格层从 `SPEC_DRAFTING` 出口到 `SPEC_LOCKED` 入口的代码侧实现，含 Coordinator 博弈编排、Computational gate、transform_trace、regression scan、acm-registry patch、spec_source_revision 冻结、spec_restart 守卫七个待落地能力。

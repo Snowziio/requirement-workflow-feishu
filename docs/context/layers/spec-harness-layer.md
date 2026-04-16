@@ -946,4 +946,4 @@ P0 全覆盖：✅（4/4）
 
 *v2 · 2026-04-16 · 六阶段工作流 + 四文件 Spec + 转化博弈 + 四道工程化闸门。*
 *v2.1 · 2026-04-17 · 追加 §十二 实现侧 ADR：登记 4 处与本文叙述的刻意偏离。*
-*参见: [epics/spec-transform-epic-2026-04.md](../epics/spec-transform-epic-2026-04.md) · [infra/harness-engineering-industry-alignment-2026-04-16.md](../infra/harness-engineering-industry-alignment-2026-04-16.md)*
+*参见: [infra/harness-engineering-industry-alignment-2026-04-16.md](../infra/harness-engineering-industry-alignment-2026-04-16.md)*

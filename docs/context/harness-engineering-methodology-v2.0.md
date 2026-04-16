@@ -623,7 +623,7 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 
 ### Phase 2：需求层→规格层桥接（待启动，依赖 Pre-Phase-2 完成）
 
-目标：打通 APPROVED 需求文档 → 飞书 9 节 Spec → 卡点 1a → spec-transformer 博弈 → GitHub 四文件 Spec PR 的完整链路，参见 [epics/spec-transform-epic-2026-04.md](epics/spec-transform-epic-2026-04.md)。
+目标：打通 APPROVED 需求文档 → 飞书 9 节 Spec → 卡点 1a → spec-transformer 博弈 → GitHub 四文件 Spec PR 的完整链路。
 
 关键任务：需求文档格式升级（半结构化输入/输出 + 技术范围声明）、UI 设计第二阶段实现、Spec 转化 Agent、ACM 兼容性检查、设计系统文档管理、卡点1a 飞书卡片。
 
@@ -694,6 +694,6 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 ---
 
 *v2.0 | 2026-04-14 | 方法论文档重构：总-分结构，实现细节移入 layers/ 和 infra/ 细分文件*
-*v2.0 · §5.2 更新 | 2026-04-16 | 规格层引入 `SPEC_TRANSFORMING` 中间态 + spec-transformer 博弈 + 四文件 Spec（`docs/specs/REQ-*/`）；ARCHITECTURE 定位回归「项目级上下文」。参见 epics/spec-transform-epic-2026-04.md。*
+*v2.0 · §5.2 更新 | 2026-04-16 | 规格层引入 `SPEC_TRANSFORMING` 中间态 + spec-transformer 博弈 + 四文件 Spec（`docs/specs/REQ-*/`）；ARCHITECTURE 定位回归「项目级上下文」。*
 *v2.0 · §2 新增 | 2026-04-16 | 术语与产出物地图章节前置；原 §2–§6 顺延为 §3–§7。*
 *v2.0 · 规格层命名与 §5.2/§5.3 精简 | 2026-04-16 | 规格层 A/B 子层命名收敛为「规格层 + Harness 层」；§5.2/§5.3 压缩为概念/流程/哲学层面（六阶段 TL;DR + 四道工程闸门 + 博弈哲学），四文件字段 schema、博弈参数、卡片模板等实现细节统一指向 layers/spec-harness-layer.md。*
