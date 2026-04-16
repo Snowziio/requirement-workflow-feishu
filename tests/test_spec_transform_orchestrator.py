@@ -62,17 +62,16 @@ def test_trace_writer_archive_renames_with_suffix(tmp_path):
     assert not (tmp_path / "REQ-P-1.jsonl").exists()
 
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 
 def test_on_enter_transforming_captures_snapshot_and_writes_trace(tmp_path):
-    gateway = AsyncMock()
-    gateway.fetch_file_sha = AsyncMock(side_effect=[
+    gateway = MagicMock()
+    gateway.fetch_file_sha = MagicMock(side_effect=[
         ("arch-sha", "ARCHITECTURE: yaml"),
         ("registry-sha", "version: 3\nentries: []"),
     ])
-    gateway.create_branch = AsyncMock()
+    gateway.create_branch = MagicMock()
     registry = MagicMock()
     registry.parse_active_slice.return_value = ["AC-001", "AC-002"]
 
@@ -84,14 +83,14 @@ def test_on_enter_transforming_captures_snapshot_and_writes_trace(tmp_path):
         gateway=gateway, registry=registry,
         feishu=feishu, trace_dir=tmp_path,
     )
-    snap = asyncio.run(orch.on_enter_transforming(
+    snap = orch.on_enter_transforming(
         req_id="REQ-P-1", project_repo="proj-repo",
         spec_doc_id="doc-1",
-    ))
+    )
     assert snap.spec_source_revision == "rev-77"
     assert snap.architecture_revision == "arch-sha"
     assert snap.acm_registry_revision == "registry-sha"
     assert snap.acm_active_slice == ["AC-001", "AC-002"]
-    gateway.create_branch.assert_awaited_once()
+    gateway.create_branch.assert_called_once()
     trace = (tmp_path / "REQ-P-1.jsonl").read_text()
     assert '"transform_started"' in trace

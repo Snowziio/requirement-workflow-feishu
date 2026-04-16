@@ -678,13 +678,10 @@ class CoordinatorService:
         cfg = self.project_configs.get(r.project)
         if cfg is None or not getattr(cfg, "scaffold_repo", None):
             raise ValueError(f"项目 {r.project} 未配置 scaffold_repo")
-        import asyncio
-        asyncio.get_event_loop().run_until_complete(
-            self.spec_orchestrator.on_enter_transforming(
-                req_id=req_id,
-                project_repo=cfg.scaffold_repo,
-                spec_doc_id=r.spec_document_id,
-            )
+        self.spec_orchestrator.on_enter_transforming(
+            req_id=req_id,
+            project_repo=cfg.scaffold_repo,
+            spec_doc_id=r.spec_document_id,
         )
         return r
 

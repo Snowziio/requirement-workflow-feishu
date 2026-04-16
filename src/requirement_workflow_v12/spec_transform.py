@@ -99,7 +99,7 @@ class SpecTransformOrchestrator:
         self._max_race_retries = max_race_retries
         self._rounds: dict[str, RoundContext] = {}
 
-    async def on_enter_transforming(
+    def on_enter_transforming(
         self,
         *,
         req_id: str,
@@ -107,10 +107,10 @@ class SpecTransformOrchestrator:
         spec_doc_id: str,
     ) -> TransformContextSnapshot:
         spec_rev = self._feishu.fetch_document_revision(spec_doc_id)
-        arch_sha, _ = await self._gateway.fetch_file_sha(
+        arch_sha, _ = self._gateway.fetch_file_sha(
             project_repo, "main", "ARCHITECTURE.yaml",
         )
-        registry_sha, registry_text = await self._gateway.fetch_file_sha(
+        registry_sha, registry_text = self._gateway.fetch_file_sha(
             project_repo, "main", "acm-registry.yaml",
         )
         active = self._registry.parse_active_slice(registry_text)
@@ -132,7 +132,7 @@ class SpecTransformOrchestrator:
                 "acm_active_slice": snap.acm_active_slice,
             },
         })
-        await self._gateway.create_branch(
+        self._gateway.create_branch(
             project_repo, f"spec/{req_id}", base="main",
         )
         self._rounds[req_id] = RoundContext(snapshot=snap)
