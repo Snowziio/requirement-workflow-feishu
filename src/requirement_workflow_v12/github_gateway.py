@@ -200,6 +200,24 @@ class GitHubGateway:
         data = self._unwrap(resp)
         return {"number": int(data["number"]), "html_url": str(data["html_url"])}
 
+    # --- file contents -----------------------------------------------
+
+    def fetch_file_sha(self, repo: str, ref: str, path: str) -> tuple[str, str]:
+        """Return (sha, decoded_text) for a file via Contents API.
+
+        ``repo`` is ``"owner/repo"``. ``ref`` may be a branch, tag, or commit SHA.
+        Raises ``GitHubGatewayError`` on non-2xx responses.
+        """
+        owner, repo_name = repo.split("/", 1)
+        data = self._unwrap(
+            self.client.get(
+                f"/repos/{owner}/{repo_name}/contents/{path}",
+                params={"ref": ref},
+            )
+        )
+        text = base64.b64decode(data["content"]).decode("utf-8")
+        return str(data["sha"]), text
+
     # --- internals ----------------------------------------------------
 
     def _get_branch_head_sha(self, owner: str, repo: str, branch: str) -> str:

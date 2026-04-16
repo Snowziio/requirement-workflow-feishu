@@ -169,3 +169,22 @@ def test_constructor_requires_token():
     settings = Settings(github_token="")
     with pytest.raises(ValueError, match="github_token"):
         GitHubGateway(settings)
+
+
+def test_fetch_file_sha_returns_sha_and_content():
+    import base64
+
+    encoded = base64.b64encode(b"hello").decode("ascii")
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.url.path == "/repos/o/r/contents/path.yaml"
+        assert req.url.params["ref"] == "main"
+        return httpx.Response(
+            200,
+            json={"sha": "abc123", "content": encoded, "encoding": "base64"},
+        )
+
+    gw = _gateway_with(handler)
+    sha, content = gw.fetch_file_sha("o/r", "main", "path.yaml")
+    assert sha == "abc123"
+    assert content == "hello"
