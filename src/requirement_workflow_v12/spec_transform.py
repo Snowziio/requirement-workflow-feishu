@@ -136,8 +136,12 @@ class SpecTransformOrchestrator:
                 "acm_active_slice": snap.acm_active_slice,
             },
         })
+        owner, repo_name = project_repo.split("/", 1)
         self._gateway.create_branch(
-            project_repo, f"spec/{req_id}", base="main",
+            owner=owner,
+            repo=repo_name,
+            branch=f"spec/{req_id}",
+            from_branch="main",
         )
         self._rounds[req_id] = RoundContext(snapshot=snap)
         return snap

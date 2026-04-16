@@ -84,7 +84,7 @@ def test_on_enter_transforming_captures_snapshot_and_writes_trace(tmp_path):
         feishu=feishu, trace_dir=tmp_path,
     )
     snap = orch.on_enter_transforming(
-        req_id="REQ-P-1", project_repo="proj-repo",
+        req_id="REQ-P-1", project_repo="owner/proj-repo",
         spec_doc_id="doc-1",
     )
     assert snap.spec_source_revision == "rev-77"
@@ -280,6 +280,37 @@ def test_on_converged_commits_pr_and_locks(tmp_path):
     gateway.open_pull_request.assert_called_once()
     trace = (tmp_path / "REQ-P-1.jsonl").read_text()
     assert '"locked"' in trace
+
+
+def test_on_enter_transforming_calls_create_branch_with_correct_kwargs(tmp_path):
+    """Regression: create_branch's real signature uses owner/repo/branch/from_branch,
+    not positional project_repo + base."""
+    gateway = MagicMock()
+    gateway.fetch_file_sha = MagicMock(return_value=("arch-sha", "arch yaml"))
+    # Second fetch_file_sha for acm-registry returns a tuple too
+    gateway.fetch_file_sha.side_effect = [
+        ("arch-sha", "arch yaml"),
+        ("reg-sha", "version: 3\nentries: []\n"),
+    ]
+    from requirement_workflow_v12.acm_registry import AcmRegistry
+    registry = AcmRegistry(gateway=gateway)
+    feishu = MagicMock()
+    feishu.fetch_document_revision = MagicMock(return_value="doc-rev")
+    from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
+    orch = SpecTransformOrchestrator(
+        gateway=gateway, registry=registry, feishu=feishu, trace_dir=tmp_path,
+    )
+    orch.on_enter_transforming(
+        req_id="REQ-P-1", project_repo="acme/repo", spec_doc_id="DOC-1",
+    )
+    gateway.create_branch.assert_called_once()
+    _args, kwargs = gateway.create_branch.call_args
+    assert kwargs == {
+        "owner": "acme",
+        "repo": "repo",
+        "branch": "spec/REQ-P-1",
+        "from_branch": "main",
+    }
 
 
 def test_on_converged_regression_fail_deadlocks(tmp_path):
