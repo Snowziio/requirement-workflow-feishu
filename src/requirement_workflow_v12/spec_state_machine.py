@@ -22,6 +22,7 @@ class SpecEvent(str, Enum):
     # Deadlock = 博弈达到 max_rounds 仍 reject。状态留在 TRANSFORMING(自循环),
     # Coordinator 同时写人工工单。**不**回退 SPEC_DRAFTING(保护人工确认结论)。
     TRANSFORM_DEADLOCK = "transform_deadlock"
+    SPEC_RESTART = "spec_restart"
 
 
 @dataclass
@@ -47,7 +48,25 @@ SPEC_TRANSITIONS: dict[tuple[Optional[SpecStatus], SpecEvent], SpecStatus] = {
 def apply_spec_event(
     current: Optional[SpecStatus],
     event: SpecEvent,
+    *,
+    deadlocked: bool = False,
 ) -> SpecTransitionDecision:
+    if event is SpecEvent.SPEC_RESTART:
+        if current is SpecStatus.DRAFTING or (
+            current is SpecStatus.TRANSFORMING and deadlocked
+        ):
+            return SpecTransitionDecision(
+                allowed=True,
+                next_status=None,
+                message="规格层状态已重置（restart）",
+            )
+        current_label = current.value if current is not None else "<未进入规格层>"
+        return SpecTransitionDecision(
+            allowed=False,
+            next_status=current,
+            message=f"当前规格层状态 {current_label} 不能 restart",
+        )
+
     next_status = SPEC_TRANSITIONS.get((current, event))
     if next_status is None:
         current_label = current.value if current is not None else "<未进入规格层>"
