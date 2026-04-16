@@ -18,7 +18,7 @@
 | `ci.yml` | PR 创建/更新 | 验证层（卡点2 触发源） | ✅ 完成 |
 | `staging.yml` | push to main | 集成层（自动部署 Staging） | ✅ 完成 |
 | `deploy.yml` | workflow_dispatch | 交付层（卡点3 后触发） | ✅ 完成 |
-| `spec-to-harness.yml` | workflow_dispatch | 规格层-B（Harness 自动生成） | □ 待建（Phase 3） |
+| `spec-to-harness.yml` | workflow_dispatch | Harness 层（自动生成测试） | □ 待建（Phase 3） |
 | `harness-confirmed.yml` | workflow_dispatch | 生成层（AI 实现触发） | □ 待建（Phase 3） |
 
 完整 YAML 配置见 [../layers/generation-delivery-layers.md §四](../layers/generation-delivery-layers.md)。

@@ -62,13 +62,13 @@
   存储：飞书文档（document_id）+ Coordinator state + Bitable
        │
        ▼ 消费：需求文档全部 8 字段 + review_summary + ARCHITECTURE 飞书文档（当前 revision）+ tech_stack
-规格层-A：Spec 子层（SPEC_DRAFTING → SPEC_LOCKED）
+规格层（SPEC_DRAFTING → SPEC_LOCKED）
   产出：Spec 飞书文档（9 节技术规格）+ 演化后的 ARCHITECTURE 飞书文档（同一份跨 REQ 持续更新）+ spec_document_url
   锁定：SPEC_LOCKED 后 Spec 飞书文档不可修改；ARCHITECTURE 永不冻结，随后续 REQ 继续演化
   存储：飞书（spec_document_id + architecture_doc_id）+ Coordinator state（spec_document_url + architecture_doc_revision）
        │
        ▼ 消费：acceptance.yaml（所有 AC）+ design.md（数据模型 + 架构接合点）+ needs_ui + 设计系统快照
-规格层-B：Harness 子层（HARNESS_GENERATING → HARNESS_READY）
+Harness 层（HARNESS_GENERATING → HARNESS_READY）
   产出：harness/tests/REQ-xxx/（每条 AC 的测试用例）/ 覆盖率矩阵
   锁定：卡点1b 通过后 Harness 目录只读
   存储：GitHub PR + ACM 注册表（status: finalized）

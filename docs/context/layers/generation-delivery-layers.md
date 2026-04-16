@@ -230,7 +230,7 @@ jobs:
             --report reports/summary.json
 ```
 
-### spec-to-harness.yml（规格层-B 触发）
+### spec-to-harness.yml（Harness 层触发）
 
 ```yaml
 name: Spec to Harness
@@ -332,7 +332,7 @@ jobs:
 feature/xxx → (PR) → main → (自动) → staging → (手动触发) → 客户环境
 
 分支命名：
-  spec/REQ-{PROJECT}-{NNN}      Spec 分支（规格层-A）
+  spec/REQ-{PROJECT}-{NNN}      Spec 分支（规格层）
   impl/REQ-{PROJECT}-{NNN}      实现分支（生成层）
   main                           生产代码
   staging                        Staging 环境（自动同步 main）

@@ -14,7 +14,7 @@
 **输出**：状态迁移 + Hook 执行结果 + Bitable 写入 + 飞书消息推送
 **部署**：独立服务，飞书 WebSocket 长连接，端口 8004（staging）
 
-### W2：checkpoint-handler（规格层-B → 交付层 Workflow Service）
+### W2：checkpoint-handler（Harness 层 → 交付层 Workflow Service）
 **状态**：✅ 完成
 **用途**：卡点1b/2/3 的卡片按钮回调处理，GitHub API 操作，ACM 注册表维护
 **输入**：飞书卡片按钮回调事件
