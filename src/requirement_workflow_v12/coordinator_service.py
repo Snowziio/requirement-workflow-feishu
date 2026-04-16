@@ -48,6 +48,7 @@ class CoordinatorService:
         self.project_configs: dict[str, ProjectConfig] = {}
         self._project_config_persister: Callable[[str, ProjectConfig], ProjectConfig] | None = None
         self.spec_orchestrator = None
+        self._acm_registry = None
 
     def set_project_config_persister(
         self, persister: Callable[[str, ProjectConfig], ProjectConfig] | None
@@ -620,6 +621,51 @@ class CoordinatorService:
         decision = apply_spec_event(r.spec_status, SpecEvent.TRANSFORM_DEADLOCK)
         if decision.allowed:
             r.spec_deadlocked = True
+
+    def _on_spec_locked(self, req_id: str, pr_url: str) -> None:
+        r = self.requirements.get(req_id)
+        if r is None:
+            return
+        from .spec_state_machine import SpecEvent, apply_spec_event
+        decision = apply_spec_event(r.spec_status, SpecEvent.TRANSFORM_CONVERGED)
+        if decision.allowed:
+            r.spec_status = decision.next_status
+            r.spec_pr_url = pr_url
+
+    def _project_repo_for(self, req_id: str) -> str:
+        r = self.requirements[req_id]
+        cfg = self.project_configs.get(r.project)
+        if cfg is None or not getattr(cfg, "scaffold_repo", None):
+            raise ValueError(
+                f"Project {r.project} has no scaffold_repo; cannot resolve project repo."
+            )
+        return cfg.scaffold_repo
+
+    def configure_spec_orchestrator(
+        self,
+        *,
+        github_gateway,
+        trace_dir,
+        feishu=None,
+    ) -> None:
+        """Wire the spec transform orchestrator + ACM registry.
+
+        Called by runtime (CoordinatorRuntimeApp) when GitHub access is
+        available. Idempotent: calling twice replaces the previous
+        orchestrator.
+        """
+        from .acm_registry import AcmRegistry
+        from .spec_transform import SpecTransformOrchestrator
+        self._acm_registry = AcmRegistry(gateway=github_gateway)
+        self.spec_orchestrator = SpecTransformOrchestrator(
+            gateway=github_gateway,
+            registry=self._acm_registry,
+            feishu=feishu,
+            trace_dir=trace_dir,
+            on_deadlock=self._on_spec_deadlock,
+            on_locked=self._on_spec_locked,
+        )
+        self.spec_orchestrator._project_repo_for = self._project_repo_for
 
     def spec_restart(self, req_id: str) -> Requirement:
         """Reset Spec state for re-entry. Allowed only in DRAFTING or

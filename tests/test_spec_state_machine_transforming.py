@@ -92,3 +92,67 @@ def test_on_spec_deadlock_does_not_set_flag_when_not_in_transforming():
     svc.requirements[r.req_id] = r
     svc._on_spec_deadlock("REQ-T-2", "max_rounds")
     assert r.spec_deadlocked is False
+
+
+def test_coordinator_init_has_spec_orchestrator_attribute():
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    svc = CoordinatorService()
+    assert hasattr(svc, "spec_orchestrator")
+    assert svc.spec_orchestrator is None
+    assert hasattr(svc, "_acm_registry")
+    assert svc._acm_registry is None
+
+
+def test_configure_spec_orchestrator_wires_orchestrator_and_callbacks(tmp_path):
+    from unittest.mock import MagicMock
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    svc = CoordinatorService()
+    gw = MagicMock()
+    feishu = MagicMock()
+    svc.configure_spec_orchestrator(
+        github_gateway=gw, trace_dir=tmp_path, feishu=feishu,
+    )
+    assert svc.spec_orchestrator is not None
+    assert svc._acm_registry is not None
+    # Callbacks wired to the right coordinator methods
+    assert svc.spec_orchestrator._on_deadlock_cb == svc._on_spec_deadlock
+    assert svc.spec_orchestrator._on_locked_cb == svc._on_spec_locked
+    # project_repo_for bound
+    assert svc.spec_orchestrator._project_repo_for == svc._project_repo_for
+
+
+def test_on_spec_locked_transitions_and_stores_pr_url():
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    from requirement_workflow_v12.models import Requirement, SpecStatus, WorkflowStatus
+    svc = CoordinatorService()
+    req = Requirement(
+        req_id="REQ-T-1", project="T", name="n", summary="s",
+        creator="c", creator_user_id="u", creation_chat_id="c",
+    )
+    req.status = WorkflowStatus.APPROVED
+    req.spec_status = SpecStatus.TRANSFORMING
+    svc.requirements[req.req_id] = req
+    svc._on_spec_locked("REQ-T-1", "https://gh/pr/123")
+    assert req.spec_status == SpecStatus.LOCKED
+    assert req.spec_pr_url == "https://gh/pr/123"
+
+
+def test_on_spec_locked_noop_when_req_missing():
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    svc = CoordinatorService()
+    svc._on_spec_locked("DOES-NOT-EXIST", "https://gh/pr/X")  # must not raise
+
+
+def test_project_repo_for_raises_when_no_scaffold_repo():
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    from requirement_workflow_v12.models import Requirement
+    svc = CoordinatorService()
+    req = Requirement(
+        req_id="REQ-T-2", project="NOCFG", name="n", summary="s",
+        creator="c", creator_user_id="u", creation_chat_id="c",
+    )
+    svc.requirements[req.req_id] = req
+    # No project_configs for NOCFG
+    import pytest
+    with pytest.raises(ValueError, match="scaffold_repo"):
+        svc._project_repo_for("REQ-T-2")
