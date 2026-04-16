@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "spec-transformer-reviewer reviewer_verdict payload",
+  "type": "object",
+  "required": ["verdict", "findings"],
+  "properties": {
+    "verdict": {"type": "string", "enum": ["converged", "reject"]},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["dimension", "severity", "detail"],
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "enum": ["completeness", "consistency", "testability",
+                     "architecture_fit", "supersedes"]
+          },
+          "severity": {"type": "string", "enum": ["blocking", "warning", "info"]},
+          "detail": {"type": "string"}
+        }
+      }
+    }
+  }
+}
