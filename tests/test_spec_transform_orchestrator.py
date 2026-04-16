@@ -94,3 +94,67 @@ def test_on_enter_transforming_captures_snapshot_and_writes_trace(tmp_path):
     gateway.create_branch.assert_called_once()
     trace = (tmp_path / "REQ-P-1.jsonl").read_text()
     assert '"transform_started"' in trace
+
+
+def _orch(tmp_path):
+    from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
+    return SpecTransformOrchestrator(
+        gateway=MagicMock(), registry=MagicMock(), feishu=MagicMock(),
+        trace_dir=tmp_path,
+    )
+
+
+def _blank_snap():
+    return TransformContextSnapshot(
+        req_id="R", spec_source_revision="", architecture_revision="",
+        acm_registry_revision="", acm_active_slice=[], captured_at="",
+    )
+
+
+def test_handle_transformer_output_pass_returns_wake_reviewer(tmp_path):
+    gateway = MagicMock()
+    registry = MagicMock()
+    feishu = MagicMock()
+    from requirement_workflow_v12.spec_transform import (
+        SpecTransformOrchestrator, TransformContextSnapshot, RoundContext,
+    )
+    orch = SpecTransformOrchestrator(
+        gateway=gateway, registry=registry, feishu=feishu, trace_dir=tmp_path,
+    )
+    snap = TransformContextSnapshot(
+        req_id="R", spec_source_revision="", architecture_revision="",
+        acm_registry_revision="", acm_active_slice=[], captured_at="",
+    )
+    orch._rounds["R"] = RoundContext(snapshot=snap)
+    payload = {
+        "design_md": "## supersedes\nno supersession\n",
+        "tasks_md": "T-001 init\n",
+        "ac_schedule_yaml": (
+            "version: 1\nacs:\n"
+            "  - {id: AC-100, title: t, priority: P0, given: g, expected: e, "
+            "test_file: harness/tests/R/test_x.py, test_function: test_x}\n"
+        ),
+        "harness_files": {
+            "harness/tests/R/test_x.py":
+                "import pytest\n@pytest.mark.ac('AC-100')\ndef test_x(): pass\n",
+        },
+        "supersedes_decl": [],
+        "round_zero_ac_ids": [],
+    }
+    action = orch.handle_transformer_output("R", payload)
+    assert action == "wake_reviewer"
+    trace = (tmp_path / "R.jsonl").read_text()
+    assert "gate_pass" in trace
+
+
+def test_handle_transformer_output_format_fail_soft_retry(tmp_path):
+    orch = _orch(tmp_path)
+    orch._rounds["R"] = RoundContext(snapshot=_blank_snap())
+    bad_payload = {
+        "design_md": "", "tasks_md": "T-001 a\n",
+        "ac_schedule_yaml": "version: 1\nacs:\n  - id: AC-100\n",
+        "harness_files": {}, "supersedes_decl": [], "round_zero_ac_ids": [],
+    }
+    action1 = orch.handle_transformer_output("R", bad_payload)
+    assert action1 == "soft_retry_transformer"
+    assert orch._rounds["R"].soft_retry_count == 1

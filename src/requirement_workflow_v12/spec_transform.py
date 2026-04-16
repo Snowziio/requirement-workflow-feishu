@@ -137,3 +137,55 @@ class SpecTransformOrchestrator:
         )
         self._rounds[req_id] = RoundContext(snapshot=snap)
         return snap
+
+    def handle_transformer_output(
+        self, req_id: str, payload: dict,
+    ) -> "NextAction":
+        from .spec_gate import run_gate
+        ctx = self._rounds.get(req_id)
+        if ctx is None:
+            self._trace.append(req_id, {
+                "event": "recovery_deadlock",
+                "reason": "no in-memory round context (likely after restart)",
+            })
+            return "deadlock"
+        ctx.last_transformer_payload = payload
+        result = run_gate(payload, ctx.snapshot)
+        if result.passed:
+            self._trace.append(req_id, {
+                "event": "gate_pass", "round": ctx.round_index,
+            })
+            return "wake_reviewer"
+        if result.has_format_failure and not result.has_semantic_failure:
+            if ctx.soft_retry_count < self._max_soft_retries:
+                ctx.soft_retry_count += 1
+                self._trace.append(req_id, {
+                    "event": "soft_retry",
+                    "round": ctx.round_index,
+                    "retry": ctx.soft_retry_count,
+                    "findings": [vars(f) for f in result.findings],
+                })
+                return "soft_retry_transformer"
+            self._trace.append(req_id, {
+                "event": "round_used",
+                "reason": "format_max",
+                "round": ctx.round_index,
+            })
+        else:
+            self._trace.append(req_id, {
+                "event": "round_used",
+                "reason": "semantic",
+                "round": ctx.round_index,
+                "findings": [vars(f) for f in result.findings],
+            })
+        return self._advance_round_or_deadlock(ctx, req_id)
+
+    def _advance_round_or_deadlock(self, ctx: "RoundContext", req_id: str) -> "NextAction":
+        if ctx.round_index >= self._max_rounds:
+            self._trace.append(req_id, {
+                "event": "deadlock", "reason": "max_rounds",
+            })
+            return "deadlock"
+        ctx.round_index += 1
+        ctx.soft_retry_count = 0
+        return "wake_transformer_next_round"
