@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "spec-transformer transformer_output payload",
+  "type": "object",
+  "required": ["design_md", "tasks_md", "ac_schedule_yaml", "harness_files",
+               "supersedes_decl", "round_zero_ac_ids"],
+  "properties": {
+    "design_md": {"type": "string"},
+    "tasks_md": {"type": "string"},
+    "ac_schedule_yaml": {"type": "string"},
+    "harness_files": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "supersedes_decl": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["old_ac_id", "by_ac_id"],
+        "properties": {
+          "old_ac_id": {"type": "string"},
+          "by_ac_id": {"type": "string"}
+        }
+      }
+    },
+    "round_zero_ac_ids": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}
