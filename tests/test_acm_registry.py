@@ -55,3 +55,52 @@ def test_compose_patch_marks_superseded_old_ac():
     old = next(e for e in patched.entries if e.ac_id == "AC-001")
     assert old.status == "retired"
     assert old.superseded_by == "AC-100"
+
+
+import threading
+import time
+from unittest.mock import MagicMock
+
+
+def test_fetch_snapshot_returns_sha_and_doc():
+    gw = MagicMock()
+    gw.fetch_file_sha = MagicMock(return_value=(
+        "sha-1",
+        "version: 3\nentries:\n  - {ac_id: AC-1, req_id: R, status: active, priority: P0}\n",
+    ))
+    reg = AcmRegistry(gateway=gw)
+    sha, doc = reg.fetch_snapshot("o/r")
+    assert sha == "sha-1"
+    assert len(doc.entries) == 1
+    gw.fetch_file_sha.assert_called_once_with("o/r", "main", "acm-registry.yaml")
+
+
+def test_write_lock_serializes_concurrent_callers():
+    reg = AcmRegistry(gateway=None)
+    order = []
+    started = threading.Event()
+
+    def worker(name: str):
+        with reg.write_lock():
+            order.append(("enter", name))
+            time.sleep(0.02)
+            order.append(("exit", name))
+
+    t1 = threading.Thread(target=worker, args=("a",))
+    t2 = threading.Thread(target=worker, args=("b",))
+    t1.start(); t2.start(); t1.join(); t2.join()
+
+    # Serialization: each thread's (enter, exit) are adjacent, never interleaved
+    assert order in (
+        [("enter", "a"), ("exit", "a"), ("enter", "b"), ("exit", "b")],
+        [("enter", "b"), ("exit", "b"), ("enter", "a"), ("exit", "a")],
+    )
+
+
+def test_write_lock_is_context_manager_and_releases():
+    reg = AcmRegistry(gateway=None)
+    with reg.write_lock():
+        pass
+    # Acquiring a second time after release must succeed within timeout
+    with reg.write_lock():
+        pass

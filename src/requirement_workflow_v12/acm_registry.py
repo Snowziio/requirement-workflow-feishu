@@ -104,3 +104,14 @@ class AcmRegistry:
                 retired_at=e.get("retired_at", ""),
             ))
         return RegistryDoc(version=doc.get("version", 3), entries=entries)
+
+    def fetch_snapshot(self, project_repo: str) -> tuple[str, RegistryDoc]:
+        sha, text = self._gateway.fetch_file_sha(
+            project_repo, "main", "acm-registry.yaml",
+        )
+        return sha, self.parse(text)
+
+    @contextmanager
+    def write_lock(self) -> Iterator[None]:
+        with self._lock:
+            yield
