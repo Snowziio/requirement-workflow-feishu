@@ -679,9 +679,10 @@ class CoordinatorService:
 
     def spec_restart(self, req_id: str) -> Requirement:
         """Reset Spec state for re-entry. Allowed only in DRAFTING or
-        TRANSFORMING(deadlocked=True). Archives current Spec doc URL and
-        resets all spec_* fields. Side effects on Feishu doc archival and
-        local trace.jsonl rotation are wired by callers (service_app)."""
+        TRANSFORMING(deadlocked=True). Archives the per-REQ trace.jsonl
+        under ``trace_dir/archive/`` so the deadlocked attempt remains
+        auditable, drops in-memory orchestrator state, and clears all
+        ``spec_*``/audit fields."""
         r = self.requirements.get(req_id)
         if r is None:
             raise KeyError(req_id)
@@ -691,11 +692,16 @@ class CoordinatorService:
         )
         if not decision.allowed:
             raise ValueError(decision.message)
+        if self.spec_orchestrator is not None:
+            self.spec_orchestrator.archive_trace(req_id, suffix="restart")
         r.spec_status = None
         r.spec_document_url = ""
         r.spec_document_id = ""
         r.spec_deadlocked = False
         r.spec_transform_snapshot = None
+        r.spec_source_revision = ""
+        r.transform_trace_digest = ""
+        r.spec_pr_url = ""
         return r
 
     def submit_spec_submit(self, req_id: str, *, summary: str) -> Requirement:

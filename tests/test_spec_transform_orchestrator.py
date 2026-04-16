@@ -96,6 +96,35 @@ def test_on_enter_transforming_captures_snapshot_and_writes_trace(tmp_path):
     assert '"transform_started"' in trace
 
 
+def test_archive_trace_returns_path_and_drops_round_context(tmp_path):
+    from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
+    orch = SpecTransformOrchestrator(
+        gateway=MagicMock(), registry=MagicMock(), feishu=MagicMock(),
+        trace_dir=tmp_path,
+    )
+    # Pre-existing trace + in-memory ctx (simulates a deadlocked session)
+    orch._trace.append("REQ-X", {"event": "transform_started"})
+    orch._rounds["REQ-X"] = RoundContext(snapshot=TransformContextSnapshot(
+        req_id="REQ-X", spec_source_revision="", architecture_revision="",
+        acm_registry_revision="", acm_active_slice=[], captured_at="",
+    ))
+    archived = orch.archive_trace("REQ-X", suffix="restart")
+    assert archived is not None
+    assert archived.exists()
+    assert "restart" in archived.name
+    assert not (tmp_path / "REQ-X.jsonl").exists()
+    assert "REQ-X" not in orch._rounds
+
+
+def test_archive_trace_returns_none_when_no_trace(tmp_path):
+    from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
+    orch = SpecTransformOrchestrator(
+        gateway=MagicMock(), registry=MagicMock(), feishu=MagicMock(),
+        trace_dir=tmp_path,
+    )
+    assert orch.archive_trace("REQ-NONE", suffix="restart") is None
+
+
 def _orch(tmp_path):
     from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
     return SpecTransformOrchestrator(

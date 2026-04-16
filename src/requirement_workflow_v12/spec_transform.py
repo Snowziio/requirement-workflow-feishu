@@ -66,6 +66,9 @@ class TraceWriter:
         if path.exists():
             path.unlink()
 
+    def has_trace(self, req_id: str) -> bool:
+        return self._path(req_id).exists()
+
     def read_all(self, req_id: str) -> str:
         path = self._path(req_id)
         return path.read_text(encoding="utf-8") if path.exists() else ""
@@ -113,6 +116,20 @@ class SpecTransformOrchestrator:
         self._on_deadlock_cb = on_deadlock
         self._on_locked_cb = on_locked
         self._rounds: dict[str, RoundContext] = {}
+
+    def archive_trace(
+        self, req_id: str, *, suffix: str = "restart",
+    ) -> Path | None:
+        """Archive the per-REQ trace.jsonl under ``trace_dir/archive/``.
+
+        Returns the archived path, or ``None`` if no trace existed.
+        Also drops any in-memory ``RoundContext`` for ``req_id`` so a
+        subsequent ``on_enter_transforming`` starts cleanly.
+        """
+        self._rounds.pop(req_id, None)
+        if not self._trace.has_trace(req_id):
+            return None
+        return self._trace.archive(req_id, suffix=suffix)
 
     def on_enter_transforming(
         self,

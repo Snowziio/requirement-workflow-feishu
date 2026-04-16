@@ -54,3 +54,50 @@ def test_spec_restart_from_deadlocked_transforming_resets():
     result = svc.spec_restart("R1")
     assert result.spec_status is None
     assert result.spec_deadlocked is False
+
+
+def test_spec_restart_clears_audit_fields():
+    svc = CoordinatorService()
+    r = _drafting_req(svc)
+    r.spec_status = SpecStatus.TRANSFORMING
+    r.spec_deadlocked = True
+    r.spec_source_revision = "rev-old"
+    r.transform_trace_digest = "abcdef012345"
+    r.spec_pr_url = "https://gh/pr/old"
+    svc.spec_restart("R1")
+    assert r.spec_source_revision == ""
+    assert r.transform_trace_digest == ""
+    assert r.spec_pr_url == ""
+
+
+def test_spec_restart_archives_trace_when_orchestrator_wired(tmp_path):
+    from unittest.mock import MagicMock
+    svc = CoordinatorService()
+    r = _drafting_req(svc)
+    r.spec_status = SpecStatus.TRANSFORMING
+    r.spec_deadlocked = True
+    svc.configure_spec_orchestrator(
+        github_gateway=MagicMock(), trace_dir=tmp_path, feishu=MagicMock(),
+    )
+    # Pre-existing trace from the deadlocked attempt
+    svc.spec_orchestrator._trace.append("R1", {"event": "transform_started"})
+    svc.spec_orchestrator._trace.append("R1", {"event": "deadlock"})
+
+    svc.spec_restart("R1")
+
+    assert not (tmp_path / "R1.jsonl").exists()
+    archived = list((tmp_path / "archive").glob("R1.*.restart.jsonl"))
+    assert len(archived) == 1
+    assert "transform_started" in archived[0].read_text()
+
+
+def test_spec_restart_works_without_orchestrator_wired():
+    """Coordinators that never called configure_spec_orchestrator (e.g.,
+    test-only) must still be able to restart without raising."""
+    svc = CoordinatorService()
+    r = _drafting_req(svc)
+    r.spec_status = SpecStatus.TRANSFORMING
+    r.spec_deadlocked = True
+    assert svc.spec_orchestrator is None
+    svc.spec_restart("R1")  # must not raise
+    assert r.spec_status is None
