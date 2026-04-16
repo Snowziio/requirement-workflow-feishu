@@ -29,3 +29,8 @@ def test_spec_restart_from_transforming_with_deadlock_allowed():
 def test_spec_restart_from_locked_rejected():
     decision = apply_spec_event(SpecStatus.LOCKED, SpecEvent.SPEC_RESTART)
     assert decision.allowed is False
+
+
+def test_spec_restart_before_spec_start_rejected():
+    decision = apply_spec_event(None, SpecEvent.SPEC_RESTART)
+    assert decision.allowed is False
