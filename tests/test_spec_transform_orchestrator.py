@@ -186,3 +186,17 @@ def test_handle_reviewer_verdict_reject_at_max_rounds_deadlocks(tmp_path):
     orch._rounds["R"] = ctx
     action = orch.handle_reviewer_verdict("R", "reject", [])
     assert action == "deadlock"
+
+
+def test_handle_transformer_output_without_round_context_deadlocks(tmp_path):
+    orch = _orch(tmp_path)
+    action = orch.handle_transformer_output("R", {})
+    assert action == "deadlock"
+    trace = (tmp_path / "R.jsonl").read_text()
+    assert "recovery_deadlock" in trace
+
+
+def test_handle_reviewer_verdict_without_round_context_deadlocks(tmp_path):
+    orch = _orch(tmp_path)
+    action = orch.handle_reviewer_verdict("R", "converged", [])
+    assert action == "deadlock"
