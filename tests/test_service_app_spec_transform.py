@@ -128,3 +128,48 @@ def test_spec_transform_callback_auth_failure_propagates():
     status, payload = app.handle_openclaw_spec_transform_callback(body)
     assert status == 401
     assert payload["error"] == "unauthorized"
+
+
+def test_runtime_wires_spec_orchestrator_when_github_token_set(tmp_path, monkeypatch):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    # httpx.Client picks up proxy env vars at construction; clear them so the
+    # GitHubGateway constructor does not fail in environments with SOCKS proxies.
+    for key in ("all_proxy", "ALL_PROXY", "http_proxy", "HTTP_PROXY",
+                "https_proxy", "HTTPS_PROXY"):
+        monkeypatch.delenv(key, raising=False)
+    from requirement_workflow_v12.config import Settings
+    from requirement_workflow_v12.service_app import CoordinatorRuntimeApp
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    settings = Settings(
+        feishu_app_id="x", feishu_app_secret="y",
+        state_store_path=str(tmp_path / "state.json"),
+        github_token="ghp_test",
+        spec_trace_dir=str(tmp_path / "traces"),
+    )
+    svc = CoordinatorService()
+    gateway = MagicMock()
+    gateway.list_project_configs = MagicMock(return_value={})
+    app = CoordinatorRuntimeApp(settings, service=svc, gateway=gateway)
+    assert app.service.spec_orchestrator is not None
+    assert app.service._acm_registry is not None
+
+
+def test_runtime_leaves_spec_orchestrator_none_when_no_github_token(tmp_path):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from requirement_workflow_v12.config import Settings
+    from requirement_workflow_v12.service_app import CoordinatorRuntimeApp
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    settings = Settings(
+        feishu_app_id="x", feishu_app_secret="y",
+        state_store_path=str(tmp_path / "state.json"),
+        github_token="",  # explicit: no GitHub token configured
+    )
+    svc = CoordinatorService()
+    gateway = MagicMock()
+    gateway.list_project_configs = MagicMock(return_value={})
+    app = CoordinatorRuntimeApp(settings, service=svc, gateway=gateway)
+    assert app.service.spec_orchestrator is None

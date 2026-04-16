@@ -35,6 +35,7 @@ class Settings:
     state_store_path: str = os.environ.get("STATE_STORE_PATH", "state/coordinator_state.json")
     github_token: str = os.environ.get("GITHUB_TOKEN", "")
     github_default_branch: str = os.environ.get("GITHUB_DEFAULT_BRANCH", "main")
+    spec_trace_dir: str = os.environ.get("SPEC_TRACE_DIR", "state/spec_traces")
     openclaw_spec_agent_name: str = os.environ.get("OPENCLAW_SPEC_AGENT_NAME", "Spec 撰写助手")
 
     def validate_runtime(self) -> None:

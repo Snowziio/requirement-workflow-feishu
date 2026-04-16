@@ -118,6 +118,18 @@ class CoordinatorRuntimeApp:
         self._observed_creation_group_chat_id = settings.creation_group_chat_id
         self._pending_form_payloads: dict[str, CreationFormPayload] = {}
 
+        if settings.github_token:
+            from pathlib import Path
+            from .github_gateway import GitHubGateway
+            github_gateway = GitHubGateway(settings)
+            trace_dir = Path(settings.spec_trace_dir)
+            trace_dir.mkdir(parents=True, exist_ok=True)
+            self.service.configure_spec_orchestrator(
+                github_gateway=github_gateway,
+                trace_dir=trace_dir,
+                feishu=self.gateway,
+            )
+
         from .spec_context import SpecContextBuilder
 
         self._spec_context_builder = SpecContextBuilder(
