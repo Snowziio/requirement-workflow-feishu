@@ -34,3 +34,12 @@ def test_spec_restart_from_locked_rejected():
 def test_spec_restart_before_spec_start_rejected():
     decision = apply_spec_event(None, SpecEvent.SPEC_RESTART)
     assert decision.allowed is False
+
+
+from requirement_workflow_v12.models import Requirement, WorkflowStatus
+
+
+def test_requirement_default_spec_deadlocked_is_false():
+    r = Requirement(req_id="R", name="n", project="p", summary="s", creator="c")
+    assert r.spec_deadlocked is False
+    assert r.spec_transform_snapshot is None

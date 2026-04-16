@@ -120,6 +120,8 @@ class Requirement:
     spec_review_summary: str = ""
     active_spec_context_token: str = ""
     spec_context_snapshot_revision: str = ""
+    spec_deadlocked: bool = False
+    spec_transform_snapshot: dict | None = None
     updated_at: datetime = field(default_factory=utc_now)
 
     def touch(self) -> None:
