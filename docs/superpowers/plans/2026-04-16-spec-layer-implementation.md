@@ -18,6 +18,7 @@
 - Snapshot freezes `spec_source_revision + architecture_revision + acm_registry_revision + acm_active_slice` at `SPEC_TRANSFORMING` onEnter.
 - `spec_restart` slash command guard: `{SPEC_DRAFTING, SPEC_TRANSFORMING(deadlocked=True)}` only.
 - No feature flag; merge to main only after S6 completes.
+- **Sync-only orchestrator / registry / gateway (decided after Task 10)**: existing `GitHubGateway` is synchronous (`httpx.Client`). All `SpecTransformOrchestrator`, `AcmRegistry`, and `regression_scan` methods use plain `def`, not `async def`. The FastAPI callback endpoint (Task 17) wraps the sync call via `await asyncio.to_thread(...)`. Any `async def` / `await` / `AsyncMock` / `assert_awaited_once` appearing in the plan's original snippets for Tasks 15, 16, 17, 22-24, 26, 27 is superseded — translate to sync at dispatch time.
 
 ---
 
