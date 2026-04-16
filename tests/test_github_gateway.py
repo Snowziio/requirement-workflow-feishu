@@ -188,3 +188,43 @@ def test_fetch_file_sha_returns_sha_and_content():
     sha, content = gw.fetch_file_sha("o/r", "main", "path.yaml")
     assert sha == "abc123"
     assert content == "hello"
+
+
+# --- delete_branch tests --------------------------------------------------
+
+
+def test_delete_branch_sends_delete_to_correct_path():
+    """DELETE is sent to /repos/o/r/git/refs/heads/<branch>."""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.method == "DELETE"
+        assert req.url.path == "/repos/o/r/git/refs/heads/spec/REQ-X"
+        return httpx.Response(204)
+
+    gw = _gateway_with(handler)
+    gw.delete_branch("o/r", "spec/REQ-X")  # must not raise
+
+
+def test_delete_branch_204_does_not_raise():
+    gw = _gateway_with(lambda req: httpx.Response(204))
+    gw.delete_branch("o/r", "spec/REQ-X")  # idempotent success
+
+
+def test_delete_branch_404_is_idempotent():
+    """404 means branch already gone — should not raise."""
+    gw = _gateway_with(lambda req: httpx.Response(404, json={"message": "Reference does not exist"}))
+    gw.delete_branch("o/r", "spec/REQ-X")  # must not raise
+
+
+def test_delete_branch_422_is_idempotent():
+    """422 (stale ref / already deleted) — should not raise."""
+    gw = _gateway_with(lambda req: httpx.Response(422, json={"message": "Reference update failed"}))
+    gw.delete_branch("o/r", "spec/REQ-X")  # must not raise
+
+
+def test_delete_branch_non_2xx_raises_gateway_error():
+    """Any other non-2xx (e.g. 403, 500) raises GitHubGatewayError."""
+    gw = _gateway_with(lambda req: httpx.Response(403, json={"message": "Forbidden"}))
+    with pytest.raises(GitHubGatewayError) as exc:
+        gw.delete_branch("o/r", "spec/REQ-X")
+    assert exc.value.status == 403

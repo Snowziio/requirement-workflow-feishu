@@ -200,6 +200,18 @@ class GitHubGateway:
         data = self._unwrap(resp)
         return {"number": int(data["number"]), "html_url": str(data["html_url"])}
 
+    def delete_branch(self, repo: str, branch: str) -> None:
+        """DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}.
+
+        Idempotent: 204 (success), 404 (already gone), and 422 (stale ref)
+        are all treated as success. Any other non-2xx raises GitHubGatewayError.
+        ``repo`` is ``"owner/repo"``.
+        """
+        owner, repo_name = repo.split("/", 1)
+        resp = self.client.delete(f"/repos/{owner}/{repo_name}/git/refs/heads/{branch}")
+        if resp.status_code not in (204, 404, 422):
+            self._unwrap(resp)
+
     # --- file contents -----------------------------------------------
 
     def fetch_file_sha(self, repo: str, ref: str, path: str) -> tuple[str, str]:
