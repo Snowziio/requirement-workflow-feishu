@@ -119,11 +119,116 @@ def _check_supersedes_completeness(payload, snapshot) -> list[GateFinding]:
     return findings
 
 
+def _check_metadata_files_present(payload) -> list[GateFinding]:
+    findings: list[GateFinding] = []
+    for key in ("design_md", "tasks_md", "ac_schedule_yaml"):
+        if not (payload.get(key) or "").strip():
+            findings.append(GateFinding(
+                "format", "metadata_files_present",
+                f"payload['{key}'] missing or empty",
+            ))
+    return findings
+
+
+_DESIGN_REQUIRED_HEADERS = ("## supersedes", "## 项目级上下文消费")
+
+
+def _check_design_md_required_sections(payload) -> list[GateFinding]:
+    text = payload.get("design_md") or ""
+    findings: list[GateFinding] = []
+    for header in _DESIGN_REQUIRED_HEADERS:
+        if header not in text:
+            findings.append(GateFinding(
+                "format", "design_md_required_sections",
+                f"design.md missing required section: {header}",
+            ))
+    return findings
+
+
+_SUPERSEDES_ITEM_RE = re.compile(r"^\s*-\s+取代\s+AC-[A-Z0-9-]+", re.MULTILINE)
+
+
+def _extract_supersedes_section(text: str) -> str | None:
+    """Return the body between ``## supersedes`` and the next ``## `` (or EOF)."""
+    marker = "## supersedes"
+    idx = text.find(marker)
+    if idx == -1:
+        return None
+    body_start = idx + len(marker)
+    next_idx = text.find("\n## ", body_start)
+    return text[body_start:] if next_idx == -1 else text[body_start:next_idx]
+
+
+def _check_supersedes_section_syntax(payload) -> list[GateFinding]:
+    text = payload.get("design_md") or ""
+    section = _extract_supersedes_section(text)
+    if section is None:
+        return []  # missing-section case is owned by design_md_required_sections
+    if "no supersession" in section.lower():
+        return []
+    if _SUPERSEDES_ITEM_RE.search(section):
+        return []
+    return [GateFinding(
+        "format", "supersedes_section_syntax",
+        "## supersedes section must contain '- 取代 AC-...' lines or 'no supersession'",
+    )]
+
+
+def _check_harness_path_prefix(payload, snapshot) -> list[GateFinding]:
+    expected_prefix = f"harness/tests/{snapshot.req_id}/"
+    findings: list[GateFinding] = []
+    for path in (payload.get("harness_files") or {}).keys():
+        if not path.startswith(expected_prefix):
+            findings.append(GateFinding(
+                "format", "harness_path_prefix",
+                f"harness file '{path}' must start with '{expected_prefix}'",
+            ))
+    return findings
+
+
+_RESERVED_HARNESS_PATHS = ("acm-registry.yaml",)
+_RESERVED_HARNESS_PREFIXES = ("docs/specs/",)
+
+
+def _check_harness_scope_discipline(payload) -> list[GateFinding]:
+    findings: list[GateFinding] = []
+    for path in (payload.get("harness_files") or {}).keys():
+        if path in _RESERVED_HARNESS_PATHS or any(
+            path.startswith(p) for p in _RESERVED_HARNESS_PREFIXES
+        ):
+            findings.append(GateFinding(
+                "format", "harness_scope_discipline",
+                f"harness_files key '{path}' is reserved (Coordinator-managed)",
+            ))
+    return findings
+
+
+_AC_MARK_RE = re.compile(r"@pytest\.mark\.ac\(\s*['\"][^'\"]+['\"]\s*\)")
+
+
+def _check_skeleton_unique_anchor(payload) -> list[GateFinding]:
+    findings: list[GateFinding] = []
+    for path, content in (payload.get("harness_files") or {}).items():
+        count = len(_AC_MARK_RE.findall(content))
+        if count != 1:
+            findings.append(GateFinding(
+                "format", "skeleton_unique_anchor",
+                f"harness file '{path}' has {count} @pytest.mark.ac marks (expected 1)",
+            ))
+    return findings
+
+
 def run_gate(payload: dict, snapshot) -> GateResult:
     findings: list[GateFinding] = []
+    findings.extend(_check_metadata_files_present(payload))
+    findings.extend(_check_design_md_required_sections(payload))
+    findings.extend(_check_supersedes_section_syntax(payload))
     findings.extend(_check_ac_schedule_schema(payload))
     findings.extend(_check_tasks_md_format(payload))
     findings.extend(_check_path_consistency(payload))
+    findings.extend(_check_harness_path_prefix(payload, snapshot))
+    findings.extend(_check_harness_scope_discipline(payload))
+    findings.extend(_check_skeleton_unique_anchor(payload))
     findings.extend(_check_round_zero_ac_recall(payload, snapshot))
     findings.extend(_check_supersedes_completeness(payload, snapshot))
     return GateResult(passed=len(findings) == 0, findings=findings)
