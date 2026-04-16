@@ -229,3 +229,99 @@ def test_recovery_deadlock_callback_invoked(tmp_path):
     action = orch.handle_transformer_output("R", {})
     assert action == "deadlock"
     assert called == [("R", "recovery")]
+
+
+def test_on_converged_commits_pr_and_locks(tmp_path):
+    from requirement_workflow_v12.acm_registry import AcmRegistry
+    from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
+    gateway = MagicMock()
+    gateway.fetch_file_sha = MagicMock(return_value=(
+        "registry-sha-1",
+        "version: 3\nentries:\n  - {ac_id: AC-1, req_id: R, status: active, priority: P0}\n",
+    ))
+    gateway.commit_spec_pr_files = MagicMock(return_value="commit-sha")
+    gateway.open_pull_request = MagicMock(
+        return_value={"number": 1, "html_url": "https://gh/pr/1"},
+    )
+    registry = AcmRegistry(gateway=gateway)
+    feishu = MagicMock()
+
+    orch = SpecTransformOrchestrator(
+        gateway=gateway, registry=registry, feishu=feishu, trace_dir=tmp_path,
+    )
+    snap = TransformContextSnapshot(
+        req_id="REQ-P-1", spec_source_revision="r",
+        architecture_revision="a", acm_registry_revision="registry-sha-1",
+        acm_active_slice=["AC-1"], captured_at="2026-04-16",
+    )
+    ctx = RoundContext(snapshot=snap)
+    ctx.last_transformer_payload = {
+        "design_md": "## supersedes\nno supersession\n",
+        "tasks_md": "T-001 init\n",
+        "ac_schedule_yaml": (
+            "version: 1\nacs:\n"
+            "  - {id: AC-100, title: t, priority: P0, given: g, expected: e, "
+            "test_file: harness/tests/REQ-P-1/test_x.py, test_function: test_x}\n"
+        ),
+        "harness_files": {
+            "harness/tests/REQ-P-1/test_x.py":
+                "import pytest\n@pytest.mark.ac('AC-1')\ndef test(): pass\n"
+                "@pytest.mark.ac('AC-100')\ndef test2(): pass\n",
+        },
+        "supersedes_decl": [],
+        "round_zero_ac_ids": ["AC-1"],
+    }
+    orch._rounds["REQ-P-1"] = ctx
+    orch._project_repo_for = lambda req_id: "o/r"
+
+    orch._on_converged("REQ-P-1")
+
+    gateway.commit_spec_pr_files.assert_called_once()
+    gateway.open_pull_request.assert_called_once()
+    trace = (tmp_path / "REQ-P-1.jsonl").read_text()
+    assert '"locked"' in trace
+
+
+def test_on_converged_regression_fail_deadlocks(tmp_path):
+    from requirement_workflow_v12.acm_registry import AcmRegistry
+    from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
+    gateway = MagicMock()
+    gateway.fetch_file_sha = MagicMock(return_value=(
+        "sha-1",
+        "version: 3\nentries:\n  - {ac_id: AC-1, req_id: R, status: active, priority: P0}\n",
+    ))
+    registry = AcmRegistry(gateway=gateway)
+    called = []
+    orch = SpecTransformOrchestrator(
+        gateway=gateway, registry=registry, feishu=MagicMock(),
+        trace_dir=tmp_path,
+        on_deadlock=lambda req, reason: called.append(reason),
+    )
+    snap = TransformContextSnapshot(
+        req_id="REQ-P-1", spec_source_revision="",
+        architecture_revision="", acm_registry_revision="sha-1",
+        acm_active_slice=["AC-1"], captured_at="",
+    )
+    ctx = RoundContext(snapshot=snap)
+    # New AC anchored, but old AC-1 is NOT anchored AND NOT superseded → fail
+    ctx.last_transformer_payload = {
+        "design_md": "## supersedes\nno supersession\n",
+        "tasks_md": "T-001 a\n",
+        "ac_schedule_yaml": (
+            "version: 1\nacs:\n"
+            "  - {id: AC-100, title: t, priority: P0, given: g, expected: e, "
+            "test_file: harness/tests/REQ-P-1/test_x.py, test_function: test_x}\n"
+        ),
+        "harness_files": {
+            "harness/tests/REQ-P-1/test_x.py":
+                "import pytest\n@pytest.mark.ac('AC-100')\ndef test(): pass\n",
+        },
+        "supersedes_decl": [],
+        "round_zero_ac_ids": ["AC-1"],
+    }
+    orch._rounds["REQ-P-1"] = ctx
+    orch._project_repo_for = lambda req_id: "o/r"
+    orch._on_converged("REQ-P-1")
+    assert called == ["regression_failed"]
+    trace = (tmp_path / "REQ-P-1.jsonl").read_text()
+    assert "regression_failed" in trace

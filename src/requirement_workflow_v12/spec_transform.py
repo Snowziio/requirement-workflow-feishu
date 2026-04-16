@@ -90,6 +90,7 @@ class SpecTransformOrchestrator:
         max_soft_retries: int = 2,
         max_race_retries: int = 3,
         on_deadlock=None,
+        on_locked=None,
     ):
         self._gateway = gateway
         self._registry = registry
@@ -99,6 +100,7 @@ class SpecTransformOrchestrator:
         self._max_soft_retries = max_soft_retries
         self._max_race_retries = max_race_retries
         self._on_deadlock_cb = on_deadlock
+        self._on_locked_cb = on_locked
         self._rounds: dict[str, RoundContext] = {}
 
     def on_enter_transforming(
@@ -221,5 +223,102 @@ class SpecTransformOrchestrator:
         return self._advance_round_or_deadlock(ctx, req_id)
 
     def _on_converged(self, req_id: str) -> None:
-        # Full converged path implemented in S6 (Task 27); placeholder so tests can monkeypatch.
-        self._trace.append(req_id, {"event": "converged_placeholder"})
+        from .acm_registry import SupersedeDecl
+        from .regression_scan import scan
+        import yaml
+        ctx = self._rounds[req_id]
+        payload = ctx.last_transformer_payload
+        project_repo = self._project_repo_for(req_id)
+
+        with self._registry.write_lock():
+            committed = False
+            for race_attempt in range(self._max_race_retries):
+                current_sha, current_doc = self._registry.fetch_snapshot(project_repo)
+                ac_doc = yaml.safe_load(payload["ac_schedule_yaml"]) or {}
+                new_acs = ac_doc.get("acs", []) or []
+                supersedes = [
+                    SupersedeDecl(old_ac_id=d["old_ac_id"], by_ac_id=d["by_ac_id"])
+                    for d in payload.get("supersedes_decl", [])
+                ]
+                patched = self._registry.compose_patch(
+                    current_doc, new_acs=new_acs,
+                    supersedes=supersedes, req_id=req_id,
+                )
+                active_ids = [e.ac_id for e in patched.entries if e.status == "active"]
+                regression = scan(
+                    active_ids=active_ids,
+                    supersedes_decl=supersedes,
+                    harness_files=payload["harness_files"],
+                )
+                if not regression.passed:
+                    self._trace.append(req_id, {
+                        "event": "regression_failed",
+                        "missing": regression.missing,
+                    })
+                    self._rounds.pop(req_id, None)
+                    if self._on_deadlock_cb is not None:
+                        self._on_deadlock_cb(req_id, "regression_failed")
+                    return
+
+                files = self._compose_pr_files(req_id, payload, patched)
+                try:
+                    self._gateway.commit_spec_pr_files(
+                        project_repo, f"spec/{req_id}",
+                        files, f"feat(spec): {req_id}",
+                    )
+                    committed = True
+                    break
+                except Exception as exc:
+                    if "mismatch" in str(exc).lower() and race_attempt < self._max_race_retries - 1:
+                        ctx.race_retry_count += 1
+                        self._trace.append(req_id, {
+                            "event": "acm_race_retry",
+                            "attempt": race_attempt + 1,
+                        })
+                        continue
+                    self._trace.append(req_id, {
+                        "event": "github_commit_failed",
+                        "error": str(exc),
+                    })
+                    self._rounds.pop(req_id, None)
+                    if self._on_deadlock_cb is not None:
+                        self._on_deadlock_cb(req_id, "github_commit_failed")
+                    return
+
+            if not committed:
+                self._trace.append(req_id, {"event": "acm_race_giveup"})
+                self._rounds.pop(req_id, None)
+                if self._on_deadlock_cb is not None:
+                    self._on_deadlock_cb(req_id, "acm_race_giveup")
+                return
+
+        owner, repo_name = project_repo.split("/", 1)
+        pr = self._gateway.open_pull_request(
+            owner=owner, repo=repo_name,
+            head_branch=f"spec/{req_id}", base_branch="main",
+            title=f"Spec: {req_id}",
+            body=f"Spec PR for {req_id}.\n\nRounds used: {ctx.round_index}",
+        )
+        self._trace.append(req_id, {
+            "event": "locked", "pr_url": pr.get("html_url"),
+        })
+        self._rounds.pop(req_id, None)
+        if self._on_locked_cb is not None:
+            self._on_locked_cb(req_id, pr.get("html_url"))
+
+    def _compose_pr_files(self, req_id, payload, patched_registry) -> dict[str, str]:
+        prefix = f"docs/specs/{req_id}"
+        files = {
+            f"{prefix}/design.md": payload["design_md"],
+            f"{prefix}/tasks.md": payload["tasks_md"],
+            f"{prefix}/ac-schedule.yaml": payload["ac_schedule_yaml"],
+            f"{prefix}/transform_trace.jsonl": self._trace.read_all(req_id),
+            "acm-registry.yaml": self._registry.serialize(patched_registry),
+        }
+        for path, content in payload.get("harness_files", {}).items():
+            files[path] = content
+        return files
+
+    def _project_repo_for(self, req_id: str) -> str:
+        # Default impl; CoordinatorService wiring (Task 28) injects a real resolver.
+        raise NotImplementedError("project_repo_for must be set by Coordinator wiring")
