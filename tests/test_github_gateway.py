@@ -228,3 +228,29 @@ def test_delete_branch_non_2xx_raises_gateway_error():
     with pytest.raises(GitHubGatewayError) as exc:
         gw.delete_branch("o/r", "spec/REQ-X")
     assert exc.value.status == 403
+
+
+def test_commit_spec_pr_files_delegates_to_commit_files(monkeypatch):
+    """Semantic wrapper splits owner/repo and converts dict -> FileChange list,
+    then delegates to commit_files() unchanged."""
+    gw = _gateway_with(lambda req: httpx.Response(500))
+    called = {}
+
+    def fake_commit_files(*args, **kwargs):
+        called.update(kwargs)
+        return "newsha"
+
+    monkeypatch.setattr(gw, "commit_files", fake_commit_files)
+    sha = gw.commit_spec_pr_files(
+        "o/r", "spec/REQ-X", {"a.md": "1"}, "msg",
+    )
+    assert sha == "newsha"
+    assert called.get("owner") == "o"
+    assert called.get("repo") == "r"
+    assert called.get("branch") == "spec/REQ-X"
+    assert called.get("message") == "msg"
+    files = list(called.get("files") or [])
+    assert len(files) == 1
+    assert files[0].path == "a.md"
+    assert files[0].content == "1"
+    gw.close()

@@ -181,6 +181,29 @@ class GitHubGateway:
         )
         return commit_sha
 
+    def commit_spec_pr_files(
+        self,
+        repo: str,
+        branch: str,
+        files: dict[str, str],
+        message: str,
+    ) -> str:
+        """Atomic multi-file commit on ``branch`` for a Spec PR. Returns new commit sha.
+
+        Semantic wrapper over :meth:`commit_files` — callers express intent
+        that this is the Spec PR four-file commit. ``repo`` is ``"owner/repo"``;
+        ``files`` maps path → text content.
+        """
+        owner, repo_name = repo.split("/", 1)
+        file_changes = [FileChange(path=p, content=c) for p, c in files.items()]
+        return self.commit_files(
+            owner=owner,
+            repo=repo_name,
+            branch=branch,
+            files=file_changes,
+            message=message,
+        )
+
     def open_pull_request(
         self,
         *,
