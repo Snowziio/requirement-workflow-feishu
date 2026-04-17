@@ -85,6 +85,12 @@ jobs:
             PROJECT_GROUP_NAME_TEMPLATE={project} 需求群
             STATE_STORE_PATH=/app/state/coordinator_state.json
             OPENCLAW_SPEC_AGENT_NAME=${{ secrets.OPENCLAW_SPEC_AGENT_NAME || 'Spec 撰写助手' }}
+            OPENCLAW_CALLBACK_SECRET=${{ secrets.OPENCLAW_CALLBACK_SECRET }}
+            GITHUB_TOKEN=${{ secrets.GH_PAT }}
+            SPEC_TRACE_DIR=/app/state/spec_traces
+            FEISHU_SPEC_TRANSFORM_OPS_CHAT_ID=${{ secrets.FEISHU_SPEC_TRANSFORM_OPS_CHAT_ID }}
+            OPENCLAW_SPEC_TRANSFORMER_AGENT_NAME=${{ secrets.OPENCLAW_SPEC_TRANSFORMER_AGENT_NAME || 'Spec 转化助手' }}
+            OPENCLAW_SPEC_TRANSFORMER_REVIEWER_AGENT_NAME=${{ secrets.OPENCLAW_SPEC_TRANSFORMER_REVIEWER_AGENT_NAME || 'Spec 转化审查助手' }}
             EOF
 
             docker pull ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/$APP:${{ steps.build.outputs.image_tag }}

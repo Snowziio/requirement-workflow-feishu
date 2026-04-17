@@ -399,14 +399,20 @@ class CoordinatorService:
         if requirement.spec_status == SpecStatus.DRAFTING:
             # Spec layer review branch — 走 spec 子状态机，不动 requirement.status
             if event_name == "ai_review_pass":
-                decision = apply_spec_event(requirement.spec_status, SpecEvent.SPEC_REVIEW_PASS)
-                if not decision.allowed:
-                    raise ValueError(decision.message)
-                requirement.spec_status = decision.next_status
                 requirement.spec_review_summary = payload.review_summary
-                requirement.current_phase = "Spec 已锁定"
-                requirement.current_owner = "coordinator-service"
-                requirement.current_role_label = "需求协调服务"
+                if self.spec_orchestrator is not None:
+                    self.submit_checkpoint_1a_pass(requirement.req_id)
+                    requirement.current_phase = "Spec 转化中"
+                    requirement.current_owner = "spec-transformer"
+                    requirement.current_role_label = "Spec 转化 Agent"
+                else:
+                    decision = apply_spec_event(requirement.spec_status, SpecEvent.SPEC_REVIEW_PASS)
+                    if not decision.allowed:
+                        raise ValueError(decision.message)
+                    requirement.spec_status = decision.next_status
+                    requirement.current_phase = "Spec 已锁定"
+                    requirement.current_owner = "coordinator-service"
+                    requirement.current_role_label = "需求协调服务"
             else:  # ai_review_reject
                 decision = apply_spec_event(requirement.spec_status, SpecEvent.SPEC_REVIEW_REJECT)
                 if not decision.allowed:

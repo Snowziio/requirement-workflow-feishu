@@ -54,6 +54,10 @@ def _build_bare_app():
     app._validate_openclaw_callback_auth = lambda raw_body, *, headers=None: None
     app.service = MagicMock()
     app.service.spec_orchestrator = MagicMock()
+    app.settings = MagicMock()
+    app.settings.feishu_spec_transform_ops_chat_id = ""
+    app.gateway = MagicMock()
+    app._save_state = MagicMock()
     return app
 
 
@@ -128,6 +132,89 @@ def test_spec_transform_callback_auth_failure_propagates():
     status, payload = app.handle_openclaw_spec_transform_callback(body)
     assert status == 401
     assert payload["error"] == "unauthorized"
+
+
+def _build_app_with_ops_chat():
+    """Bare app with ops chat configured for wake tests."""
+    app = _build_bare_app()
+    app.settings.feishu_spec_transform_ops_chat_id = "oc_ops_chat"
+    app.settings.openclaw_spec_transformer_agent_name = "Spec 转化助手"
+    app.settings.openclaw_spec_transformer_reviewer_agent_name = "Spec 转化审查助手"
+    app.service.spec_orchestrator._rounds = {}
+    return app
+
+
+def test_callback_wake_reviewer_sends_text_to_ops_chat():
+    app = _build_app_with_ops_chat()
+    app.service.spec_orchestrator.handle_transformer_output = MagicMock(
+        return_value="wake_reviewer"
+    )
+    from unittest.mock import PropertyMock
+    app.service.spec_orchestrator._rounds = {"REQ-P-1": MagicMock(round_index=2)}
+    body = json.dumps({
+        "req_id": "REQ-P-1", "event": "transformer_output",
+        "data": {"design_md": "x", "tasks_md": "t\n", "ac_schedule_yaml": "y",
+                 "harness_files": {}, "supersedes_decl": [], "round_zero_ac_ids": []},
+    }).encode()
+
+    status, payload = app.handle_openclaw_spec_transform_callback(body)
+
+    assert status == 200
+    assert payload["next_action"] == "wake_reviewer"
+    app.gateway.send_text.assert_called_once_with(
+        "oc_ops_chat", "请评审 Spec 转化产出 REQ-P-1 (round=2)", receive_id_type="chat_id",
+    )
+
+
+def test_callback_wake_transformer_next_round_sends_text():
+    app = _build_app_with_ops_chat()
+    app.service.spec_orchestrator.handle_reviewer_verdict = MagicMock(
+        return_value="wake_transformer_next_round"
+    )
+    app.service.spec_orchestrator._rounds = {"REQ-P-1": MagicMock(round_index=3)}
+    body = json.dumps({
+        "req_id": "REQ-P-1", "event": "reviewer_verdict",
+        "data": {"verdict": "reject", "findings": [{"severity": "blocking"}]},
+    }).encode()
+
+    status, payload = app.handle_openclaw_spec_transform_callback(body)
+
+    assert status == 200
+    app.gateway.send_text.assert_called_once()
+    text_arg = app.gateway.send_text.call_args[0][1]
+    assert "请开始 Spec 转化 REQ-P-1 (round=3)" == text_arg
+
+
+def test_callback_converged_does_not_wake():
+    app = _build_app_with_ops_chat()
+    app.service.spec_orchestrator.handle_reviewer_verdict = MagicMock(
+        return_value="converged"
+    )
+    body = json.dumps({
+        "req_id": "REQ-P-1", "event": "reviewer_verdict",
+        "data": {"verdict": "converged", "findings": []},
+    }).encode()
+
+    status, _ = app.handle_openclaw_spec_transform_callback(body)
+    assert status == 200
+    app.gateway.send_text.assert_not_called()
+
+
+def test_callback_no_ops_chat_skips_wake_gracefully():
+    app = _build_bare_app()
+    app.settings.feishu_spec_transform_ops_chat_id = ""
+    app.service.spec_orchestrator.handle_transformer_output = MagicMock(
+        return_value="wake_reviewer"
+    )
+    body = json.dumps({
+        "req_id": "REQ-P-1", "event": "transformer_output",
+        "data": {"design_md": "x", "tasks_md": "t\n", "ac_schedule_yaml": "y",
+                 "harness_files": {}, "supersedes_decl": [], "round_zero_ac_ids": []},
+    }).encode()
+
+    status, payload = app.handle_openclaw_spec_transform_callback(body)
+    assert status == 200
+    app.gateway.send_text.assert_not_called()
 
 
 def test_runtime_wires_spec_orchestrator_when_github_token_set(tmp_path, monkeypatch):

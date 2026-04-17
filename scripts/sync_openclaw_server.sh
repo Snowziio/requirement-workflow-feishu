@@ -12,8 +12,9 @@
 #   OPENCLAW_NODE_AUTH_TOKEN   - OpenClaw node auth bearer token
 #   NANO_BANANA_PRO_API_KEY    - Google API key for nano-banana-pro skill
 #
-# The four in-scope agents: ai-founder-brief, ai-meeting-closeout,
-# spec-author, spec-reviewer. Other agents on the server are left untouched.
+# The six in-scope agents: ai-founder-brief, ai-meeting-closeout,
+# spec-author, spec-reviewer, spec-transformer, spec-transformer-reviewer.
+# Other agents on the server are left untouched.
 
 set -euo pipefail
 
@@ -25,7 +26,7 @@ fi
 REMOTE="${OPENCLAW_REMOTE:-admin@47.251.81.45}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="${REPO_ROOT}/deploy/openclaw"
-AGENTS=(ai-founder-brief ai-meeting-closeout spec-author spec-reviewer)
+AGENTS=(ai-founder-brief ai-meeting-closeout spec-author spec-reviewer spec-transformer spec-transformer-reviewer)
 
 # Agent id → skill name (see reference_openclaw_skill_dual_sync.md).
 # Using a case fallback rather than declare -A to stay compatible with bash 3.2
@@ -36,6 +37,8 @@ skill_for_agent() {
     ai-meeting-closeout) echo requirement-reviewer ;;
     spec-author) echo spec-author ;;
     spec-reviewer) echo spec-reviewer ;;
+    spec-transformer) echo spec-transformer ;;
+    spec-transformer-reviewer) echo spec-transformer-reviewer ;;
     *) echo "[error] no skill mapping for agent $1" >&2; exit 1 ;;
   esac
 }

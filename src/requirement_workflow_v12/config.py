@@ -37,6 +37,13 @@ class Settings:
     github_default_branch: str = os.environ.get("GITHUB_DEFAULT_BRANCH", "main")
     spec_trace_dir: str = os.environ.get("SPEC_TRACE_DIR", "state/spec_traces")
     openclaw_spec_agent_name: str = os.environ.get("OPENCLAW_SPEC_AGENT_NAME", "Spec 撰写助手")
+    openclaw_spec_transformer_agent_name: str = os.environ.get(
+        "OPENCLAW_SPEC_TRANSFORMER_AGENT_NAME", "Spec 转化助手",
+    )
+    openclaw_spec_transformer_reviewer_agent_name: str = os.environ.get(
+        "OPENCLAW_SPEC_TRANSFORMER_REVIEWER_AGENT_NAME", "Spec 转化审查助手",
+    )
+    feishu_spec_transform_ops_chat_id: str = os.environ.get("FEISHU_SPEC_TRANSFORM_OPS_CHAT_ID", "")
 
     def validate_runtime(self) -> None:
         missing = []

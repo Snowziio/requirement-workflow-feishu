@@ -217,6 +217,30 @@
           "theme": "对 Spec 文档按 6+2+1 维度进行质量审查，单次上报 pass/reject 结论",
           "emoji": "🔬"
         }
+      },
+      {
+        "id": "spec-transformer",
+        "name": "Spec 转化助手",
+        "workspace": "/home/admin/.openclaw/workspace/agents/spec-transformer",
+        "agentDir": "/home/admin/.openclaw/agents/spec-transformer/agent",
+        "model": "minimax/MiniMax-M2.7",
+        "identity": {
+          "name": "Spec 转化助手",
+          "theme": "把飞书 9 节 Spec 转化为 GitHub 四文件（design.md + tasks.md + ac-schedule.yaml + harness 骨架），最多 3 轮博弈",
+          "emoji": "⚙️"
+        }
+      },
+      {
+        "id": "spec-transformer-reviewer",
+        "name": "Spec 转化审查助手",
+        "workspace": "/home/admin/.openclaw/workspace/agents/spec-transformer-reviewer",
+        "agentDir": "/home/admin/.openclaw/agents/spec-transformer-reviewer/agent",
+        "model": "minimax/MiniMax-M2.7",
+        "identity": {
+          "name": "Spec 转化审查助手",
+          "theme": "评审 spec-transformer 产出的四文件，按五维度判定 converged/reject",
+          "emoji": "⚖️"
+        }
       }
     ]
   },
@@ -283,6 +307,20 @@
       "match": {
         "channel": "feishu",
         "accountId": "spec-reviewer"
+      }
+    },
+    {
+      "agentId": "spec-transformer",
+      "match": {
+        "channel": "feishu",
+        "accountId": "spec-transformer"
+      }
+    },
+    {
+      "agentId": "spec-transformer-reviewer",
+      "match": {
+        "channel": "feishu",
+        "accountId": "spec-transformer-reviewer"
       }
     }
   ],
@@ -354,6 +392,18 @@
           "appSecret": "7nRATtjvPkw4oJFC9JFTNhXXMEyitWe2",
           "dmPolicy": "open",
           "groupPolicy": "open"
+        },
+        "spec-transformer": {
+          "appId": "cli_a96a1becb87bdbc9",
+          "appSecret": "TkZclOEbm7p9Fanp4YFW4eff86wN3u28",
+          "dmPolicy": "open",
+          "groupPolicy": "open"
+        },
+        "spec-transformer-reviewer": {
+          "appId": "cli_a96a0c9907b65bdf",
+          "appSecret": "xb0fkD9PDzbshGsvXNcUzjMfzIXSzfMW",
+          "dmPolicy": "open",
+          "groupPolicy": "open"
         }
       },
       "groups": {
@@ -389,6 +439,12 @@
           "allowFrom": [
             "ou_11070bfb9fca4cd2e195100aa8e21afa"
           ]
+        },
+        "oc_fc9b42a630973e961265dedb02aff16a": {
+          "enabled": true,
+          "requireMention": false,
+          "replyInThread": "enabled",
+          "groupSessionScope": "group_topic"
         }
       }
     },

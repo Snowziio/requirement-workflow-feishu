@@ -770,7 +770,10 @@ class CoordinatorRuntimeApp:
             )
             self._sync_requirement_outputs(requirement)
             self._save_state()
-            if requirement.spec_status == SpecStatus.LOCKED:
+            if requirement.spec_status == SpecStatus.TRANSFORMING:
+                self._dispatch_transition_notifications(requirement, trigger="spec_transforming")
+                self._wake_spec_transform_agent(requirement.req_id, "wake_transformer")
+            elif requirement.spec_status == SpecStatus.LOCKED:
                 self._dispatch_transition_notifications(requirement, trigger="spec_locked")
             elif requirement.spec_status == SpecStatus.DRAFTING and normalized_event == "ai_review_reject":
                 self._dispatch_transition_notifications(requirement, trigger="spec_review_reject")
@@ -1060,6 +1063,15 @@ class CoordinatorRuntimeApp:
                 "Spec transform callback failed req_id=%s event=%s", req_id, event,
             )
             return 500, {"error": "spec_transform_failed", "message": str(exc)}
+
+        self._save_state()
+        if action in (
+            "wake_reviewer",
+            "wake_transformer_next_round",
+            "wake_transformer_regression_retry",
+            "soft_retry_transformer",
+        ):
+            self._wake_spec_transform_agent(req_id, action)
 
         return 200, {"ok": True, "req_id": req_id, "next_action": action}
 
@@ -1750,6 +1762,41 @@ class CoordinatorRuntimeApp:
             f"需求文档：{requirement.document_url or '（待同步）'}\n\n"
             f"请按 6+2+1 维度审查，单次上报 ai_review_pass 或 ai_review_reject。"
         )
+
+    def _wake_spec_transform_agent(self, req_id: str, action: str) -> None:
+        chat_id = self.settings.feishu_spec_transform_ops_chat_id
+        if not chat_id:
+            LOGGER.warning("FEISHU_SPEC_TRANSFORM_OPS_CHAT_ID not configured; skipping wake for %s", req_id)
+            return
+
+        orch = self.service.spec_orchestrator
+        ctx = orch._rounds.get(req_id) if orch else None
+        round_index = ctx.round_index if ctx else 1
+
+        if action in ("wake_reviewer",):
+            agent_name = self.settings.openclaw_spec_transformer_reviewer_agent_name
+            text = f"请评审 Spec 转化产出 {req_id} (round={round_index})"
+        elif action in (
+            "wake_transformer",
+            "wake_transformer_next_round",
+            "wake_transformer_regression_retry",
+            "soft_retry_transformer",
+        ):
+            agent_name = self.settings.openclaw_spec_transformer_agent_name
+            suffix = ""
+            if action == "wake_transformer_regression_retry":
+                suffix = ", regression_retry"
+            elif action == "soft_retry_transformer":
+                suffix = ", soft_retry"
+            text = f"请开始 Spec 转化 {req_id} (round={round_index}{suffix})"
+        else:
+            return
+
+        try:
+            self.gateway.send_text(chat_id, text, receive_id_type="chat_id")
+            LOGGER.info("Woke %s for %s action=%s", agent_name, req_id, action)
+        except Exception as exc:
+            LOGGER.exception("Failed to wake %s for %s: %s", agent_name, req_id, exc)
 
     def _extract_message_context(self, data: P2ImMessageReceiveV1) -> MessageContext | None:
         event = getattr(data, "event", None)
