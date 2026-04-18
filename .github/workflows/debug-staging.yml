@@ -13,10 +13,12 @@ jobs:
           host: ${{ secrets.ECS_HOST }}
           username: ${{ secrets.ECS_USER }}
           key: ${{ secrets.ECS_SSH_KEY }}
+          command_timeout: 5m
           script: |
             set +e
             APP=requirement-workflow-feishu
             DIR=~/staging/$APP
+            CONTAINER=$(docker ps -q --filter name=coordinator)
 
             echo "=== docker ps ==="
             docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
@@ -26,9 +28,51 @@ jobs:
             cd $DIR && docker compose -f docker-compose.staging.yml --env-file .env ps
             echo
 
-            echo "=== env excerpt ==="
-            cd $DIR && grep -E '^(STAGING_PORT|FEISHU_APP_ID|FEISHU_CREATION_GROUP_CHAT_ID|FEISHU_BITABLE_APP_TOKEN|FEISHU_BITABLE_TABLE_ID|FEISHU_DOC_FOLDER_TOKEN|FEISHU_BASE_URL|FEISHU_USER_ID_TYPE)=' .env || true
+            echo "=== env keys in .env (values redacted) ==="
+            cd $DIR && awk -F= '{print $1}' .env | head -50
             echo
 
-            echo "=== recent logs ==="
-            cd $DIR && docker compose -f docker-compose.staging.yml --env-file .env logs --tail=300
+            echo "=== container env: spec-transform related ==="
+            docker exec $CONTAINER env | grep -iE "GITHUB_TOKEN|SPEC_TRACE|SPEC_TRANSFORM|OPENCLAW_CALLBACK|OPENCLAW_SPEC" | sed 's/=.*/=***/'
+            echo
+
+            echo "=== container env: BITABLE related ==="
+            docker exec $CONTAINER env | grep -iE "BITABLE" | sed 's/=.*/=***/'
+            echo
+
+            echo "=== container env: FEISHU_SPEC related ==="
+            docker exec $CONTAINER env | grep -iE "FEISHU_SPEC" | sed 's/=.*/=***/'
+            echo
+
+            echo "=== state.json: REQ-test2-002 ==="
+            docker exec $CONTAINER python -c "
+            import json
+            with open('/app/state/coordinator_state.json') as f:
+                state = json.load(f)
+            reqs = state.get('requirements', {})
+            r = reqs.get('REQ-test2-002')
+            if r:
+                print(json.dumps({k: r[k] for k in ['req_id','name','status','spec_status','current_phase','current_owner','bitable_record_id','spec_document_url','spec_deadlocked','spec_transform_snapshot'] if k in r}, indent=2, ensure_ascii=False))
+            else:
+                print('REQ-test2-002 not found in state')
+                print('Available req_ids:', list(reqs.keys()))
+            "
+            echo
+
+            echo "=== state.json: all requirements summary ==="
+            docker exec $CONTAINER python -c "
+            import json
+            with open('/app/state/coordinator_state.json') as f:
+                state = json.load(f)
+            reqs = state.get('requirements', {})
+            for rid, r in reqs.items():
+                print(f\"{rid}: status={r.get('status','?')} spec_status={r.get('spec_status','None')} phase={r.get('current_phase','?')} bitable={r.get('bitable_record_id','')}\")
+            "
+            echo
+
+            echo "=== spec_traces directory ==="
+            docker exec $CONTAINER ls -la /app/state/spec_traces/ 2>/dev/null || echo "(no spec_traces dir)"
+            echo
+
+            echo "=== recent logs (last 500 lines) ==="
+            cd $DIR && docker compose -f docker-compose.staging.yml --env-file .env logs --tail=500
