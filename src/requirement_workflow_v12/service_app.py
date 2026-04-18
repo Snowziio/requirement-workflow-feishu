@@ -1835,6 +1835,14 @@ class CoordinatorRuntimeApp:
                 self.gateway.update_requirement_record(requirement)
             except Exception as exc:
                 LOGGER.warning("Failed to update bitable record for %s: %s", requirement.req_id, exc)
+        else:
+            try:
+                created_record = self.gateway.create_requirement_record(requirement)
+                if created_record:
+                    self.service.attach_bitable_record(requirement.req_id, created_record.record_id)
+                    LOGGER.info("Backfilled bitable record for %s: %s", requirement.req_id, created_record.record_id)
+            except Exception as exc:
+                LOGGER.warning("Failed to backfill bitable record for %s: %s", requirement.req_id, exc)
 
     def _dispatch_transition_notifications(self, requirement: Requirement, *, trigger: str) -> None:
         card = self._build_transition_notification_card(requirement, trigger=trigger)

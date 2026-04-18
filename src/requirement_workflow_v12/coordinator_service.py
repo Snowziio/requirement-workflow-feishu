@@ -400,7 +400,13 @@ class CoordinatorService:
             # Spec layer review branch — 走 spec 子状态机，不动 requirement.status
             if event_name == "ai_review_pass":
                 requirement.spec_review_summary = payload.review_summary
-                if self.spec_orchestrator is not None:
+                cfg = self.project_configs.get(requirement.project)
+                can_transform = (
+                    self.spec_orchestrator is not None
+                    and cfg is not None
+                    and cfg.github_repo_url
+                )
+                if can_transform:
                     self.submit_checkpoint_1a_pass(requirement.req_id)
                     requirement.current_phase = "Spec 转化中"
                     requirement.current_owner = "spec-transformer"
