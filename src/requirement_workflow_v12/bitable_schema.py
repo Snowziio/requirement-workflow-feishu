@@ -126,10 +126,9 @@ def _url_payload(url: str) -> dict[str, str] | str:
     return {"link": url, "text": url}
 
 
-def _datetime_to_ms(value) -> int | str:
-    # Bitable datetime 字段期望毫秒时间戳 int；空值写空串。
+def _datetime_to_ms(value) -> int | None:
     if value is None:
-        return ""
+        return None
     return int(value.timestamp() * 1000)
 
 

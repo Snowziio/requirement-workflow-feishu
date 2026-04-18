@@ -65,8 +65,7 @@ def _build_wired_service(tmp_path, *, req_id="REQ-P-1", project="P"):
         category="application", template_version="v1",
         architecture_doc_id="arch-doc", architecture_doc_url="https://arch",
     )
-    # scaffold_repo is read via getattr; set it on the instance.
-    cfg.scaffold_repo = "acme/scaffold-repo"
+    cfg.github_repo_url = "acme/scaffold-repo"
     svc.project_configs[project] = cfg
 
     gateway = _gateway_mock()

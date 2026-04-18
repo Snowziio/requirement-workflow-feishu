@@ -651,11 +651,11 @@ class CoordinatorService:
     def _project_repo_for(self, req_id: str) -> str:
         r = self.requirements[req_id]
         cfg = self.project_configs.get(r.project)
-        if cfg is None or not getattr(cfg, "scaffold_repo", None):
+        if cfg is None or not cfg.github_repo_url:
             raise ValueError(
-                f"Project {r.project} has no scaffold_repo; cannot resolve project repo."
+                f"Project {r.project} has no github_repo_url; cannot resolve project repo."
             )
-        return cfg.scaffold_repo
+        return cfg.github_repo_url
 
     def configure_spec_orchestrator(
         self,
@@ -748,16 +748,16 @@ class CoordinatorService:
 
     def submit_checkpoint_1a_pass(self, req_id: str) -> Requirement:
         r = self.requirements[req_id]
+        cfg = self.project_configs.get(r.project)
+        if cfg is None or not cfg.github_repo_url:
+            raise ValueError(f"项目 {r.project} 未配置 github_repo_url")
         decision = apply_spec_event(r.spec_status, SpecEvent.CHECKPOINT_1A_PASS)
         if not decision.allowed:
             raise ValueError(decision.message)
         r.spec_status = decision.next_status
-        cfg = self.project_configs.get(r.project)
-        if cfg is None or not getattr(cfg, "scaffold_repo", None):
-            raise ValueError(f"项目 {r.project} 未配置 scaffold_repo")
         self.spec_orchestrator.on_enter_transforming(
             req_id=req_id,
-            project_repo=cfg.scaffold_repo,
+            project_repo=cfg.github_repo_url,
             spec_doc_id=r.spec_document_id,
         )
         return r

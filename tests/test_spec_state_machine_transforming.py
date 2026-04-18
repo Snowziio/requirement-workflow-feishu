@@ -61,7 +61,7 @@ def test_submit_checkpoint_1a_pass_transitions_to_transforming():
     svc.spec_orchestrator = MagicMock()
     svc.spec_orchestrator.on_enter_transforming = MagicMock(return_value=None)
     svc.project_configs = MagicMock()
-    cfg = MagicMock(); cfg.scaffold_repo = "owner/repo"
+    cfg = MagicMock(); cfg.github_repo_url = "owner/repo"
     svc.project_configs.get.return_value = cfg
 
     svc.submit_checkpoint_1a_pass("R1")
@@ -170,7 +170,7 @@ def test_on_spec_locked_persists_audit_fields():
     assert req.transform_trace_digest == "abcdef012345"
 
 
-def test_project_repo_for_raises_when_no_scaffold_repo():
+def test_project_repo_for_raises_when_no_github_repo_url():
     from requirement_workflow_v12.coordinator_service import CoordinatorService
     from requirement_workflow_v12.models import Requirement
     svc = CoordinatorService()
@@ -181,5 +181,5 @@ def test_project_repo_for_raises_when_no_scaffold_repo():
     svc.requirements[req.req_id] = req
     # No project_configs for NOCFG
     import pytest
-    with pytest.raises(ValueError, match="scaffold_repo"):
+    with pytest.raises(ValueError, match="github_repo_url"):
         svc._project_repo_for("REQ-T-2")
