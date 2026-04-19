@@ -77,3 +77,34 @@ class GitHubProjectRepoTools:
                 "cleanup_failed_branch could not delete %s/%s: %s",
                 project_repo, branch, exc,
             )
+
+    def commit_spec_artifacts(
+        self, req_id: str, artifacts: SpecArtifacts,
+    ) -> PrRef:
+        owner, name = artifacts.project_repo.split("/", 1)
+        try:
+            self._gw.create_branch(
+                owner=owner, repo=name,
+                branch=artifacts.branch, from_branch=artifacts.base_branch,
+            )
+            head_sha = self._gw.commit_spec_pr_files(
+                artifacts.project_repo, artifacts.branch,
+                artifacts.files, artifacts.commit_message,
+            )
+            pr = self._gw.open_pull_request(
+                owner=owner, repo=name,
+                head_branch=artifacts.branch, base_branch=artifacts.base_branch,
+                title=artifacts.pr_title, body=artifacts.pr_body,
+            )
+        except GitHubGatewayError as exc:
+            self.cleanup_failed_branch(artifacts.project_repo, artifacts.branch)
+            raise ProjectRepoError(
+                f"commit_spec_artifacts failed for {req_id}: {exc}",
+                recoverable=False,
+            ) from exc
+        return PrRef(
+            number=int(pr["number"]),
+            html_url=str(pr["html_url"]),
+            head_sha=head_sha,
+            branch=artifacts.branch,
+        )

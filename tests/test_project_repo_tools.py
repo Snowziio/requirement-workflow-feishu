@@ -126,3 +126,48 @@ def test_fetch_project_context_wraps_gateway_error():
     assert "fetch_project_context" in str(exc_info.value)
     assert exc_info.value.__cause__ is not None
     assert exc_info.value.recoverable is False
+
+
+# ── GitHubProjectRepoTools.commit_spec_artifacts ────────────────────────
+
+def _happy_artifacts():
+    return SpecArtifacts(
+        project_repo="acme/repo",
+        branch="spec/REQ-P-1",
+        base_branch="main",
+        files={"docs/specs/REQ-P-1/design.md": "# Design\n"},
+        commit_message="feat(spec): REQ-P-1",
+        pr_title="Spec: REQ-P-1",
+        pr_body="body",
+    )
+
+
+def test_commit_spec_artifacts_happy_path_returns_pr_ref():
+    gw = MagicMock()
+    gw.create_branch = MagicMock(return_value="head-sha-of-main")
+    gw.commit_spec_pr_files = MagicMock(return_value="commit-sha")
+    gw.open_pull_request = MagicMock(
+        return_value={"number": 42, "html_url": "https://gh/pr/42"},
+    )
+    tools = GitHubProjectRepoTools(gw)
+
+    pr = tools.commit_spec_artifacts("REQ-P-1", _happy_artifacts())
+
+    assert pr.number == 42
+    assert pr.html_url == "https://gh/pr/42"
+    assert pr.head_sha == "commit-sha"
+    assert pr.branch == "spec/REQ-P-1"
+    gw.create_branch.assert_called_once_with(
+        owner="acme", repo="repo",
+        branch="spec/REQ-P-1", from_branch="main",
+    )
+    gw.commit_spec_pr_files.assert_called_once_with(
+        "acme/repo", "spec/REQ-P-1",
+        {"docs/specs/REQ-P-1/design.md": "# Design\n"},
+        "feat(spec): REQ-P-1",
+    )
+    gw.open_pull_request.assert_called_once_with(
+        owner="acme", repo="repo",
+        head_branch="spec/REQ-P-1", base_branch="main",
+        title="Spec: REQ-P-1", body="body",
+    )
