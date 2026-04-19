@@ -48,3 +48,51 @@ def test_fire_exit_runs_only_exit_hooks():
 def test_fire_unknown_status_is_noop():
     hooks = StateTransitionHooks()
     hooks.fire_enter(SpecStatus.LOCKED, _req())  # no registered hook
+
+
+# ── Task 4.2: exception observability contract ──────────────────────────
+
+import logging
+
+
+def test_hook_exception_is_logged_with_required_fields(caplog):
+    hooks = StateTransitionHooks()
+
+    def boom(_req):
+        raise ProjectRepoError("disk full", recoverable=False)
+
+    hooks.on_enter(SpecStatus.TRANSFORMING, boom)
+
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(ProjectRepoError) as exc_info:
+            hooks.fire_enter(SpecStatus.TRANSFORMING, _req("REQ-X-9"))
+
+    assert "disk full" in str(exc_info.value)
+
+    text = caplog.text
+    assert "hook_exception" in text
+    assert "transition=enter" in text
+    assert "TRANSFORMING" in text
+    assert "REQ-X-9" in text
+    assert "boom" in text
+    assert "ProjectRepoError" in text
+    assert "disk full" in text
+
+
+def test_hook_exception_is_fail_fast():
+    hooks = StateTransitionHooks()
+    calls: list[str] = []
+
+    def first(_r):
+        raise ProjectRepoError("halt")
+
+    def second(_r):
+        calls.append("should-not-run")
+
+    hooks.on_enter(SpecStatus.TRANSFORMING, first)
+    hooks.on_enter(SpecStatus.TRANSFORMING, second)
+
+    with pytest.raises(ProjectRepoError):
+        hooks.fire_enter(SpecStatus.TRANSFORMING, _req())
+
+    assert calls == []
