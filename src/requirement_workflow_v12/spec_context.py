@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 
 from .models import WorkflowStatus
+from .plan_state_machine import PlanStatus
 from .spec_state_machine import SpecStatus
 
 
@@ -58,6 +59,15 @@ class SpecContextBuilder:
                 current_status=requirement.status.value,
             )
 
+        if requirement.plan_status != PlanStatus.READY:
+            plan_label = (
+                requirement.plan_status.value if requirement.plan_status else "None"
+            )
+            raise SpecContextGateError(
+                f"spec-context 要求 plan_status=PLAN_READY，当前 plan_status={plan_label}",
+                current_status=requirement.status.value,
+            )
+
         project_cfg = self._service.project_configs.get(requirement.project)
         if project_cfg is None:
             raise SpecContextMisconfigured(
@@ -94,8 +104,19 @@ class SpecContextBuilder:
             "spec_document_id": requirement.spec_document_id,
             "latest_review_summary": requirement.latest_review_summary,
         }
+        plan_md = self._service._fetch_plan_md(req_id) if hasattr(
+            self._service, "_fetch_plan_md",
+        ) else ""
+        context["plan_md_content"] = plan_md
+        context["plan_decision_ids"] = _extract_decision_ids(plan_md)
         return SpecContextResult(context=context, context_token=context_token)
 
     @staticmethod
     def _mint_token(req_id: str) -> str:
         return f"spec_ctx_{req_id}_{int(time.time())}_{secrets.token_hex(4)}"
+
+
+def _extract_decision_ids(plan_md_text: str) -> list[str]:
+    """Extract `- id: Dxx` lines from plan.md YAML frontmatter."""
+    import re
+    return re.findall(r"^\s*-\s*id:\s*([A-Za-z0-9]+)\s*$", plan_md_text, re.MULTILINE)

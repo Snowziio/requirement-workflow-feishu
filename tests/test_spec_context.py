@@ -76,8 +76,10 @@ from requirement_workflow_v12.spec_context import (
 def _svc_with_req(req_id="REQ-1", project="ProjA", status=WorkflowStatus.APPROVED) -> CoordinatorService:
     svc = CoordinatorService()
     from requirement_workflow_v12.models import Requirement
+    from requirement_workflow_v12.plan_state_machine import PlanStatus
     r = Requirement(req_id=req_id, name="n", project=project, summary="s", creator="c")
     r.status = status
+    r.plan_status = PlanStatus.READY
     r.document_url = "https://feishu.example/docx/req_doc"
     r.latest_review_summary = "ready"
     svc.requirements[req_id] = r
@@ -152,3 +154,64 @@ def test_build_allows_same_req_in_spec_drafting():
     result = builder.build("REQ-1")
     assert result.context["status"] == "APPROVED"
     assert result.context["spec_status"] == "SPEC_DRAFTING"
+
+
+def test_spec_context_rejected_when_plan_not_ready(tmp_path):
+    from requirement_workflow_v12.plan_state_machine import PlanStatus
+    from requirement_workflow_v12.spec_context import (
+        SpecContextBuilder, SpecContextGateError,
+    )
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    from requirement_workflow_v12.models import Requirement, WorkflowStatus
+    from requirement_workflow_v12.project_config import ProjectConfig
+    from unittest.mock import MagicMock
+
+    svc = CoordinatorService()
+    r = Requirement(req_id="R", name="n", project="P", summary="s", creator="c")
+    r.status = WorkflowStatus.APPROVED
+    r.plan_status = PlanStatus.DRAFTING  # not READY
+    svc.requirements["R"] = r
+    svc.project_configs["P"] = ProjectConfig(
+        category="web", template_version="v1",
+        architecture_doc_id="a", architecture_doc_url="u",
+        tech_stack={}, github_repo_url="o/r",
+    )
+    gw = MagicMock()
+    gw.fetch_document_revision.return_value = "rev-1"
+    builder = SpecContextBuilder(svc, gw)
+    import pytest
+    with pytest.raises(SpecContextGateError, match="plan"):
+        builder.build("R")
+
+
+def test_spec_context_includes_plan_md_content_when_ready(tmp_path):
+    from requirement_workflow_v12.plan_state_machine import PlanStatus
+    from requirement_workflow_v12.spec_context import SpecContextBuilder
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    from requirement_workflow_v12.models import Requirement, WorkflowStatus
+    from requirement_workflow_v12.project_config import ProjectConfig
+    from unittest.mock import MagicMock
+
+    svc = CoordinatorService()
+    r = Requirement(req_id="R", name="n", project="P", summary="s", creator="c")
+    r.status = WorkflowStatus.APPROVED
+    r.plan_status = PlanStatus.READY
+    svc.requirements["R"] = r
+    svc.project_configs["P"] = ProjectConfig(
+        category="web", template_version="v1",
+        architecture_doc_id="a", architecture_doc_url="u",
+        tech_stack={}, github_repo_url="o/r",
+    )
+    gw = MagicMock()
+    gw.fetch_document_revision.return_value = "rev-1"
+    # Stub the plan.md fetcher to return canned content
+    svc._fetch_plan_md = MagicMock(
+        return_value="---\nreq_id: R\ndecisions:\n  - id: D1\n  - id: D2\n---\n",
+    )
+    builder = SpecContextBuilder(svc, gw)
+
+    result = builder.build("R")
+
+    assert "plan_md_content" in result.context
+    assert "req_id: R" in result.context["plan_md_content"]
+    assert result.context["plan_decision_ids"] == ["D1", "D2"]

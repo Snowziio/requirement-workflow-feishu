@@ -920,6 +920,10 @@ class CoordinatorService:
         r.plan_pr_url = result.commit_sha
         r.pending_plan_draft = None
 
+    def _fetch_plan_md(self, req_id: str) -> str:
+        """Default stub; override in production to pull plan.md from GitHub."""
+        return ""
+
     def plan_restart(self, req_id: str) -> Requirement:
         r = self.requirements[req_id]
         decision = apply_plan_event(r.plan_status, PlanEvent.PLAN_RESTART)
