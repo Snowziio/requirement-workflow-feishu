@@ -77,7 +77,7 @@ def test_spec_restart_archives_trace_when_orchestrator_wired(tmp_path):
     r.spec_status = SpecStatus.TRANSFORMING
     r.spec_deadlocked = True
     svc.configure_spec_orchestrator(
-        github_gateway=MagicMock(), trace_dir=tmp_path, feishu=MagicMock(),
+        tools=MagicMock(), trace_dir=tmp_path, feishu=MagicMock(),
     )
     # Pre-existing trace from the deadlocked attempt
     svc.spec_orchestrator._trace.append("R1", {"event": "transform_started"})

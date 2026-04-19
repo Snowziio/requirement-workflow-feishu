@@ -274,7 +274,7 @@ def test_on_converged_commits_pr_and_locks(tmp_path):
     gateway.open_pull_request = MagicMock(
         return_value={"number": 1, "html_url": "https://gh/pr/1"},
     )
-    registry = AcmRegistry(gateway=gateway)
+    registry = AcmRegistry()
     feishu = MagicMock()
 
     orch = SpecTransformOrchestrator(
@@ -322,7 +322,7 @@ def _make_regression_fail_orch(tmp_path, **orch_kwargs):
         "sha-1",
         "version: 3\nentries:\n  - {ac_id: AC-1, req_id: R, status: active, priority: P0}\n",
     ))
-    registry = AcmRegistry(gateway=gateway)
+    registry = AcmRegistry()
     orch = SpecTransformOrchestrator(
         tools=GitHubProjectRepoTools(gateway), registry=registry, feishu=MagicMock(),
         trace_dir=tmp_path, **orch_kwargs,
@@ -421,7 +421,7 @@ def test_on_converged_pr_body_carries_audit_fields_and_callback_kwargs(tmp_path)
         captured["pr_url"] = pr_url
         captured.update(kwargs)
 
-    registry = AcmRegistry(gateway=gateway)
+    registry = AcmRegistry()
     orch = SpecTransformOrchestrator(
         tools=GitHubProjectRepoTools(gateway), registry=registry, feishu=MagicMock(),
         trace_dir=tmp_path, on_locked=on_locked,

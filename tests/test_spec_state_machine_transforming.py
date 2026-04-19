@@ -107,10 +107,10 @@ def test_configure_spec_orchestrator_wires_orchestrator_and_callbacks(tmp_path):
     from unittest.mock import MagicMock
     from requirement_workflow_v12.coordinator_service import CoordinatorService
     svc = CoordinatorService()
-    gw = MagicMock()
+    tools = MagicMock()
     feishu = MagicMock()
     svc.configure_spec_orchestrator(
-        github_gateway=gw, trace_dir=tmp_path, feishu=feishu,
+        tools=tools, trace_dir=tmp_path, feishu=feishu,
     )
     assert svc.spec_orchestrator is not None
     assert svc._acm_registry is not None

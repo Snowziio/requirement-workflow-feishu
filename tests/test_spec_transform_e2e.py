@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from requirement_workflow_v12.coordinator_service import CoordinatorService
 from requirement_workflow_v12.models import Requirement, WorkflowStatus
 from requirement_workflow_v12.project_config import ProjectConfig
+from requirement_workflow_v12.project_repo import GitHubProjectRepoTools
 from requirement_workflow_v12.spec_state_machine import SpecStatus
 
 
@@ -72,7 +73,8 @@ def _build_wired_service(tmp_path, *, req_id="REQ-P-1", project="P"):
     feishu = MagicMock()
     feishu.fetch_document_revision = MagicMock(return_value="feishu-rev-77")
     svc.configure_spec_orchestrator(
-        github_gateway=gateway, trace_dir=tmp_path, feishu=feishu,
+        tools=GitHubProjectRepoTools(gateway),
+        trace_dir=tmp_path, feishu=feishu,
     )
     return svc, req, gateway, feishu
 

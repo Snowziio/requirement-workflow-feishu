@@ -666,21 +666,19 @@ class CoordinatorService:
     def configure_spec_orchestrator(
         self,
         *,
-        github_gateway,
+        tools,
         trace_dir,
         feishu=None,
     ) -> None:
         """Wire the spec transform orchestrator + ACM registry.
 
-        Called by runtime (CoordinatorRuntimeApp) when GitHub access is
-        available. Idempotent: calling twice replaces the previous
-        orchestrator.
+        ``tools`` is a ``ProjectRepoTools``; the caller (service_app) is
+        responsible for wrapping a ``GitHubGateway`` if needed. Idempotent:
+        calling twice replaces the previous orchestrator.
         """
         from .acm_registry import AcmRegistry
-        from .project_repo import GitHubProjectRepoTools
         from .spec_transform import SpecTransformOrchestrator
-        self._acm_registry = AcmRegistry(gateway=github_gateway)
-        tools = GitHubProjectRepoTools(github_gateway)
+        self._acm_registry = AcmRegistry()
         self.spec_orchestrator = SpecTransformOrchestrator(
             tools=tools,
             registry=self._acm_registry,

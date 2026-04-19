@@ -269,7 +269,9 @@ class SpecTransformOrchestrator:
         with self._registry.write_lock():
             committed = False
             for race_attempt in range(self._max_race_retries):
-                current_sha, current_doc = self._registry.fetch_snapshot(project_repo)
+                fresh_ctx = self._tools.fetch_project_context(project_repo)
+                current_sha = fresh_ctx.registry_sha
+                current_doc = self._registry.parse(fresh_ctx.registry_text)
                 ac_doc = yaml.safe_load(payload["ac_schedule_yaml"]) or {}
                 new_acs = ac_doc.get("acs", []) or []
                 supersedes = [

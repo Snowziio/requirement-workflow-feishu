@@ -121,11 +121,13 @@ class CoordinatorRuntimeApp:
         if settings.github_token:
             from pathlib import Path
             from .github_gateway import GitHubGateway
+            from .project_repo import GitHubProjectRepoTools
             github_gateway = GitHubGateway(settings)
+            tools = GitHubProjectRepoTools(github_gateway)
             trace_dir = Path(settings.spec_trace_dir)
             trace_dir.mkdir(parents=True, exist_ok=True)
             self.service.configure_spec_orchestrator(
-                github_gateway=github_gateway,
+                tools=tools,
                 trace_dir=trace_dir,
                 feishu=self.gateway,
             )

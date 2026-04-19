@@ -15,17 +15,17 @@ def test_parse_active_slice_returns_only_active_ids():
         "  - {ac_id: AC-002, req_id: R, status: retired, priority: P1}\n"
         "  - {ac_id: AC-003, req_id: R, status: active, priority: P0}\n"
     )
-    reg = AcmRegistry(gateway=None)
+    reg = AcmRegistry()
     assert reg.parse_active_slice(text) == ["AC-001", "AC-003"]
 
 
 def test_parse_active_slice_empty_when_no_entries():
-    reg = AcmRegistry(gateway=None)
+    reg = AcmRegistry()
     assert reg.parse_active_slice("version: 3\nentries: []\n") == []
 
 
 def test_compose_patch_appends_active_entries():
-    reg = AcmRegistry(gateway=None)
+    reg = AcmRegistry()
     current = RegistryDoc(version=3, entries=[
         AcEntry("AC-001", "REQ-A", "active", "P0"),
     ])
@@ -42,7 +42,7 @@ def test_compose_patch_appends_active_entries():
 
 
 def test_compose_patch_marks_superseded_old_ac():
-    reg = AcmRegistry(gateway=None)
+    reg = AcmRegistry()
     current = RegistryDoc(version=3, entries=[
         AcEntry("AC-001", "REQ-A", "active", "P0"),
     ])
@@ -59,24 +59,10 @@ def test_compose_patch_marks_superseded_old_ac():
 
 import threading
 import time
-from unittest.mock import MagicMock
-
-
-def test_fetch_snapshot_returns_sha_and_doc():
-    gw = MagicMock()
-    gw.fetch_file_sha = MagicMock(return_value=(
-        "sha-1",
-        "version: 3\nentries:\n  - {ac_id: AC-1, req_id: R, status: active, priority: P0}\n",
-    ))
-    reg = AcmRegistry(gateway=gw)
-    sha, doc = reg.fetch_snapshot("o/r")
-    assert sha == "sha-1"
-    assert len(doc.entries) == 1
-    gw.fetch_file_sha.assert_called_once_with("o/r", "main", "acm-registry.yaml")
 
 
 def test_write_lock_serializes_concurrent_callers():
-    reg = AcmRegistry(gateway=None)
+    reg = AcmRegistry()
     order = []
     started = threading.Event()
 
@@ -98,7 +84,7 @@ def test_write_lock_serializes_concurrent_callers():
 
 
 def test_write_lock_is_context_manager_and_releases():
-    reg = AcmRegistry(gateway=None)
+    reg = AcmRegistry()
     with reg.write_lock():
         pass
     # Acquiring a second time after release must succeed within timeout

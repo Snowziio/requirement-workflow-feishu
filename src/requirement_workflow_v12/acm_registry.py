@@ -35,8 +35,7 @@ class SupersedeDecl:
 
 
 class AcmRegistry:
-    def __init__(self, gateway):
-        self._gateway = gateway
+    def __init__(self) -> None:
         self._lock = threading.Lock()
 
     def parse_active_slice(self, registry_text: str) -> list[str]:
@@ -104,12 +103,6 @@ class AcmRegistry:
                 retired_at=e.get("retired_at", ""),
             ))
         return RegistryDoc(version=doc.get("version", 3), entries=entries)
-
-    def fetch_snapshot(self, project_repo: str) -> tuple[str, RegistryDoc]:
-        sha, text = self._gateway.fetch_file_sha(
-            project_repo, "main", "acm-registry.yaml",
-        )
-        return sha, self.parse(text)
 
     @contextmanager
     def write_lock(self) -> Iterator[None]:
