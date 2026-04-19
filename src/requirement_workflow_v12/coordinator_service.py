@@ -812,6 +812,47 @@ class CoordinatorService:
         self._hooks.fire_enter(r.plan_status, r)
         return r
 
+    def plan_authorize(self, req_id: str, *, authorized_by: str) -> Requirement:
+        r = self.requirements[req_id]
+        decision = apply_plan_event(r.plan_status, PlanEvent.PLAN_AUTHORIZE)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        from datetime import datetime, timezone
+        draft = r.pending_plan_draft or {}
+        arch = draft.get("architecture_change") or {}
+        arch["authorized"] = True
+        arch["authorized_by"] = authorized_by
+        arch["authorized_at"] = datetime.now(timezone.utc).isoformat()
+        draft["architecture_change"] = arch
+        r.pending_plan_draft = draft
+
+        prev = r.plan_status
+        self._hooks.fire_exit(prev, r)
+        r.plan_status = decision.next_status
+        self._hooks.fire_enter(r.plan_status, r)
+        return r
+
+    def plan_authorization_reject(
+        self, req_id: str, *, reason: str = "",
+    ) -> Requirement:
+        r = self.requirements[req_id]
+        decision = apply_plan_event(
+            r.plan_status, PlanEvent.PLAN_AUTHORIZATION_REJECT,
+        )
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        prev = r.plan_status
+        self._hooks.fire_exit(prev, r)
+        r.plan_status = decision.next_status
+        r.plan_phase = PlanPhase.DECISIONS_IN_PROGRESS
+        self._hooks.fire_enter(r.plan_status, r)
+        LOGGER.info(
+            "plan_authorization_reject req_id=%s reason=%s", req_id, reason,
+        )
+        return r
+
     def plan_submit(
         self,
         req_id: str,
