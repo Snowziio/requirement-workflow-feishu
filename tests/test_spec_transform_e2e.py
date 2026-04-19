@@ -231,3 +231,17 @@ def test_regression_retry_then_pass_locks_spec(tmp_path):
     trace = (tmp_path / "REQ-P-1.jsonl").read_text()
     assert "regression_retry" in trace
     assert "locked" in trace
+
+
+# ── Anchor: submit_checkpoint_1a_pass fires TRANSFORMING enter hook ─────
+
+def test_submit_checkpoint_1a_pass_fires_on_enter_transforming_hook(tmp_path):
+    """Regression anchor for Task 4.3 hook refactor: the TRANSFORMING
+    on_enter hook must drive fetch_project_context and transition state."""
+    svc, req, gateway, _feishu = _build_wired_service(tmp_path)
+
+    svc.submit_checkpoint_1a_pass("REQ-P-1")
+
+    # on_enter_transforming → fetch_project_context → 2x fetch_file_sha
+    assert gateway.fetch_file_sha.call_count == 2
+    assert req.spec_status is SpecStatus.TRANSFORMING

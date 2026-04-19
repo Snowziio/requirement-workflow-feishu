@@ -63,6 +63,9 @@ def test_submit_checkpoint_1a_pass_transitions_to_transforming():
     svc.project_configs = MagicMock()
     cfg = MagicMock(); cfg.github_repo_url = "owner/repo"
     svc.project_configs.get.return_value = cfg
+    svc._hooks.on_enter(
+        SpecStatus.TRANSFORMING, svc._on_enter_transforming_hook,
+    )
 
     svc.submit_checkpoint_1a_pass("R1")
     assert svc.requirements["R1"].spec_status is SpecStatus.TRANSFORMING

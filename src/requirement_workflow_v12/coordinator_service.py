@@ -42,6 +42,7 @@ class CoordinatorService:
     """Independent backend coordinator for Feishu events and workflow state."""
 
     def __init__(self) -> None:
+        from .project_repo import StateTransitionHooks
         self.project_groups: dict[str, str] = {}
         self.requirements: dict[str, Requirement] = {}
         self.active_req_by_user: dict[str, str] = {}
@@ -49,6 +50,7 @@ class CoordinatorService:
         self._project_config_persister: Callable[[str, ProjectConfig], ProjectConfig] | None = None
         self.spec_orchestrator = None
         self._acm_registry = None
+        self._hooks = StateTransitionHooks()
 
     def set_project_config_persister(
         self, persister: Callable[[str, ProjectConfig], ProjectConfig] | None
@@ -677,6 +679,7 @@ class CoordinatorService:
         calling twice replaces the previous orchestrator.
         """
         from .acm_registry import AcmRegistry
+        from .spec_state_machine import SpecStatus
         from .spec_transform import SpecTransformOrchestrator
         self._acm_registry = AcmRegistry()
         self.spec_orchestrator = SpecTransformOrchestrator(
@@ -688,6 +691,16 @@ class CoordinatorService:
             on_locked=self._on_spec_locked,
         )
         self.spec_orchestrator._project_repo_for = self._project_repo_for
+        self._hooks.on_enter(
+            SpecStatus.TRANSFORMING, self._on_enter_transforming_hook,
+        )
+
+    def _on_enter_transforming_hook(self, r: Requirement) -> None:
+        self.spec_orchestrator.on_enter_transforming(
+            req_id=r.req_id,
+            project_repo=self._project_repo_for(r.req_id),
+            spec_doc_id=r.spec_document_id,
+        )
 
     def spec_restart(self, req_id: str) -> Requirement:
         """Reset Spec state for re-entry. Allowed only in DRAFTING or
@@ -760,12 +773,11 @@ class CoordinatorService:
         decision = apply_spec_event(r.spec_status, SpecEvent.CHECKPOINT_1A_PASS)
         if not decision.allowed:
             raise ValueError(decision.message)
+
+        prev_status = r.spec_status
+        self._hooks.fire_exit(prev_status, r)
         r.spec_status = decision.next_status
-        self.spec_orchestrator.on_enter_transforming(
-            req_id=req_id,
-            project_repo=cfg.github_repo_url,
-            spec_doc_id=r.spec_document_id,
-        )
+        self._hooks.fire_enter(r.spec_status, r)
         return r
 
     def _next_req_id(self, project: str) -> str:
