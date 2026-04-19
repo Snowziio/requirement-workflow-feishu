@@ -15,6 +15,10 @@ from .protocols import (
     CreationRequest,
     CreationResponse,
 )
+from .plan_state_machine import (
+    DesignStatus, PlanEvent, PlanPhase, PlanStatus, apply_plan_event,
+)
+from .project_repo import PlanArtifacts
 from .spec_state_machine import SpecEvent, SpecStatus, apply_spec_event
 from .state_machine import Event, apply_event
 
@@ -783,3 +787,27 @@ class CoordinatorService:
     def _next_req_id(self, project: str) -> str:
         count = sum(1 for item in self.requirements.values() if item.project == project) + 1
         return f"REQ-{project}-{count:03d}"
+
+    # ── PLANNING layer ──────────────────────────────────────────────────
+
+    def plan_start(self, req_id: str) -> Requirement:
+        r = self.requirements[req_id]
+        if r.status != WorkflowStatus.APPROVED:
+            raise ValueError(
+                f"plan_start requires workflow_status=APPROVED, got {r.status.value}"
+            )
+        if r.needs_ui and r.design_status != DesignStatus.READY:
+            raise ValueError(
+                f"plan_start requires design_status=READY when needs_ui=True, "
+                f"got design_status={r.design_status}"
+            )
+        decision = apply_plan_event(r.plan_status, PlanEvent.PLAN_START)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        prev = r.plan_status
+        self._hooks.fire_exit(prev, r)
+        r.plan_status = decision.next_status
+        r.plan_phase = PlanPhase.OUTLINE_PENDING
+        self._hooks.fire_enter(r.plan_status, r)
+        return r
