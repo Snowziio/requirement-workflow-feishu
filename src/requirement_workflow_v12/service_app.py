@@ -138,6 +138,8 @@ class CoordinatorRuntimeApp:
             service=self.service,
             gateway=self.gateway,
         )
+        from .plan_context import PlanContextBuilder
+        self._plan_context_builder = PlanContextBuilder(service=self.service)
 
     def build_event_dispatcher(self):
         self._require_lark()
@@ -193,6 +195,9 @@ class CoordinatorRuntimeApp:
                     status, payload = app.handle_openclaw_requirement_context_query(raw_body, headers=headers)
                 elif self.path == "/queries/openclaw/spec-context":
                     status, payload = app.handle_openclaw_spec_context_query(raw_body, headers=headers)
+                elif self.path.startswith("/queries/openclaw/plan-context/"):
+                    req_id = self.path.rsplit("/", 1)[-1]
+                    status, payload = app.handle_openclaw_plan_context_query(req_id)
                 elif self.path == "/callbacks/openclaw/spec-turn":
                     status, payload = app.handle_openclaw_spec_turn_callback(raw_body, headers=headers)
                 elif self.path == "/callbacks/openclaw/spec-transform":
@@ -911,6 +916,26 @@ class CoordinatorRuntimeApp:
             "context_token": result.context_token,
             "expires_hint": "valid until SPEC_LOCKED or a newer token is issued",
         }
+
+    def handle_openclaw_plan_context_query(
+        self, req_id: str,
+    ) -> tuple[int, dict]:
+        from .plan_context import (
+            PlanContextGateError, PlanContextMisconfigured,
+        )
+        r = self.service.requirements.get(req_id)
+        if r is None:
+            return 404, {"error": "not_found", "req_id": req_id}
+        try:
+            ctx = self._plan_context_builder.build(req_id)
+            return 200, ctx
+        except PlanContextGateError as exc:
+            return 409, {"error": "gate_failed", "message": str(exc)}
+        except PlanContextMisconfigured as exc:
+            return 409, {"error": "misconfigured", "message": str(exc)}
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.exception("plan-context failed req_id=%s", req_id)
+            return 500, {"error": "plan_context_failed", "message": str(exc)}
 
     def handle_openclaw_spec_turn_callback(
         self,
