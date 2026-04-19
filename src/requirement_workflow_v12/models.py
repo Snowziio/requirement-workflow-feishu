@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 
+from .plan_state_machine import DesignStatus, PlanPhase, PlanStatus
 from .spec_state_machine import SpecStatus
 
 
@@ -125,6 +126,13 @@ class Requirement:
     spec_pr_url: str = ""
     spec_source_revision: str = ""
     transform_trace_digest: str = ""
+    plan_status: "PlanStatus | None" = None
+    plan_phase: "PlanPhase | None" = None
+    plan_pr_url: str = ""
+    plan_outline: list[dict] = field(default_factory=list)
+    plan_decisions_wip: list[dict] = field(default_factory=list)
+    pending_plan_draft: dict | None = None
+    design_status: "DesignStatus | None" = None
     updated_at: datetime = field(default_factory=utc_now)
 
     def touch(self) -> None:

@@ -93,3 +93,31 @@ def test_plan_phase_enum_values():
     assert PlanPhase.OUTLINE_CONFIRMED.value == "outline_confirmed"
     assert PlanPhase.DECISIONS_IN_PROGRESS.value == "decisions_in_progress"
     assert PlanPhase.FINAL_REVIEW_PENDING.value == "final_review_pending"
+
+
+# append at end of tests/test_plan_state_machine.py
+
+from requirement_workflow_v12.models import Requirement
+
+
+def test_requirement_defaults_plan_fields_empty():
+    r = Requirement(req_id="R", name="n", project="p", summary="s", creator="c")
+    assert r.plan_status is None
+    assert r.plan_phase is None
+    assert r.plan_pr_url == ""
+    assert r.plan_outline == []
+    assert r.plan_decisions_wip == []
+    assert r.pending_plan_draft is None
+    assert r.design_status is None
+
+
+def test_requirement_plan_status_assignable():
+    r = Requirement(req_id="R", name="n", project="p", summary="s", creator="c")
+    r.plan_status = PlanStatus.DRAFTING
+    assert r.plan_status is PlanStatus.DRAFTING
+
+
+def test_requirement_plan_phase_assignable():
+    r = Requirement(req_id="R", name="n", project="p", summary="s", creator="c")
+    r.plan_phase = PlanPhase.OUTLINE_CONFIRMED
+    assert r.plan_phase is PlanPhase.OUTLINE_CONFIRMED
