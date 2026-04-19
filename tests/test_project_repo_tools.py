@@ -171,3 +171,37 @@ def test_commit_spec_artifacts_happy_path_returns_pr_ref():
         head_branch="spec/REQ-P-1", base_branch="main",
         title="Spec: REQ-P-1", body="body",
     )
+
+
+def test_commit_spec_artifacts_on_pr_failure_cleans_branch_and_raises():
+    gw = MagicMock()
+    gw.create_branch = MagicMock(return_value="head-sha")
+    gw.commit_spec_pr_files = MagicMock(return_value="commit-sha")
+    gw.open_pull_request = MagicMock(
+        side_effect=GitHubGatewayError(422, "validation failed"),
+    )
+    gw.delete_branch = MagicMock(return_value=None)
+    tools = GitHubProjectRepoTools(gw)
+
+    with pytest.raises(ProjectRepoError) as exc_info:
+        tools.commit_spec_artifacts("REQ-P-1", _happy_artifacts())
+
+    assert "REQ-P-1" in str(exc_info.value)
+    assert exc_info.value.__cause__ is not None
+    assert exc_info.value.recoverable is False
+    gw.delete_branch.assert_called_once_with("acme/repo", "spec/REQ-P-1")
+
+
+def test_commit_spec_artifacts_on_commit_failure_cleans_branch():
+    gw = MagicMock()
+    gw.create_branch = MagicMock(return_value="head-sha")
+    gw.commit_spec_pr_files = MagicMock(
+        side_effect=GitHubGatewayError(409, "conflict"),
+    )
+    gw.delete_branch = MagicMock(return_value=None)
+    tools = GitHubProjectRepoTools(gw)
+
+    with pytest.raises(ProjectRepoError):
+        tools.commit_spec_artifacts("REQ-P-1", _happy_artifacts())
+
+    gw.delete_branch.assert_called_once()
