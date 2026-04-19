@@ -944,6 +944,29 @@ P0 全覆盖：✅（4/4）
 
 ---
 
+## 十三、实现与部署
+
+### project_repo/ 模块职责
+
+`src/requirement_workflow_v12/project_repo/` 是 Spec 层对外部 Git 托管平台的领域 facade。Coordinator / SpecTransformOrchestrator / AcmRegistry 不直接调用 `GitHubGateway`；所有外部写入走 facade 的领域动词。`AcmRegistry` 是纯解析器，不持有 gateway。
+
+### 领域动词清单
+
+| 动词 | 输入 | 输出 | 何时调用 |
+|---|---|---|---|
+| `fetch_project_context` | `project_repo` | `ProjectContext`（ARCHITECTURE + acm-registry 的 sha/text） | `on_enter_transforming` 快照；race retry 刷新 |
+| `commit_spec_artifacts` | `req_id`, `SpecArtifacts` | `PrRef` | `_on_converged` commit Spec PR |
+| `cleanup_failed_branch` | `project_repo`, `branch` | `None`（幂等） | `commit_spec_artifacts` 内部失败回滚 |
+
+完整 API 签名、错误语义、设计 trade-off 见：[docs/superpowers/specs/2026-04-19-project-repo-tools-design.md](../../superpowers/specs/2026-04-19-project-repo-tools-design.md) § 3。
+
+### 状态转移副作用
+
+`CoordinatorService` 在 `__init__` 持有一个 `StateTransitionHooks` 实例，`configure_spec_orchestrator` 阶段向其注册 `on_enter(SpecStatus.TRANSFORMING, ...)` 回调。状态转移方法（如 `submit_checkpoint_1a_pass`）只管 `fire_exit → apply_spec_event → fire_enter`。架构原则参见 [infra/state-machine-hook-pattern.md](../infra/state-machine-hook-pattern.md)。
+
+---
+
 *v2 · 2026-04-16 · 六阶段工作流 + 四文件 Spec + 转化博弈 + 四道工程化闸门。*
 *v2.1 · 2026-04-17 · 追加 §十二 实现侧 ADR：登记 4 处与本文叙述的刻意偏离。*
+*v2.2 · 2026-04-19 · 追加 §十三 实现与部署：project_repo/ 领域动词 + 钩子装配。*
 *参见: [infra/harness-engineering-industry-alignment-2026-04-16.md](../infra/harness-engineering-industry-alignment-2026-04-16.md)*
