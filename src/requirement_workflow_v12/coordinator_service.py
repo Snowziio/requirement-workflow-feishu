@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import logging
 from typing import Callable
 
@@ -16,7 +17,8 @@ from .protocols import (
     CreationResponse,
 )
 from .plan_state_machine import (
-    DesignStatus, PlanEvent, PlanPhase, PlanStatus, apply_plan_event,
+    DesignEvent, DesignStatus, PlanEvent, PlanPhase, PlanStatus,
+    apply_design_event, apply_plan_event,
 )
 from .project_repo import PlanArtifacts
 from .spec_state_machine import SpecEvent, SpecStatus, apply_spec_event
@@ -818,7 +820,6 @@ class CoordinatorService:
         if not decision.allowed:
             raise ValueError(decision.message)
 
-        from datetime import datetime, timezone
         draft = r.pending_plan_draft or {}
         arch = draft.get("architecture_change") or {}
         arch["authorized"] = True
@@ -891,8 +892,7 @@ class CoordinatorService:
         )
 
     def _commit_plan_and_maybe_architecture(self, r: Requirement) -> None:
-        """``on_enter(PlanStatus.READY)`` hook: atomic commit of plan.md
-        (and ARCHITECTURE.md if architecture_change present)."""
+        """``on_enter(PlanStatus.READY)`` hook: atomic commit of plan.md (+ARCHITECTURE.md)."""
         draft = r.pending_plan_draft or {}
         plan_md_content = draft.get("plan_md_content", "")
         architecture_change = draft.get("architecture_change")
@@ -931,7 +931,6 @@ class CoordinatorService:
 
     def design_restart(self, req_id: str) -> Requirement:
         r = self.requirements[req_id]
-        from .plan_state_machine import DesignEvent, apply_design_event
         decision = apply_design_event(r.design_status, DesignEvent.DESIGN_RESTART)
         if not decision.allowed:
             raise ValueError(decision.message)
@@ -942,9 +941,7 @@ class CoordinatorService:
         return r
 
     def _cascade_reset_spec(self, r: Requirement) -> None:
-        """Quiet spec reset used by plan_restart; unlike /spec restart
-        it does NOT require deadlock, because the user has already
-        acknowledged cascade intent at the plan layer."""
+        """Quiet spec reset used by plan_restart; no deadlock precondition."""
         if r.spec_status is None:
             return
         if self.spec_orchestrator is not None:
