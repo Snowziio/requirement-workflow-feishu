@@ -811,3 +811,30 @@ class CoordinatorService:
         r.plan_phase = PlanPhase.OUTLINE_PENDING
         self._hooks.fire_enter(r.plan_status, r)
         return r
+
+    def plan_submit(
+        self,
+        req_id: str,
+        *,
+        plan_md_content: str,
+        architecture_change: dict | None,
+    ) -> Requirement:
+        r = self.requirements[req_id]
+        decision = apply_plan_event(
+            r.plan_status, PlanEvent.PLAN_SUBMIT,
+            has_architecture_change=architecture_change is not None,
+        )
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        r.pending_plan_draft = {
+            "plan_md_content": plan_md_content,
+            "architecture_change": architecture_change,
+        }
+        r.plan_phase = PlanPhase.FINAL_REVIEW_PENDING
+
+        prev = r.plan_status
+        self._hooks.fire_exit(prev, r)
+        r.plan_status = decision.next_status
+        self._hooks.fire_enter(r.plan_status, r)
+        return r
