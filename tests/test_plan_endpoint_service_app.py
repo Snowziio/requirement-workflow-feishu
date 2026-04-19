@@ -127,3 +127,35 @@ def test_plan_callback_req_not_found_returns_404(app):
         {"req_id": "NO", "event": "plan_submit", "payload": {}},
     )
     assert status == 404
+
+
+def test_slash_plan_restart_parses_req_id_and_calls_service(app):
+    r = _approved_req(app)
+    from requirement_workflow_v12.plan_state_machine import PlanStatus
+    r.plan_status = PlanStatus.DRAFTING
+    r.plan_phase = None
+
+    response = app.handle_slash_command("/plan restart REQ-P-1")
+
+    assert response is not None
+    assert "重置" in response or "reset" in response.lower()
+    assert r.plan_status is None
+
+
+def test_slash_design_restart_cascades(app):
+    r = _approved_req(app)
+    from requirement_workflow_v12.plan_state_machine import DesignStatus, PlanStatus
+    r.design_status = DesignStatus.READY
+    r.plan_status = PlanStatus.DRAFTING
+
+    response = app.handle_slash_command("/design restart REQ-P-1")
+
+    assert response is not None
+    assert r.design_status is None
+    assert r.plan_status is None
+
+
+def test_slash_plan_restart_unknown_req_returns_error_message(app):
+    response = app.handle_slash_command("/plan restart REQ-NOPE")
+    assert response is not None
+    assert "REQ-NOPE" in response

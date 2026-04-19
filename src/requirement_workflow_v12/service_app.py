@@ -54,6 +54,8 @@ REVIEW_CALLBACK_EVENT_ALIASES = {
 }
 
 SPEC_RESTART_RE = re.compile(r"^/spec\s+restart\s+(REQ-\S+)\s*$")
+PLAN_RESTART_RE = re.compile(r"^/plan\s+restart\s+(REQ-\S+)\s*$")
+DESIGN_RESTART_RE = re.compile(r"^/design\s+restart\s+(REQ-\S+)\s*$")
 
 
 @dataclass
@@ -939,6 +941,30 @@ class CoordinatorRuntimeApp:
         except Exception as exc:  # pragma: no cover - defensive
             LOGGER.exception("plan-context failed req_id=%s", req_id)
             return 500, {"error": "plan_context_failed", "message": str(exc)}
+
+    def handle_slash_command(self, text: str) -> str | None:
+        """Return human-readable reply, or None if no match."""
+        m = PLAN_RESTART_RE.match(text.strip())
+        if m:
+            req_id = m.group(1)
+            try:
+                self.service.plan_restart(req_id)
+                return f"规划层已重置（含下游 spec 级联清理）：{req_id}"
+            except KeyError:
+                return f"未知需求：{req_id}"
+            except ValueError as exc:
+                return f"不能执行 /plan restart {req_id}：{exc}"
+        m = DESIGN_RESTART_RE.match(text.strip())
+        if m:
+            req_id = m.group(1)
+            try:
+                self.service.design_restart(req_id)
+                return f"设计层已重置（含下游 plan + spec 级联清理）：{req_id}"
+            except KeyError:
+                return f"未知需求：{req_id}"
+            except ValueError as exc:
+                return f"不能执行 /design restart {req_id}：{exc}"
+        return None
 
     def handle_openclaw_plan_callback(
         self, body: dict,
