@@ -40,6 +40,48 @@ def test_commit_plan_artifacts_without_architecture_commits_plan_md_to_main():
     gw.fetch_file_sha.assert_not_called()
 
 
+def test_commit_plan_artifacts_with_architecture_commits_both_files_atomically():
+    gw = MagicMock()
+    gw.fetch_file_sha.return_value = (
+        "arch-sha-before",
+        "# Architecture\n\n## 会话存储\n\n旧方案。\n",
+    )
+    gw.commit_files.return_value = "sha-commit-2"
+
+    tools = GitHubProjectRepoTools(gateway=gw)
+    arch_change = {
+        "summary": "Add Redis",
+        "changes": [{
+            "section_path": "## 会话存储",
+            "before": "## 会话存储\n\n旧方案。",
+            "after": "## 会话存储\n\n新方案：Redis。",
+            "rationale": "D1",
+        }],
+        "authorized": True,
+        "authorized_by": "u-1",
+        "authorized_at": "2026-04-19T10:00:00Z",
+    }
+    artifacts = PlanArtifacts(
+        project_repo="owner/repo",
+        req_id="REQ-P-2",
+        plan_md_content="---\nreq_id: REQ-P-2\n---\n",
+        architecture_change=arch_change,
+        commit_message="plan(REQ-P-2): add Redis",
+    )
+
+    result = tools.commit_plan_artifacts(artifacts)
+
+    assert result.architecture_updated is True
+    gw.fetch_file_sha.assert_called_once_with("owner/repo", "main", "ARCHITECTURE.md")
+    kwargs = gw.commit_files.call_args.kwargs
+    files = list(kwargs["files"])
+    paths = sorted(fc.path for fc in files)
+    assert paths == ["ARCHITECTURE.md", "docs/specs/REQ-P-2/plan.md"]
+    arch_content = next(fc.content for fc in files if fc.path == "ARCHITECTURE.md")
+    assert "Redis" in arch_content
+    assert "旧方案" not in arch_content
+
+
 def test_plan_artifacts_is_frozen():
     a = PlanArtifacts(
         project_repo="o/r",
