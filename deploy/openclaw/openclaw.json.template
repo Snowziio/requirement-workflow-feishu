@@ -195,6 +195,18 @@
         }
       },
       {
+        "id": "plan-author",
+        "name": "规划助手",
+        "workspace": "/home/admin/.openclaw/workspace/agents/plan-author",
+        "agentDir": "/home/admin/.openclaw/agents/plan-author/agent",
+        "model": "minimax/MiniMax-M2.7",
+        "identity": {
+          "name": "规划助手",
+          "theme": "PLANNING 阶段引导者 + 记录者，三段 IM 协作产出 plan.md",
+          "emoji": "🧭"
+        }
+      },
+      {
         "id": "spec-author",
         "name": "Spec 撰写助手",
         "workspace": "/home/admin/.openclaw/workspace/agents/spec-author",
@@ -296,6 +308,13 @@
       }
     },
     {
+      "agentId": "plan-author",
+      "match": {
+        "channel": "feishu",
+        "accountId": "plan-author"
+      }
+    },
+    {
       "agentId": "spec-author",
       "match": {
         "channel": "feishu",
@@ -379,6 +398,12 @@
           "allowFrom": [
             "ou_11070bfb9fca4cd2e195100aa8e21afa"
           ],
+          "groupPolicy": "open"
+        },
+        "plan-author": {
+          "appId": "cli_a96e762cf5385bca",
+          "appSecret": "FozrJSJ79vQQex56memT1dGCN0tZ6bIa",
+          "dmPolicy": "open",
           "groupPolicy": "open"
         },
         "spec-author": {
