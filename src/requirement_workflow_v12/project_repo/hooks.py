@@ -1,6 +1,6 @@
-"""Spec state-transition hook registry.
+"""State-transition hook registry.
 
-``on_enter(status, fn)`` fires after ``apply_spec_event`` lands the new
+``on_enter(status, fn)`` fires after a state machine lands the new
 status; ``on_exit(status, fn)`` fires before it. Callbacks take a single
 ``Requirement`` argument.
 
@@ -11,11 +11,10 @@ structured fields so operators can trace which hook blew up and why.
 from __future__ import annotations
 
 import logging
-from typing import Callable, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..models import Requirement
-    from ..spec_state_machine import SpecStatus
 
 _logger = logging.getLogger(__name__)
 
@@ -23,20 +22,27 @@ HookFn = Callable[["Requirement"], None]
 
 
 class StateTransitionHooks:
-    def __init__(self) -> None:
-        self._on_enter: dict["SpecStatus", list[HookFn]] = {}
-        self._on_exit: dict["SpecStatus", list[HookFn]] = {}
+    """Registry for state-column enter/exit callbacks.
 
-    def on_enter(self, status: "SpecStatus", fn: HookFn) -> None:
+    Keys are any hashable status value — typically ``SpecStatus`` or
+    ``PlanStatus`` members. Separate registries are not needed; key
+    equality already partitions hooks per column.
+    """
+
+    def __init__(self) -> None:
+        self._on_enter: dict[Any, list[HookFn]] = {}
+        self._on_exit: dict[Any, list[HookFn]] = {}
+
+    def on_enter(self, status: Any, fn: HookFn) -> None:
         self._on_enter.setdefault(status, []).append(fn)
 
-    def on_exit(self, status: "SpecStatus", fn: HookFn) -> None:
+    def on_exit(self, status: Any, fn: HookFn) -> None:
         self._on_exit.setdefault(status, []).append(fn)
 
-    def fire_enter(self, status: "SpecStatus", req: "Requirement") -> None:
+    def fire_enter(self, status: Any, req: "Requirement") -> None:
         self._fire("enter", self._on_enter.get(status, ()), status, req)
 
-    def fire_exit(self, status: "SpecStatus", req: "Requirement") -> None:
+    def fire_exit(self, status: Any, req: "Requirement") -> None:
         self._fire("exit", self._on_exit.get(status, ()), status, req)
 
     def _fire(

@@ -11,7 +11,8 @@
 
 | 版本 | 日期 | 关键变更 |
 |---|---|---|
-| v1 | 2026-04-19 | 首版：在 `APPROVED → SPEC_DRAFTING` 之间插入 DESIGNING + PLANNING 两阶段；`design-author` / `plan-author` 两个 sibling agent；`plan.md` 结构化多决策 + `architecture_change` 授权闸门；DesignStatus / PlanStatus / SpecStatus 三列并行；级联 restart；钩子驱动架构变更原子 apply。 |
+| v1 | 2026-04-19 | 首版设计：在 `APPROVED → SPEC_DRAFTING` 之间插入 DESIGNING + PLANNING 两阶段；`design-author` / `plan-author` 两个 sibling agent；`plan.md` 结构化多决策 + `architecture_change` 授权闸门；DesignStatus / PlanStatus / SpecStatus 三列并行；级联 restart；钩子驱动架构变更原子 apply。 |
+| v1-impl | 2026-04-19 | MVP 实装落地：PlanStatus 状态机 + `commit_plan_artifacts` + `on_enter(READY)` 钩子 + plan-context / plan-callback 端点 + `/plan restart` + `/design restart` + spec-context 增加 `plan_md_content`；ARCHITECTURE.md section 匹配采用「header 行精确匹配 + 同级或更高级 header 为节边界」；design-author 未落地，DesignStatus 只提供状态机位置 + restart 级联。 |
 
 ---
 
@@ -249,7 +250,7 @@ plan-author 分三阶段与人协作；每阶段通过 IM 卡片驱动：
 
 ## 八、钩子装配
 
-复用 [infra/state-machine-hook-pattern.md](../infra/state-machine-hook-pattern.md) 模式。装配阶段（`configure_plan_orchestrator`）注册：
+复用 [infra/state-machine-hook-pattern.md](../infra/state-machine-hook-pattern.md) 模式。装配阶段（`configure_plan_hooks`）注册：
 
 ```python
 hooks.on_enter(DesignStatus.DRAFTING, _dispatch_design_author)
@@ -271,7 +272,7 @@ hooks.on_exit(PlanStatus.READY, _notify_spec_precondition_met)
 | 卡片 | 触发点 | 按钮 |
 |---|---|---|
 | 规划启动提醒 | `on_enter(PlanStatus.DRAFTING)` | （无，仅通知） |
-| 骨架确认卡 | plan-author 回调 `plan_outline_ready` | 确认 / 调整（文本回复） |
+| 骨架确认卡 | plan-author 回调 `plan_outline_submit` | 确认 / 调整（文本回复） |
 | 决策进度卡 | 每条 decision 定稿（plan-author 回调） | 继续下一条 / 回看修改 |
 | 定稿预览卡 | plan-author 回调 `plan_draft_ready` | 确认定稿（`PLAN_SUBMIT`） / 打回 |
 | **架构授权卡** | `on_enter(PlanStatus.AUTH_PENDING)` | **授权** / **驳回** |
@@ -311,3 +312,4 @@ spec-author 在 SPEC_DRAFTING 阶段消费 plan.md，**不再做决策**：
 - design-author 的具体产物格式待 Phase 2 第一次真实 needs_ui=true REQ 落地时收敛；当前设计文档留空 `docs/specs/REQ-*/design/` 目录结构，不强制 schema
 - `ARCHITECTURE.md` 的 section_path 匹配算法（header-based vs line-range）实施阶段再定
 - plan-author / design-author 的 SKILL.md 位于 OpenClaw 仓库，遵循 skills+workspace 双份同步约束（见 `reference_openclaw_skill_dual_sync.md`）
+- spec-context 的 `_fetch_plan_md(req_id)` 默认返回空串，生产环境需替换成从 GitHub 拉 `docs/specs/<req>/plan.md` 的实现（留给下一次部署迭代处理）

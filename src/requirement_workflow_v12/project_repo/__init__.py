@@ -9,6 +9,8 @@ from .hooks import StateTransitionHooks
 from .tools import GitHubProjectRepoTools, ProjectRepoError, ProjectRepoTools
 from .types import (
     CommitRef,
+    PlanArtifacts,
+    PlanCommitResult,
     PrRef,
     ProjectContext,
     RepoRef,
@@ -18,6 +20,8 @@ from .types import (
 __all__ = [
     "CommitRef",
     "GitHubProjectRepoTools",
+    "PlanArtifacts",
+    "PlanCommitResult",
     "PrRef",
     "ProjectContext",
     "ProjectRepoError",

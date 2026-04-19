@@ -10,8 +10,9 @@ from __future__ import annotations
 import logging
 from typing import Protocol, runtime_checkable
 
-from ..github_gateway import GitHubGateway, GitHubGatewayError
-from .types import PrRef, ProjectContext, SpecArtifacts
+from ..github_gateway import FileChange, GitHubGateway, GitHubGatewayError
+from .architecture_apply import ArchitectureApplyError, apply_architecture_changes
+from .types import PlanArtifacts, PlanCommitResult, PrRef, ProjectContext, SpecArtifacts
 
 
 _logger = logging.getLogger(__name__)
@@ -38,6 +39,10 @@ class ProjectRepoTools(Protocol):
     def commit_spec_artifacts(
         self, req_id: str, artifacts: SpecArtifacts,
     ) -> PrRef: ...
+
+    def commit_plan_artifacts(
+        self, artifacts: PlanArtifacts,
+    ) -> PlanCommitResult: ...
 
     def cleanup_failed_branch(self, project_repo: str, branch: str) -> None: ...
 
@@ -107,4 +112,54 @@ class GitHubProjectRepoTools:
             html_url=str(pr["html_url"]),
             head_sha=head_sha,
             branch=artifacts.branch,
+        )
+
+    def commit_plan_artifacts(
+        self, artifacts: PlanArtifacts,
+    ) -> PlanCommitResult:
+        owner, name = artifacts.project_repo.split("/", 1)
+        plan_path = f"docs/specs/{artifacts.req_id}/plan.md"
+        files_to_commit = [
+            FileChange(path=plan_path, content=artifacts.plan_md_content),
+        ]
+        architecture_updated = False
+
+        if artifacts.architecture_change is not None:
+            try:
+                _arch_sha, arch_text = self._gw.fetch_file_sha(
+                    artifacts.project_repo, "main", "ARCHITECTURE.md",
+                )
+            except GitHubGatewayError as exc:
+                raise ProjectRepoError(
+                    f"commit_plan_artifacts: cannot fetch ARCHITECTURE.md: {exc}",
+                    recoverable=False,
+                ) from exc
+            try:
+                new_arch = apply_architecture_changes(
+                    arch_text, artifacts.architecture_change.get("changes", []),
+                )
+            except ArchitectureApplyError as exc:
+                raise ProjectRepoError(
+                    f"commit_plan_artifacts: architecture apply failed: {exc}",
+                    recoverable=exc.recoverable,
+                ) from exc
+            files_to_commit.append(
+                FileChange(path="ARCHITECTURE.md", content=new_arch),
+            )
+            architecture_updated = True
+
+        try:
+            sha = self._gw.commit_files(
+                owner=owner, repo=name, branch="main",
+                files=files_to_commit, message=artifacts.commit_message,
+            )
+        except GitHubGatewayError as exc:
+            raise ProjectRepoError(
+                f"commit_plan_artifacts: commit to main failed: {exc}",
+                recoverable=False,
+            ) from exc
+        return PlanCommitResult(
+            commit_sha=sha, branch="main",
+            plan_md_path=plan_path,
+            architecture_updated=architecture_updated,
         )

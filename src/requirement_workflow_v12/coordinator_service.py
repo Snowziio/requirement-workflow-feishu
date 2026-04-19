@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import logging
 from typing import Callable
 
@@ -15,6 +16,11 @@ from .protocols import (
     CreationRequest,
     CreationResponse,
 )
+from .plan_state_machine import (
+    DesignEvent, DesignStatus, PlanEvent, PlanPhase, PlanStatus,
+    apply_design_event, apply_plan_event,
+)
+from .project_repo import PlanArtifacts
 from .spec_state_machine import SpecEvent, SpecStatus, apply_spec_event
 from .state_machine import Event, apply_event
 
@@ -783,3 +789,185 @@ class CoordinatorService:
     def _next_req_id(self, project: str) -> str:
         count = sum(1 for item in self.requirements.values() if item.project == project) + 1
         return f"REQ-{project}-{count:03d}"
+
+    # ── PLANNING layer ──────────────────────────────────────────────────
+
+    def plan_start(self, req_id: str) -> Requirement:
+        r = self.requirements[req_id]
+        if r.status != WorkflowStatus.APPROVED:
+            raise ValueError(
+                f"plan_start requires workflow_status=APPROVED, got {r.status.value}"
+            )
+        if r.needs_ui and r.design_status != DesignStatus.READY:
+            raise ValueError(
+                f"plan_start requires design_status=READY when needs_ui=True, "
+                f"got design_status={r.design_status}"
+            )
+        decision = apply_plan_event(r.plan_status, PlanEvent.PLAN_START)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        prev = r.plan_status
+        self._hooks.fire_exit(prev, r)
+        r.plan_status = decision.next_status
+        r.plan_phase = PlanPhase.OUTLINE_PENDING
+        self._hooks.fire_enter(r.plan_status, r)
+        return r
+
+    def plan_authorize(self, req_id: str, *, authorized_by: str) -> Requirement:
+        r = self.requirements[req_id]
+        decision = apply_plan_event(r.plan_status, PlanEvent.PLAN_AUTHORIZE)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        draft = r.pending_plan_draft or {}
+        arch = draft.get("architecture_change") or {}
+        arch["authorized"] = True
+        arch["authorized_by"] = authorized_by
+        arch["authorized_at"] = datetime.now(timezone.utc).isoformat()
+        draft["architecture_change"] = arch
+        r.pending_plan_draft = draft
+
+        prev = r.plan_status
+        self._hooks.fire_exit(prev, r)
+        r.plan_status = decision.next_status
+        self._hooks.fire_enter(r.plan_status, r)
+        return r
+
+    def plan_authorization_reject(
+        self, req_id: str, *, reason: str = "",
+    ) -> Requirement:
+        r = self.requirements[req_id]
+        decision = apply_plan_event(
+            r.plan_status, PlanEvent.PLAN_AUTHORIZATION_REJECT,
+        )
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        prev = r.plan_status
+        self._hooks.fire_exit(prev, r)
+        r.plan_status = decision.next_status
+        r.plan_phase = PlanPhase.DECISIONS_IN_PROGRESS
+        self._hooks.fire_enter(r.plan_status, r)
+        LOGGER.info(
+            "plan_authorization_reject req_id=%s reason=%s", req_id, reason,
+        )
+        return r
+
+    def set_plan_outline(self, req_id: str, outline: list[dict]) -> Requirement:
+        r = self.requirements[req_id]
+        if r.plan_status is not PlanStatus.DRAFTING:
+            raise ValueError("plan outline can only be set in DRAFTING")
+        r.plan_outline = list(outline)
+        r.plan_phase = PlanPhase.DECISIONS_IN_PROGRESS
+        return r
+
+    def plan_submit(
+        self,
+        req_id: str,
+        *,
+        plan_md_content: str,
+        architecture_change: dict | None,
+    ) -> Requirement:
+        r = self.requirements[req_id]
+        decision = apply_plan_event(
+            r.plan_status, PlanEvent.PLAN_SUBMIT,
+            has_architecture_change=architecture_change is not None,
+        )
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        r.pending_plan_draft = {
+            "plan_md_content": plan_md_content,
+            "architecture_change": architecture_change,
+        }
+        r.plan_phase = PlanPhase.FINAL_REVIEW_PENDING
+
+        prev = r.plan_status
+        self._hooks.fire_exit(prev, r)
+        r.plan_status = decision.next_status
+        self._hooks.fire_enter(r.plan_status, r)
+        return r
+
+    def configure_plan_hooks(self, *, tools) -> None:
+        """Register PLANNING-layer hooks. Idempotent: safe to call twice."""
+        if getattr(self, "_plan_tools", None) is not None:
+            self._plan_tools = tools
+            return
+        self._plan_tools = tools
+        self._hooks.on_enter(
+            PlanStatus.READY, self._commit_plan_and_maybe_architecture,
+        )
+
+    def _commit_plan_and_maybe_architecture(self, r: Requirement) -> None:
+        """``on_enter(PlanStatus.READY)`` hook: atomic commit of plan.md (+ARCHITECTURE.md)."""
+        draft = r.pending_plan_draft or {}
+        plan_md_content = draft.get("plan_md_content", "")
+        architecture_change = draft.get("architecture_change")
+        project_repo = self._project_repo_for(r.req_id)
+
+        message_parts = [f"plan({r.req_id}): land plan.md"]
+        if architecture_change is not None:
+            message_parts.append("and apply architecture_change")
+        artifacts = PlanArtifacts(
+            project_repo=project_repo,
+            req_id=r.req_id,
+            plan_md_content=plan_md_content,
+            architecture_change=architecture_change,
+            commit_message=" ".join(message_parts),
+        )
+        result = self._plan_tools.commit_plan_artifacts(artifacts)
+        r.plan_pr_url = result.commit_sha
+        r.pending_plan_draft = None
+
+    def _fetch_plan_md(self, req_id: str) -> str:
+        """Default stub; override in production to pull plan.md from GitHub."""
+        return ""
+
+    def plan_restart(self, req_id: str) -> Requirement:
+        r = self.requirements[req_id]
+        decision = apply_plan_event(r.plan_status, PlanEvent.PLAN_RESTART)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        prev = r.plan_status
+        self._hooks.fire_exit(prev, r)
+        r.plan_status = None
+        r.plan_phase = None
+        r.plan_pr_url = ""
+        r.plan_outline = []
+        r.plan_decisions_wip = []
+        r.pending_plan_draft = None
+        self._cascade_reset_spec(r)
+        return r
+
+    def design_restart(self, req_id: str) -> Requirement:
+        r = self.requirements[req_id]
+        decision = apply_design_event(r.design_status, DesignEvent.DESIGN_RESTART)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        r.design_status = None
+        if r.plan_status is not None:
+            self.plan_restart(req_id)
+        return r
+
+    def _cascade_reset_spec(self, r: Requirement) -> None:
+        """Quiet spec reset used by plan_restart; no deadlock precondition."""
+        if r.spec_status is None:
+            return
+        if self.spec_orchestrator is not None:
+            try:
+                self.spec_orchestrator.archive_trace(r.req_id, suffix="cascade")
+            except Exception:
+                LOGGER.exception(
+                    "cascade spec archive failed req_id=%s", r.req_id,
+                )
+        r.spec_status = None
+        r.spec_document_id = ""
+        r.spec_document_url = ""
+        r.spec_deadlocked = False
+        r.spec_transform_snapshot = None
+        r.spec_source_revision = ""
+        r.transform_trace_digest = ""
+        r.spec_pr_url = ""

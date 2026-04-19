@@ -54,6 +54,8 @@ REVIEW_CALLBACK_EVENT_ALIASES = {
 }
 
 SPEC_RESTART_RE = re.compile(r"^/spec\s+restart\s+(REQ-\S+)\s*$")
+PLAN_RESTART_RE = re.compile(r"^/plan\s+restart\s+(REQ-\S+)\s*$")
+DESIGN_RESTART_RE = re.compile(r"^/design\s+restart\s+(REQ-\S+)\s*$")
 
 
 @dataclass
@@ -138,6 +140,8 @@ class CoordinatorRuntimeApp:
             service=self.service,
             gateway=self.gateway,
         )
+        from .plan_context import PlanContextBuilder
+        self._plan_context_builder = PlanContextBuilder(service=self.service)
 
     def build_event_dispatcher(self):
         self._require_lark()
@@ -193,10 +197,16 @@ class CoordinatorRuntimeApp:
                     status, payload = app.handle_openclaw_requirement_context_query(raw_body, headers=headers)
                 elif self.path == "/queries/openclaw/spec-context":
                     status, payload = app.handle_openclaw_spec_context_query(raw_body, headers=headers)
+                elif self.path.startswith("/queries/openclaw/plan-context/"):
+                    req_id = self.path.rsplit("/", 1)[-1]
+                    status, payload = app.handle_openclaw_plan_context_query(req_id)
                 elif self.path == "/callbacks/openclaw/spec-turn":
                     status, payload = app.handle_openclaw_spec_turn_callback(raw_body, headers=headers)
                 elif self.path == "/callbacks/openclaw/spec-transform":
                     status, payload = app.handle_openclaw_spec_transform_callback(raw_body, headers=headers)
+                elif self.path == "/openclaw/plan-callback":
+                    body_json = json.loads(raw_body.decode("utf-8") or "{}")
+                    status, payload = app.handle_openclaw_plan_callback(body_json)
                 else:
                     status, payload = 404, {"error": "not_found"}
                 body = json.dumps(payload, ensure_ascii=False).encode()
@@ -245,6 +255,10 @@ class CoordinatorRuntimeApp:
         m = SPEC_RESTART_RE.match(text)
         if m:
             return self._handle_spec_restart_command(req_id=m.group(1), context=context)
+
+        reply = self.handle_slash_command(text)
+        if reply is not None:
+            return [OutboundMessage(receive_id=context.chat_id, text=reply)]
 
         if self._is_creation_group_message(context):
             return self._handle_creation_group_message(context)
@@ -911,6 +925,86 @@ class CoordinatorRuntimeApp:
             "context_token": result.context_token,
             "expires_hint": "valid until SPEC_LOCKED or a newer token is issued",
         }
+
+    def handle_openclaw_plan_context_query(
+        self, req_id: str,
+    ) -> tuple[int, dict]:
+        from .plan_context import (
+            PlanContextGateError, PlanContextMisconfigured,
+        )
+        r = self.service.requirements.get(req_id)
+        if r is None:
+            return 404, {"error": "not_found", "req_id": req_id}
+        try:
+            ctx = self._plan_context_builder.build(req_id)
+            return 200, ctx
+        except PlanContextGateError as exc:
+            return 409, {"error": "gate_failed", "message": str(exc)}
+        except PlanContextMisconfigured as exc:
+            return 409, {"error": "misconfigured", "message": str(exc)}
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.exception("plan-context failed req_id=%s", req_id)
+            return 500, {"error": "plan_context_failed", "message": str(exc)}
+
+    def handle_slash_command(self, text: str) -> str | None:
+        """Return human-readable reply, or None if no match."""
+        m = PLAN_RESTART_RE.match(text.strip())
+        if m:
+            req_id = m.group(1)
+            try:
+                self.service.plan_restart(req_id)
+            except KeyError:
+                return f"未知需求：{req_id}"
+            except ValueError as exc:
+                return f"不能执行 /plan restart {req_id}：{exc}"
+            self._save_state()
+            return f"规划层已重置（含下游 spec 级联清理）：{req_id}"
+        m = DESIGN_RESTART_RE.match(text.strip())
+        if m:
+            req_id = m.group(1)
+            try:
+                self.service.design_restart(req_id)
+            except KeyError:
+                return f"未知需求：{req_id}"
+            except ValueError as exc:
+                return f"不能执行 /design restart {req_id}：{exc}"
+            self._save_state()
+            return f"设计层已重置（含下游 plan + spec 级联清理）：{req_id}"
+        return None
+
+    def handle_openclaw_plan_callback(
+        self, body: dict,
+    ) -> tuple[int, dict]:
+        req_id = body.get("req_id", "")
+        event = body.get("event", "")
+        payload = body.get("payload") or {}
+
+        r = self.service.requirements.get(req_id)
+        if r is None:
+            return 404, {"error": "not_found", "req_id": req_id}
+
+        try:
+            if event == "plan_outline_submit":
+                self.service.set_plan_outline(req_id, payload.get("outline", []))
+                self._save_state()
+                return 200, {"req_id": req_id, "plan_phase": "decisions_in_progress"}
+            if event == "plan_submit":
+                self.service.plan_submit(
+                    req_id,
+                    plan_md_content=payload.get("plan_md_content", ""),
+                    architecture_change=payload.get("architecture_change"),
+                )
+                self._save_state()
+                return 200, {
+                    "req_id": req_id,
+                    "plan_status": r.plan_status.value if r.plan_status else None,
+                }
+            return 400, {"error": "unknown_event", "event": event}
+        except ValueError as exc:
+            return 409, {"error": "invalid_state", "message": str(exc)}
+        except Exception as exc:  # pragma: no cover
+            LOGGER.exception("plan-callback failed req_id=%s event=%s", req_id, event)
+            return 500, {"error": "plan_callback_failed", "message": str(exc)}
 
     def handle_openclaw_spec_turn_callback(
         self,
