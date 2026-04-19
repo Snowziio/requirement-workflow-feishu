@@ -57,3 +57,45 @@ def test_project_repo_tools_is_protocol():
         def cleanup_failed_branch(self, project_repo, branch): ...
 
     assert isinstance(Dummy(), ProjectRepoTools)
+
+
+# ── GitHubProjectRepoTools.fetch_project_context ────────────────────────
+from unittest.mock import MagicMock
+
+from requirement_workflow_v12.github_gateway import GitHubGatewayError
+from requirement_workflow_v12.project_repo.tools import GitHubProjectRepoTools
+
+
+def _mock_gateway():
+    gw = MagicMock()
+    gw.fetch_file_sha = MagicMock(side_effect=lambda repo, ref, path: {
+        "ARCHITECTURE.yaml": ("arch-sha", "kind: Architecture\n"),
+        "acm-registry.yaml": ("reg-sha", "version: 3\n"),
+    }[path])
+    return gw
+
+
+def test_fetch_project_context_combines_two_files():
+    tools = GitHubProjectRepoTools(_mock_gateway())
+
+    ctx = tools.fetch_project_context("acme/repo")
+
+    assert ctx.project_repo == "acme/repo"
+    assert ctx.arch_sha == "arch-sha"
+    assert ctx.arch_text == "kind: Architecture\n"
+    assert ctx.registry_sha == "reg-sha"
+    assert ctx.registry_text == "version: 3\n"
+
+
+def test_fetch_project_context_wraps_gateway_error():
+    gw = MagicMock()
+    gw.fetch_file_sha = MagicMock(
+        side_effect=GitHubGatewayError(404, "not found"),
+    )
+    tools = GitHubProjectRepoTools(gw)
+
+    with pytest.raises(ProjectRepoError) as exc_info:
+        tools.fetch_project_context("acme/repo")
+    assert "fetch_project_context" in str(exc_info.value)
+    assert exc_info.value.__cause__ is not None
+    assert exc_info.value.recoverable is False

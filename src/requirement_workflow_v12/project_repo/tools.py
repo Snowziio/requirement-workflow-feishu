@@ -47,3 +47,24 @@ class GitHubProjectRepoTools:
 
     def __init__(self, gateway: "GitHubGateway"):
         self._gw = gateway
+
+    def fetch_project_context(self, project_repo: str) -> ProjectContext:
+        try:
+            arch_sha, arch_text = self._gw.fetch_file_sha(
+                project_repo, "main", "ARCHITECTURE.yaml",
+            )
+            registry_sha, registry_text = self._gw.fetch_file_sha(
+                project_repo, "main", "acm-registry.yaml",
+            )
+        except GitHubGatewayError as exc:
+            raise ProjectRepoError(
+                f"fetch_project_context failed for {project_repo}: {exc}",
+                recoverable=False,
+            ) from exc
+        return ProjectContext(
+            project_repo=project_repo,
+            arch_sha=arch_sha,
+            arch_text=arch_text,
+            registry_sha=registry_sha,
+            registry_text=registry_text,
+        )
