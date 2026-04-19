@@ -854,6 +854,14 @@ class CoordinatorService:
         )
         return r
 
+    def set_plan_outline(self, req_id: str, outline: list[dict]) -> Requirement:
+        r = self.requirements[req_id]
+        if r.plan_status is not PlanStatus.DRAFTING:
+            raise ValueError("plan outline can only be set in DRAFTING")
+        r.plan_outline = list(outline)
+        r.plan_phase = PlanPhase.DECISIONS_IN_PROGRESS
+        return r
+
     def plan_submit(
         self,
         req_id: str,
