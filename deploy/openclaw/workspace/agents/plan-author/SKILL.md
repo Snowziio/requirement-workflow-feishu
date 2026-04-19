@@ -1,0 +1,1 @@
+../../../../../docs/agents/plan-author/SKILL.md
