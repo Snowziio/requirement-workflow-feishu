@@ -72,7 +72,9 @@ API 入参与测试用例中使用的字段名一致，无矛盾。
 
 ## 输出
 
-**⚠️ 状态机驱动硬约束:** 审查结论形成后,本次会话的**最终动作必须是执行下列 callback 之一**(二选一,不可同时发、不可都不发)。**禁止仅输出审查报告文本就结束会话**——未成功调用 callback,Coordinator 不会推进状态,流程会卡死。
+**⚠️ 状态机驱动硬约束（pass 和 reject 同等重要）:** 审查结论形成后,本次会话的**最终动作必须是执行下列 callback 之一**(二选一,不可同时发、不可都不发)。**禁止仅输出审查报告文本就结束会话**——未成功调用 callback,Coordinator 不会推进状态,流程会卡死。
+
+**特别警告 — pass 分支**: 当你判断 Spec "通过"时,直觉会告诉你"审查工作完成了,可以结束了"。**这个直觉是错的**。Coordinator 依赖 `ai_review_pass` callback 信号才能把状态推到 `HUMAN_CONFIRM`。没有 callback = 流程死锁 = 人工介入。**pass 不代表结束，pass 代表要发 callback**。
 
 callback 调用失败(非 2xx)时必须立即重试,如仍失败则在回复中明确说明"callback 上报失败"并保留现场,禁止伪装成已完成。
 
@@ -99,6 +101,15 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
   --event ai_review_reject \
   --summary "<整体结论一句话，含具体问题>"
 ```
+
+## 反模式（⚠️ 历史 staging 观察到的真实错误）
+
+- ❌ 判决为 pass 后，输出"审查已通过，无问题"然后结束会话，**不调用 callback**
+- ❌ 认为"reject 才需要 callback，pass 可以省略"
+- ❌ 认为"审查报告写完 = 工作完成"（错：状态机只认 callback）
+- ❌ 两个分支都不发 callback，仅回复审查结论文本
+
+历史数据：2026-04-15 staging REQ-test-002 round 2 观察到 AI pass 判决但 callback 未发，流程卡死，需人工手动触发。**不要重复这个错误**。
 
 ## 不允许的行为
 
