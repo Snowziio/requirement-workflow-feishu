@@ -68,3 +68,12 @@ class GitHubProjectRepoTools:
             registry_sha=registry_sha,
             registry_text=registry_text,
         )
+
+    def cleanup_failed_branch(self, project_repo: str, branch: str) -> None:
+        try:
+            self._gw.delete_branch(project_repo, branch)
+        except GitHubGatewayError as exc:
+            _logger.warning(
+                "cleanup_failed_branch could not delete %s/%s: %s",
+                project_repo, branch, exc,
+            )

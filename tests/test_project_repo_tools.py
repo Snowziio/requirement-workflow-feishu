@@ -87,6 +87,33 @@ def test_fetch_project_context_combines_two_files():
     assert ctx.registry_text == "version: 3\n"
 
 
+import logging
+
+
+def test_cleanup_failed_branch_delegates_to_gateway():
+    gw = MagicMock()
+    gw.delete_branch = MagicMock(return_value=None)
+    tools = GitHubProjectRepoTools(gw)
+
+    tools.cleanup_failed_branch("acme/repo", "spec/REQ-P-1")
+
+    gw.delete_branch.assert_called_once_with("acme/repo", "spec/REQ-P-1")
+
+
+def test_cleanup_failed_branch_swallows_gateway_error(caplog):
+    gw = MagicMock()
+    gw.delete_branch = MagicMock(
+        side_effect=GitHubGatewayError(500, "server err"),
+    )
+    tools = GitHubProjectRepoTools(gw)
+
+    with caplog.at_level(logging.WARNING):
+        tools.cleanup_failed_branch("acme/repo", "spec/REQ-P-1")
+
+    assert "cleanup_failed_branch" in caplog.text
+    assert "spec/REQ-P-1" in caplog.text
+
+
 def test_fetch_project_context_wraps_gateway_error():
     gw = MagicMock()
     gw.fetch_file_sha = MagicMock(
