@@ -641,6 +641,10 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 
 目标：ACM 注册表积累，ARCHITECTURE.yaml 持续更新，AI 干预点逐渐减少，验证飞轮效应。
 
+### 副作用职责边界
+
+Coordinator 侧所有对 GitHub 等外部系统的写入（commit、PR、分支）一律在状态机转移的 `on_enter`/`on_exit` 钩子里触发；状态机本身保持纯函数不做 I/O。新状态接入时通过 `StateTransitionHooks.on_enter` 注册回调，而非在 `submit_checkpoint_*` 里堆 if/else。参见 [infra/state-machine-hook-pattern.md](infra/state-machine-hook-pattern.md) 与 [docs/superpowers/specs/2026-04-19-project-repo-tools-design.md](../superpowers/specs/2026-04-19-project-repo-tools-design.md) § 4。
+
 ---
 
 ## 附录：关键术语表（A-Z 索引）
