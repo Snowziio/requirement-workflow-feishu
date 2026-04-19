@@ -377,6 +377,19 @@ def _on_enter_transforming(self, r: Requirement):
 
 状态转移的原子性：`fire_exit` 抛异常 → 不应用新状态；`fire_enter` 抛异常 → 状态已应用但副作用失败，需要人工介入（未来可扩展补偿钩子，本期不做）。
 
+**可观测性要求**（向上抛不等于黑盒）：
+- `StateTransitionHooks.fire_enter` / `fire_exit` 在回调抛异常时 **先 log 再 re-raise**，日志字段固定：
+  - `event`：`hook_exception`
+  - `transition`：`enter` / `exit`
+  - `status`：目标 / 离开的 SpecStatus
+  - `req_id`：来自 Requirement
+  - `hook_name`：`fn.__qualname__`
+  - `exception`：类型 + 消息（不含完整 traceback，traceback 进 `logger.exception`）
+- `ProjectRepoError` 构造时必须带 `from exc` 保留 cause chain；调用方在上层 log 时能看到完整链路
+- 钩子抛出的异常类型必须是 `ProjectRepoError` 或其子类（业务钩子自己决定是否包装）；内置 Python 异常（`KeyError` 等）若来自业务 bug，允许穿透，由服务层顶部错误处理统一捕获并记录
+
+单测要求：`test_project_repo_hooks.py` 验证"钩子异常时日志字段齐全"。
+
 ---
 
 ## 五、模块结构
@@ -498,12 +511,59 @@ tests/
 - [ ] staging 环境重跑一次已验证过的完整 spec-transform 链路（REQ-test2-002 级别），行为一致
 
 ### 9.4 文档层面
-- [ ] `docs/context/layers/spec-harness-layer.md` 里如有提到 `github_gateway` 的部分更新为 `project_repo.tools`
+- [ ] 按 § 10 "文档同步计划"分发内容到对应文档
 - [ ] 新模块 docstring 符合现有注释风格
 
 ---
 
-## 十、后续衔接
+## 十、文档同步计划（实施完成后执行）
+
+实施完成并通过验收后，按下述分发把内容填进对应文档。**不要把所有细节塞进一个文件**。每个文件只承载属于它的内容。
+
+### 10.1 内容归属原则
+
+| 内容性质 | 归属文件 | 判断标准 |
+|---|---|---|
+| **架构原则**（跨项目复用的设计智慧） | `docs/context/infra/` | "其他项目/未来演进也会用到" |
+| **方法论契约**（工作流和职责约束） | `docs/context/harness-engineering-methodology-v2.0.md` | "约束 agent / 状态机行为的公共规则" |
+| **层实现细节**（特定层的工程选择） | `docs/context/layers/spec-harness-layer.md` | "实施这一层时需要知道的具体做法" |
+| **本次设计记录**（历史决策 + trade-off） | 本 spec 文件（不动） | "为什么当时这么选" —— 审计用 |
+
+### 10.2 具体分发任务
+
+**A. 新增 `docs/context/infra/state-machine-hook-pattern.md`**
+- 覆盖：纯状态机 + 钩子机制的架构原则、适用场景、反模式
+- 来源：本 spec § 2.1 / § 4.2 / § 4.4
+- 不含：facade 接口细节（那是特定实现，不是原则）
+
+**B. 更新 `docs/context/harness-engineering-methodology-v2.0.md`**
+- 位置：§七并发写回契约 之后，新增一小节"副作用职责边界"
+- 覆盖：Coordinator 的 GitHub 操作只在钩子里触发；状态机本身不允许 I/O
+- 仅补一段话 + 指回 `infra/state-machine-hook-pattern.md`
+- 不含：类名、模块路径、代码示例
+
+**C. 更新 `docs/context/layers/spec-harness-layer.md`**
+- 位置：§十一 实现与部署（若无则新增）
+- 覆盖：
+  - `project_repo/` 模块的职责边界（一段话）
+  - 领域动词清单（表格形式，不含完整签名）
+  - 指回本 spec 文件看完整 API
+- 不含：决策 trade-off、迁移步骤、self-review 细节
+
+**D. 不改的文件（明确列出避免误动）**
+- `docs/context/infra/context-chain-principle.md` —— 并发写回契约未变
+- 所有其他 `docs/superpowers/specs/*.md` —— 历史 spec 保留原貌
+
+### 10.3 文档更新的验收
+
+- [ ] A/B/C 三个文件更新完成且 `git diff` 可审
+- [ ] 三处更新**互不重复**内容（同一句话不出现在两个文件里）
+- [ ] 每处更新都有**单向链接**指向本 spec 作为完整参考
+- [ ] 本 spec 文件**不改**（作为不可变历史记录）
+
+---
+
+## 十一、后续衔接
 
 Tool 层 spec 完成并实施后，下一步按顺序：
 
