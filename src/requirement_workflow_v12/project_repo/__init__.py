@@ -5,6 +5,7 @@ depend on this module instead of ``GitHubGateway`` directly.
 """
 from __future__ import annotations
 
+from .tools import GitHubProjectRepoTools, ProjectRepoError, ProjectRepoTools
 from .types import (
     CommitRef,
     PrRef,
@@ -15,8 +16,11 @@ from .types import (
 
 __all__ = [
     "CommitRef",
+    "GitHubProjectRepoTools",
     "PrRef",
     "ProjectContext",
+    "ProjectRepoError",
+    "ProjectRepoTools",
     "RepoRef",
     "SpecArtifacts",
 ]

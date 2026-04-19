@@ -11,6 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import pytest
 from dataclasses import FrozenInstanceError
 
+from requirement_workflow_v12.project_repo.tools import (
+    ProjectRepoError, ProjectRepoTools,
+)
 from requirement_workflow_v12.project_repo.types import (
     ProjectContext, SpecArtifacts, CommitRef, PrRef, RepoRef,
 )
@@ -36,3 +39,21 @@ def test_domain_types_are_frozen_dataclasses():
         owner="o", name="r", html_url="u",
         default_branch="main", initial_commit_sha="s",
     ).owner == "o"
+
+
+def test_project_repo_error_carries_recoverable_flag():
+    err = ProjectRepoError("boom", recoverable=True)
+    assert err.recoverable is True
+    assert "boom" in str(err)
+
+    default = ProjectRepoError("x")
+    assert default.recoverable is False
+
+
+def test_project_repo_tools_is_protocol():
+    class Dummy:
+        def fetch_project_context(self, project_repo): ...
+        def commit_spec_artifacts(self, req_id, artifacts): ...
+        def cleanup_failed_branch(self, project_repo, branch): ...
+
+    assert isinstance(Dummy(), ProjectRepoTools)
