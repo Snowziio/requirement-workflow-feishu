@@ -677,10 +677,12 @@ class CoordinatorService:
         orchestrator.
         """
         from .acm_registry import AcmRegistry
+        from .project_repo import GitHubProjectRepoTools
         from .spec_transform import SpecTransformOrchestrator
         self._acm_registry = AcmRegistry(gateway=github_gateway)
+        tools = GitHubProjectRepoTools(github_gateway)
         self.spec_orchestrator = SpecTransformOrchestrator(
-            gateway=github_gateway,
+            tools=tools,
             registry=self._acm_registry,
             feishu=feishu,
             trace_dir=trace_dir,

@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from requirement_workflow_v12.project_repo import GitHubProjectRepoTools
 from requirement_workflow_v12.spec_transform import (
     TransformContextSnapshot, RoundContext, TraceWriter,
 )
@@ -71,7 +72,6 @@ def test_on_enter_transforming_captures_snapshot_and_writes_trace(tmp_path):
         ("arch-sha", "ARCHITECTURE: yaml"),
         ("registry-sha", "version: 3\nentries: []"),
     ])
-    gateway.create_branch = MagicMock()
     registry = MagicMock()
     registry.parse_active_slice.return_value = ["AC-001", "AC-002"]
 
@@ -80,7 +80,7 @@ def test_on_enter_transforming_captures_snapshot_and_writes_trace(tmp_path):
 
     from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
     orch = SpecTransformOrchestrator(
-        gateway=gateway, registry=registry,
+        tools=GitHubProjectRepoTools(gateway), registry=registry,
         feishu=feishu, trace_dir=tmp_path,
     )
     snap = orch.on_enter_transforming(
@@ -91,7 +91,6 @@ def test_on_enter_transforming_captures_snapshot_and_writes_trace(tmp_path):
     assert snap.architecture_revision == "arch-sha"
     assert snap.acm_registry_revision == "registry-sha"
     assert snap.acm_active_slice == ["AC-001", "AC-002"]
-    gateway.create_branch.assert_called_once()
     trace = (tmp_path / "REQ-P-1.jsonl").read_text()
     assert '"transform_started"' in trace
 
@@ -99,7 +98,7 @@ def test_on_enter_transforming_captures_snapshot_and_writes_trace(tmp_path):
 def test_archive_trace_returns_path_and_drops_round_context(tmp_path):
     from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
     orch = SpecTransformOrchestrator(
-        gateway=MagicMock(), registry=MagicMock(), feishu=MagicMock(),
+        tools=GitHubProjectRepoTools(MagicMock()), registry=MagicMock(), feishu=MagicMock(),
         trace_dir=tmp_path,
     )
     # Pre-existing trace + in-memory ctx (simulates a deadlocked session)
@@ -119,7 +118,7 @@ def test_archive_trace_returns_path_and_drops_round_context(tmp_path):
 def test_archive_trace_returns_none_when_no_trace(tmp_path):
     from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
     orch = SpecTransformOrchestrator(
-        gateway=MagicMock(), registry=MagicMock(), feishu=MagicMock(),
+        tools=GitHubProjectRepoTools(MagicMock()), registry=MagicMock(), feishu=MagicMock(),
         trace_dir=tmp_path,
     )
     assert orch.archive_trace("REQ-NONE", suffix="restart") is None
@@ -128,7 +127,7 @@ def test_archive_trace_returns_none_when_no_trace(tmp_path):
 def _orch(tmp_path):
     from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
     return SpecTransformOrchestrator(
-        gateway=MagicMock(), registry=MagicMock(), feishu=MagicMock(),
+        tools=GitHubProjectRepoTools(MagicMock()), registry=MagicMock(), feishu=MagicMock(),
         trace_dir=tmp_path,
     )
 
@@ -148,7 +147,7 @@ def test_handle_transformer_output_pass_returns_wake_reviewer(tmp_path):
         SpecTransformOrchestrator, TransformContextSnapshot, RoundContext,
     )
     orch = SpecTransformOrchestrator(
-        gateway=gateway, registry=registry, feishu=feishu, trace_dir=tmp_path,
+        tools=GitHubProjectRepoTools(gateway), registry=registry, feishu=feishu, trace_dir=tmp_path,
     )
     snap = TransformContextSnapshot(
         req_id="R", spec_source_revision="", architecture_revision="",
@@ -238,7 +237,7 @@ def test_deadlock_callback_invoked(tmp_path):
     from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
     called = []
     orch = SpecTransformOrchestrator(
-        gateway=MagicMock(), registry=MagicMock(), feishu=MagicMock(),
+        tools=GitHubProjectRepoTools(MagicMock()), registry=MagicMock(), feishu=MagicMock(),
         trace_dir=tmp_path,
         on_deadlock=lambda req, reason: called.append((req, reason)),
     )
@@ -254,7 +253,7 @@ def test_recovery_deadlock_callback_invoked(tmp_path):
     from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
     called = []
     orch = SpecTransformOrchestrator(
-        gateway=MagicMock(), registry=MagicMock(), feishu=MagicMock(),
+        tools=GitHubProjectRepoTools(MagicMock()), registry=MagicMock(), feishu=MagicMock(),
         trace_dir=tmp_path,
         on_deadlock=lambda req, reason: called.append((req, reason)),
     )
@@ -279,7 +278,7 @@ def test_on_converged_commits_pr_and_locks(tmp_path):
     feishu = MagicMock()
 
     orch = SpecTransformOrchestrator(
-        gateway=gateway, registry=registry, feishu=feishu, trace_dir=tmp_path,
+        tools=GitHubProjectRepoTools(gateway), registry=registry, feishu=feishu, trace_dir=tmp_path,
     )
     snap = TransformContextSnapshot(
         req_id="REQ-P-1", spec_source_revision="r",
@@ -314,37 +313,6 @@ def test_on_converged_commits_pr_and_locks(tmp_path):
     assert '"locked"' in trace
 
 
-def test_on_enter_transforming_calls_create_branch_with_correct_kwargs(tmp_path):
-    """Regression: create_branch's real signature uses owner/repo/branch/from_branch,
-    not positional project_repo + base."""
-    gateway = MagicMock()
-    gateway.fetch_file_sha = MagicMock(return_value=("arch-sha", "arch yaml"))
-    # Second fetch_file_sha for acm-registry returns a tuple too
-    gateway.fetch_file_sha.side_effect = [
-        ("arch-sha", "arch yaml"),
-        ("reg-sha", "version: 3\nentries: []\n"),
-    ]
-    from requirement_workflow_v12.acm_registry import AcmRegistry
-    registry = AcmRegistry(gateway=gateway)
-    feishu = MagicMock()
-    feishu.fetch_document_revision = MagicMock(return_value="doc-rev")
-    from requirement_workflow_v12.spec_transform import SpecTransformOrchestrator
-    orch = SpecTransformOrchestrator(
-        gateway=gateway, registry=registry, feishu=feishu, trace_dir=tmp_path,
-    )
-    orch.on_enter_transforming(
-        req_id="REQ-P-1", project_repo="acme/repo", spec_doc_id="DOC-1",
-    )
-    gateway.create_branch.assert_called_once()
-    _args, kwargs = gateway.create_branch.call_args
-    assert kwargs == {
-        "owner": "acme",
-        "repo": "repo",
-        "branch": "spec/REQ-P-1",
-        "from_branch": "main",
-    }
-
-
 def _make_regression_fail_orch(tmp_path, **orch_kwargs):
     """Helper: orch where regression scan fails (AC-1 active but not anchored)."""
     from requirement_workflow_v12.acm_registry import AcmRegistry
@@ -356,7 +324,7 @@ def _make_regression_fail_orch(tmp_path, **orch_kwargs):
     ))
     registry = AcmRegistry(gateway=gateway)
     orch = SpecTransformOrchestrator(
-        gateway=gateway, registry=registry, feishu=MagicMock(),
+        tools=GitHubProjectRepoTools(gateway), registry=registry, feishu=MagicMock(),
         trace_dir=tmp_path, **orch_kwargs,
     )
     snap = TransformContextSnapshot(
@@ -455,7 +423,7 @@ def test_on_converged_pr_body_carries_audit_fields_and_callback_kwargs(tmp_path)
 
     registry = AcmRegistry(gateway=gateway)
     orch = SpecTransformOrchestrator(
-        gateway=gateway, registry=registry, feishu=MagicMock(),
+        tools=GitHubProjectRepoTools(gateway), registry=registry, feishu=MagicMock(),
         trace_dir=tmp_path, on_locked=on_locked,
     )
     snap = TransformContextSnapshot(

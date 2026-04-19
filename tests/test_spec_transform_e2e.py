@@ -127,7 +127,8 @@ def test_one_round_converged_locks_spec_with_audit_fields(tmp_path):
 
     svc.submit_checkpoint_1a_pass("REQ-P-1")
     assert req.spec_status is SpecStatus.TRANSFORMING
-    gateway.create_branch.assert_called_once()
+    # fetch_project_context triggered once in on_enter_transforming
+    assert gateway.fetch_file_sha.call_count >= 2  # ARCHITECTURE + acm-registry
 
     action = svc.spec_orchestrator.handle_transformer_output(
         "REQ-P-1", _good_payload(),

@@ -86,6 +86,8 @@ class TraceWriter:
 
 import datetime as _dt
 
+from .project_repo import ProjectRepoError, SpecArtifacts
+
 
 class SpecTransformOrchestrator:
     """Coordinator-side game runner. Holds in-memory RoundContext per req_id.
@@ -94,7 +96,7 @@ class SpecTransformOrchestrator:
     def __init__(
         self,
         *,
-        gateway,
+        tools,
         registry,
         feishu,
         trace_dir: Path,
@@ -105,7 +107,7 @@ class SpecTransformOrchestrator:
         on_deadlock=None,
         on_locked=None,
     ):
-        self._gateway = gateway
+        self._tools = tools
         self._registry = registry
         self._feishu = feishu
         self._trace = TraceWriter(trace_dir)
@@ -139,18 +141,13 @@ class SpecTransformOrchestrator:
         spec_doc_id: str,
     ) -> TransformContextSnapshot:
         spec_rev = self._feishu.fetch_document_revision(spec_doc_id)
-        arch_sha, _ = self._gateway.fetch_file_sha(
-            project_repo, "main", "ARCHITECTURE.yaml",
-        )
-        registry_sha, registry_text = self._gateway.fetch_file_sha(
-            project_repo, "main", "acm-registry.yaml",
-        )
-        active = self._registry.parse_active_slice(registry_text)
+        project_ctx = self._tools.fetch_project_context(project_repo)
+        active = self._registry.parse_active_slice(project_ctx.registry_text)
         snap = TransformContextSnapshot(
             req_id=req_id,
             spec_source_revision=spec_rev,
-            architecture_revision=arch_sha,
-            acm_registry_revision=registry_sha,
+            architecture_revision=project_ctx.arch_sha,
+            acm_registry_revision=project_ctx.registry_sha,
             acm_active_slice=active,
             captured_at=_dt.datetime.now(_dt.timezone.utc).isoformat(),
         )
@@ -164,13 +161,6 @@ class SpecTransformOrchestrator:
                 "acm_active_slice": snap.acm_active_slice,
             },
         })
-        owner, repo_name = project_repo.split("/", 1)
-        self._gateway.create_branch(
-            owner=owner,
-            repo=repo_name,
-            branch=f"spec/{req_id}",
-            from_branch="main",
-        )
         self._rounds[req_id] = RoundContext(snapshot=snap)
         return snap
 
@@ -317,14 +307,28 @@ class SpecTransformOrchestrator:
                     return "deadlock"
 
                 files = self._compose_pr_files(req_id, payload, patched)
+                trace_digest = _compute_trace_digest(self._trace.read_all(req_id))
+                source_revision = ctx.snapshot.spec_source_revision
+                pr_body = (
+                    f"Spec PR for {req_id}.\n\n"
+                    f"spec_source_revision={source_revision} | "
+                    f"transform_round={ctx.round_index} | "
+                    f"transform_trace_digest={trace_digest}"
+                )
+                artifacts = SpecArtifacts(
+                    project_repo=project_repo,
+                    branch=f"spec/{req_id}",
+                    base_branch="main",
+                    files=files,
+                    commit_message=f"feat(spec): {req_id}",
+                    pr_title=f"Spec: {req_id}",
+                    pr_body=pr_body,
+                )
                 try:
-                    self._gateway.commit_spec_pr_files(
-                        project_repo, f"spec/{req_id}",
-                        files, f"feat(spec): {req_id}",
-                    )
+                    pr_ref = self._tools.commit_spec_artifacts(req_id, artifacts)
                     committed = True
                     break
-                except Exception as exc:
+                except ProjectRepoError as exc:
                     if "mismatch" in str(exc).lower() and race_attempt < self._max_race_retries - 1:
                         ctx.race_retry_count += 1
                         self._trace.append(req_id, {
@@ -348,28 +352,13 @@ class SpecTransformOrchestrator:
                     self._on_deadlock_cb(req_id, "acm_race_giveup")
                 return "deadlock"
 
-        owner, repo_name = project_repo.split("/", 1)
-        trace_digest = _compute_trace_digest(self._trace.read_all(req_id))
-        source_revision = ctx.snapshot.spec_source_revision
-        pr_body = (
-            f"Spec PR for {req_id}.\n\n"
-            f"spec_source_revision={source_revision} | "
-            f"transform_round={ctx.round_index} | "
-            f"transform_trace_digest={trace_digest}"
-        )
-        pr = self._gateway.open_pull_request(
-            owner=owner, repo=repo_name,
-            head_branch=f"spec/{req_id}", base_branch="main",
-            title=f"Spec: {req_id}",
-            body=pr_body,
-        )
         self._trace.append(req_id, {
-            "event": "locked", "pr_url": pr.get("html_url"),
+            "event": "locked", "pr_url": pr_ref.html_url,
         })
         self._rounds.pop(req_id, None)
         if self._on_locked_cb is not None:
             self._on_locked_cb(
-                req_id, pr.get("html_url"),
+                req_id, pr_ref.html_url,
                 source_revision=source_revision,
                 trace_digest=trace_digest,
                 transform_round=ctx.round_index,
