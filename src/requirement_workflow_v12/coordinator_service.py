@@ -879,3 +879,35 @@ class CoordinatorService:
         r.plan_status = decision.next_status
         self._hooks.fire_enter(r.plan_status, r)
         return r
+
+    def configure_plan_hooks(self, *, tools) -> None:
+        """Register PLANNING-layer hooks. Idempotent: safe to call twice."""
+        if getattr(self, "_plan_tools", None) is not None:
+            self._plan_tools = tools
+            return
+        self._plan_tools = tools
+        self._hooks.on_enter(
+            PlanStatus.READY, self._commit_plan_and_maybe_architecture,
+        )
+
+    def _commit_plan_and_maybe_architecture(self, r: Requirement) -> None:
+        """``on_enter(PlanStatus.READY)`` hook: atomic commit of plan.md
+        (and ARCHITECTURE.md if architecture_change present)."""
+        draft = r.pending_plan_draft or {}
+        plan_md_content = draft.get("plan_md_content", "")
+        architecture_change = draft.get("architecture_change")
+        project_repo = self._project_repo_for(r.req_id)
+
+        message_parts = [f"plan({r.req_id}): land plan.md"]
+        if architecture_change is not None:
+            message_parts.append("and apply architecture_change")
+        artifacts = PlanArtifacts(
+            project_repo=project_repo,
+            req_id=r.req_id,
+            plan_md_content=plan_md_content,
+            architecture_change=architecture_change,
+            commit_message=" ".join(message_parts),
+        )
+        result = self._plan_tools.commit_plan_artifacts(artifacts)
+        r.plan_pr_url = result.commit_sha
+        r.pending_plan_draft = None
