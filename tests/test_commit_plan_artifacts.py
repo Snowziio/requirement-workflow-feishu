@@ -82,6 +82,51 @@ def test_commit_plan_artifacts_with_architecture_commits_both_files_atomically()
     assert "旧方案" not in arch_content
 
 
+def test_commit_plan_artifacts_raises_recoverable_on_architecture_conflict():
+    gw = MagicMock()
+    gw.fetch_file_sha.return_value = (
+        "arch-sha",
+        "# Architecture\n\n## 会话存储\n\n实际内容不同。\n",
+    )
+    tools = GitHubProjectRepoTools(gateway=gw)
+    arch_change = {
+        "changes": [{
+            "section_path": "## 会话存储",
+            "before": "## 会话存储\n\n期望的旧内容。",
+            "after": "## 会话存储\n\nRedis。",
+            "rationale": "D1",
+        }],
+    }
+    artifacts = PlanArtifacts(
+        project_repo="owner/repo", req_id="REQ-P-3",
+        plan_md_content="---\n---\n",
+        architecture_change=arch_change,
+        commit_message="m",
+    )
+    import pytest
+    with pytest.raises(ProjectRepoError) as exc_info:
+        tools.commit_plan_artifacts(artifacts)
+    assert exc_info.value.recoverable is True
+    gw.commit_files.assert_not_called()
+
+
+def test_commit_plan_artifacts_raises_nonrecoverable_on_commit_failure():
+    from requirement_workflow_v12.github_gateway import GitHubGatewayError
+    gw = MagicMock()
+    gw.commit_files.side_effect = GitHubGatewayError(500, "boom")
+    tools = GitHubProjectRepoTools(gateway=gw)
+    artifacts = PlanArtifacts(
+        project_repo="o/r", req_id="REQ-P-4",
+        plan_md_content="---\n---\n",
+        architecture_change=None,
+        commit_message="m",
+    )
+    import pytest
+    with pytest.raises(ProjectRepoError) as exc_info:
+        tools.commit_plan_artifacts(artifacts)
+    assert exc_info.value.recoverable is False
+
+
 def test_plan_artifacts_is_frozen():
     a = PlanArtifacts(
         project_repo="o/r",
