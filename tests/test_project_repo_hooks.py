@@ -96,3 +96,31 @@ def test_hook_exception_is_fail_fast():
         hooks.fire_enter(SpecStatus.TRANSFORMING, _req())
 
     assert calls == []
+
+
+# Task 3 extension: hooks must accept any hashable status value, not just SpecStatus
+from requirement_workflow_v12.plan_state_machine import PlanStatus
+
+
+def test_hooks_accept_plan_status_keys():
+    hooks = StateTransitionHooks()
+    calls: list[str] = []
+    hooks.on_enter(PlanStatus.DRAFTING, lambda r: calls.append("drafting"))
+    hooks.on_enter(PlanStatus.READY, lambda r: calls.append("ready"))
+
+    hooks.fire_enter(PlanStatus.DRAFTING, _req())
+    hooks.fire_enter(PlanStatus.READY, _req())
+
+    assert calls == ["drafting", "ready"]
+
+
+def test_hook_exception_propagates_for_plan_status():
+    hooks = StateTransitionHooks()
+
+    def boom(_r):
+        raise ProjectRepoError("bad")
+
+    hooks.on_enter(PlanStatus.READY, boom)
+
+    with pytest.raises(ProjectRepoError):
+        hooks.fire_enter(PlanStatus.READY, _req("REQ-Q-1"))
