@@ -911,3 +911,54 @@ class CoordinatorService:
         result = self._plan_tools.commit_plan_artifacts(artifacts)
         r.plan_pr_url = result.commit_sha
         r.pending_plan_draft = None
+
+    def plan_restart(self, req_id: str) -> Requirement:
+        r = self.requirements[req_id]
+        decision = apply_plan_event(r.plan_status, PlanEvent.PLAN_RESTART)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        prev = r.plan_status
+        self._hooks.fire_exit(prev, r)
+        r.plan_status = None
+        r.plan_phase = None
+        r.plan_pr_url = ""
+        r.plan_outline = []
+        r.plan_decisions_wip = []
+        r.pending_plan_draft = None
+        self._cascade_reset_spec(r)
+        return r
+
+    def design_restart(self, req_id: str) -> Requirement:
+        r = self.requirements[req_id]
+        from .plan_state_machine import DesignEvent, apply_design_event
+        decision = apply_design_event(r.design_status, DesignEvent.DESIGN_RESTART)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        r.design_status = None
+        if r.plan_status is not None:
+            self.plan_restart(req_id)
+        return r
+
+    def _cascade_reset_spec(self, r: Requirement) -> None:
+        """Quiet spec reset used by plan_restart; unlike /spec restart
+        it does NOT require deadlock, because the user has already
+        acknowledged cascade intent at the plan layer."""
+        if r.spec_status is None:
+            return
+        if self.spec_orchestrator is not None:
+            try:
+                self.spec_orchestrator.archive_trace(r.req_id, suffix="cascade")
+            except Exception:
+                LOGGER.exception(
+                    "cascade spec archive failed req_id=%s", r.req_id,
+                )
+        r.spec_status = None
+        r.spec_document_id = ""
+        r.spec_document_url = ""
+        r.spec_deadlocked = False
+        r.spec_transform_snapshot = None
+        r.spec_source_revision = ""
+        r.transform_trace_digest = ""
+        r.spec_pr_url = ""
