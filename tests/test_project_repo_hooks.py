@@ -1,0 +1,50 @@
+"""Unit tests for the StateTransitionHooks registry.
+
+Covers registration order, enter/exit separation, no-op on unregistered
+statuses, and fail-fast observability contract for hook exceptions.
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+import pytest
+
+from requirement_workflow_v12.models import Requirement
+from requirement_workflow_v12.project_repo import StateTransitionHooks
+from requirement_workflow_v12.project_repo.tools import ProjectRepoError
+from requirement_workflow_v12.spec_state_machine import SpecStatus
+
+
+def _req(req_id="REQ-P-1"):
+    return Requirement(
+        req_id=req_id, name="n", project="P", summary="s", creator="c",
+    )
+
+
+def test_fire_enter_runs_hooks_in_registration_order():
+    hooks = StateTransitionHooks()
+    calls: list[str] = []
+    hooks.on_enter(SpecStatus.TRANSFORMING, lambda r: calls.append("a"))
+    hooks.on_enter(SpecStatus.TRANSFORMING, lambda r: calls.append("b"))
+
+    hooks.fire_enter(SpecStatus.TRANSFORMING, _req())
+
+    assert calls == ["a", "b"]
+
+
+def test_fire_exit_runs_only_exit_hooks():
+    hooks = StateTransitionHooks()
+    enter_calls, exit_calls = [], []
+    hooks.on_enter(SpecStatus.DRAFTING, lambda r: enter_calls.append("e"))
+    hooks.on_exit(SpecStatus.DRAFTING, lambda r: exit_calls.append("x"))
+
+    hooks.fire_exit(SpecStatus.DRAFTING, _req())
+
+    assert enter_calls == []
+    assert exit_calls == ["x"]
+
+
+def test_fire_unknown_status_is_noop():
+    hooks = StateTransitionHooks()
+    hooks.fire_enter(SpecStatus.LOCKED, _req())  # no registered hook

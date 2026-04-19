@@ -5,6 +5,7 @@ depend on this module instead of ``GitHubGateway`` directly.
 """
 from __future__ import annotations
 
+from .hooks import StateTransitionHooks
 from .tools import GitHubProjectRepoTools, ProjectRepoError, ProjectRepoTools
 from .types import (
     CommitRef,
@@ -23,4 +24,5 @@ __all__ = [
     "ProjectRepoTools",
     "RepoRef",
     "SpecArtifacts",
+    "StateTransitionHooks",
 ]
