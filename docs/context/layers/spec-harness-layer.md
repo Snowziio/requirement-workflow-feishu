@@ -1,8 +1,10 @@
 # 规格层实现规格（规格层 + Harness 层）
 
-> 本文是方法论 [harness-engineering-methodology-v2.0.md](../harness-engineering-methodology-v2.0.md) §5.2–§5.3 规格层的实现细节文档。
+> 本文是方法论 [harness-engineering-methodology-v2.0.md](../harness-engineering-methodology-v2.0.md) §5.3–§5.4 规格层的实现细节文档。
 > 描述目标/使命、上下文契约、六阶段工作流、四文件 Spec 格式、子状态机、转化博弈、Harness 目录结构、卡片模板等。
 > 本文服务 Phase 2（规格层）实施者；Harness 层（§十）服务 Phase 3。
+>
+> **2026-04-19 起**：规格层不再自主做决策；所有"怎么做"的抉择回迁到上游规划层（[planning-harness-layer.md](planning-harness-layer.md)），本层消费 `plan.md` 作为必备输入，`SpecStatus = DRAFTING` 的前置条件包含 `PlanStatus == READY`（若 `needs_ui=true` 还需 `DesignStatus == READY`）。
 
 ---
 
@@ -12,6 +14,7 @@
 |---|---|---|
 | v1 | 2026-04 以前 | 五文件 Spec（requirements.md + design.md + design-ui.md + acceptance.yaml + tasks.md），路径 `spec/REQ-*/`；单阶段状态机 `SPEC_DRAFTING → SPEC_LOCKED` |
 | **v2** | **2026-04-16** | **四文件 Spec**（drop `requirements.md`，acceptance.yaml → `ac-schedule.yaml`），路径迁到 `docs/specs/REQ-*/`；新增中间态 `SPEC_TRANSFORMING` + spec-transformer/reviewer 博弈；新增 Round 0 AC 回显、Computational gate 前置、transform_trace、regression scan 四道工程化闸门 |
+| **v3** | **2026-04-19** | 上游新增规划层：`plan.md` 成为 `spec-context` 的必备输入；`SpecStatus = DRAFTING` 前置条件新增 `PlanStatus == READY`（及 `DesignStatus == READY` 当 needs_ui=true）；spec-author 职责收敛为"决策翻译"，不再自主选型；ARCHITECTURE 演化主通道迁至规划层授权钩子，本层不再写回 ARCHITECTURE 飞书文档（原 context_token / revision 握手保留为过渡态，后续随规划层稳定后清退）|
 
 ---
 
@@ -46,13 +49,15 @@
 
 ### 2.1 规格层消费输入
 
-**唯一合法入口**：`/queries/openclaw/spec-context` 端点（CLI 子命令 `spec-context`）。状态门控：`requirement.status == APPROVED && spec_status ∈ {null, SPEC_DRAFTING}`。
+**唯一合法入口**：`/queries/openclaw/spec-context` 端点（CLI 子命令 `spec-context`）。状态门控：`requirement.status == APPROVED && spec_status ∈ {null, SPEC_DRAFTING} && plan_status == READY && (not needs_ui or design_status == READY)`。
 
 > **禁用**需求层的 `fetch-context`——它不返回 `architecture_doc_url` / `architecture_doc_revision` / `context_token`。
 
 | 上下文产物 | 来源 | 性质 | 用于三元组 |
 |---|---|---|---|
 | 需求文档 8 字段 | 飞书 docx（requirement_document_url） | 只读 | 约束集 + 反馈集 |
+| **`plan.md`（结构化决策日志）** | GitHub `docs/specs/REQ-*/plan.md` | 只读 | 约束集（决策来源锚；spec-author 必须在 design.md 引用 `plan.md#D<id>`） |
+| **design 产物**（若 needs_ui=true） | GitHub `docs/specs/REQ-*/design/` | 只读 | 约束集（UI / 交互依据） |
 | latest_review_summary | Coordinator state | 只读 | — |
 | **ARCHITECTURE 飞书文档** | 飞书项目级 docx（architecture_doc_url）+ 入口 `architecture_doc_revision` | 读入 + 增量合并 + 写回 | 约束集（架构接合点）+ 边界锚 |
 | **acm-registry 切片** | Coordinator 根据技术范围声明过滤后的相关条目 | 只读 | 边界锚（supersedes 依据） |

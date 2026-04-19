@@ -1,5 +1,7 @@
 # Harness Engineering 全自动开发工作流：方法论
-## v2.0 | 2026-04-14
+## v2.0 | 2026-04-14（v2.1 补丁 · 2026-04-19：PLANNING 层）
+
+> **v2.1 补丁摘要（2026-04-19）**：在需求层与规格层之间新增**规划层**（§5.2），承接需求层决策性产出的汇总与架构演化权限闸门；规格层（§5.3）收敛为工程化细化，不再涉及设计/架构变更；原 §5.2–§5.7 相应顺延为 §5.3–§5.8。ARCHITECTURE 演化主通道由规格层回迁到规划层的授权钩子。
 
 > **文档定位**
 >
@@ -12,6 +14,7 @@
 > | 主题 | 文件 |
 > |---|---|
 > | 需求层实现规格 | [layers/requirement-layer.md](layers/requirement-layer.md) |
+> | 规划层实现规格（Plan + 架构授权） | [layers/planning-harness-layer.md](layers/planning-harness-layer.md) |
 > | 规格层实现规格（Spec + Harness） | [layers/spec-harness-layer.md](layers/spec-harness-layer.md) |
 > | 生成→交付层实现规格 | [layers/generation-delivery-layers.md](layers/generation-delivery-layers.md) |
 > | 项目级上下文产物规格 | [infra/project-context.md](infra/project-context.md) |
@@ -95,9 +98,9 @@ AI 的行为规则写入 CLAUDE.md 和 ACM，不靠每次对话约定。规格�
 |---|---|---|
 | **Harness engineering** | 2025–2026 业内共识:围绕 LLM 构建可自驱 coding Agent 所需的全部结构化支撑层 | 本方法论的总名 |
 | **Agent = Model + Harness** | Agent 能力 = 模型能力 × 工程脚手架完备度 | §1 基础设施假设 |
-| **Guides(前馈) / Sensors(反馈)** | Martin Fowler 控制论视角:前馈给约束,反馈给偏离信号 | **约束集**(Guides) / **反馈集**(Sensors),见 §5.2 |
+| **Guides(前馈) / Sensors(反馈)** | Martin Fowler 控制论视角:前馈给约束,反馈给偏离信号 | **约束集**(Guides) / **反馈集**(Sensors),见 §5.3 |
 | **Computational / Inferential** | 可机械判定(pytest / schema) vs 需判断(LLM judge / 人工 review) | 卡点与 AI 审查的二分;Computational 优先、Inferential 兜底 |
-| **Generator-Evaluator loop** | Anthropic "Building Effective Agents" 模式:生成-评审-驳回-再生成 | §5.2 **转化博弈机制**:spec-transformer + spec-transformer-reviewer |
+| **Generator-Evaluator loop** | Anthropic "Building Effective Agents" 模式:生成-评审-驳回-再生成 | §5.3 **转化博弈机制**:spec-transformer + spec-transformer-reviewer |
 | **Spec-Driven Development (SDD)** | 学术/工程社区的规格先行范式,六要素:outcomes/scope/constraints/prior decisions/tasks/verification | 本文四文件 Spec 覆盖全部六要素 |
 | **Rigid tests block completion** | OpenAI Codex 硬约束:测试不通过即不算完成 | P0 Harness 门 + regression scan |
 | **Externalized memory** | 外部化记忆(markdown / yaml,而非 token-中的 context) | 项目级上下文五层 + acm-registry.yaml |
@@ -111,6 +114,7 @@ AI 的行为规则写入 CLAUDE.md 和 ACM，不靠每次对话约定。规格�
 | 层 | 驱动者 | 原始产出 | 派生产出 | 核心概念词 |
 |---|---|---|---|---|
 | 需求层 / Requirements | Coordinator Service | 飞书需求文档(8 节) | — | REQ ID · 双闸门 · 三方交互模型 · UI 两阶段 |
+| 规划层 / Planning | Coordinator + design-author + plan-author | IM 多轮讨论会话 | `docs/specs/REQ-*/design/`（UI 产物，需 `needs_ui=true`）+ `docs/specs/REQ-*/plan.md`（多决策）+ 可选 ARCHITECTURE.md 增量 commit | Decision 结构化 · `architecture_change` 授权闸门 · 三产物列并行 · 级联 restart · 骨架-深入-定稿 三阶段交互 |
 | 规格层 / Spec | Coordinator + spec-author / spec-reviewer / spec-transformer / spec-transformer-reviewer | 飞书 9 节 Spec(人-AI 协作协议) | `docs/specs/REQ-*/` 四文件(design.md + tasks.md + ac-schedule.yaml + harness 骨架)+ `acm-registry.yaml` patch | 三元组(**约束集** / **反馈集** / **边界锚**)· `SPEC_TRANSFORMING` · 转化博弈 · `spec_source_revision` · 卡点 1a |
 | Harness 层 / Harness | `spec-to-harness.yml` Actions | — | `harness/tests/REQ-*/` 完整测试代码 + 覆盖率矩阵 | ACM · P0 门 · 卡点 1b · 视觉回归 |
 | 生成层 / Generation | `harness-confirmed.yml` + Claude Code CLI | — | Impl PR(通过 P0 Harness) | 自修复循环 · `CLAUDE.md` 行为规则 |
@@ -125,15 +129,20 @@ AI 的行为规则写入 CLAUDE.md 和 ACM，不靠每次对话约定。规格�
 | 词 | 最权威定义位置 |
 |---|---|
 | **REQ ID** | §4.3 |
-| **ACM** / **acm-registry.yaml** | §5.2(本 REQ 的 ac-schedule 与根仓库 acm-registry 的角色分工)+ §5.3 |
-| **Harness** | §5.3(生成)、§5.5(消费) |
+| **ACM** / **acm-registry.yaml** | §5.3(本 REQ 的 ac-schedule 与根仓库 acm-registry 的角色分工)+ §5.4 |
+| **Harness** | §5.4(生成)、§5.6(消费) |
 | **项目级上下文五层** | §4.2 |
 | **双闸门**(AI Ready + Human Confirmed) | §5.1 |
 | **卡点 1a / 1b / 2 / 3** | §4.4 |
-| **三元组**(约束集 / 反馈集 / 边界锚) | §5.2 |
-| **转化博弈**(`SPEC_TRANSFORMING` 内部循环) | §5.2 |
-| **`context_token`** + **revision round-trip** | §5.2 ARCHITECTURE 关系 + [infra/context-chain-principle.md §七](infra/context-chain-principle.md#七并发写回契约) |
-| **`spec_source_revision`** | §5.2 转化博弈的设计哲学 |
+| **规划授权闸门**（架构变更人工授权） | §5.2 + [docs/superpowers/specs/2026-04-19-planning-phase-design.md §5](../superpowers/specs/2026-04-19-planning-phase-design.md) |
+| **Decision**（plan.md 的决策原子） | §5.2 + [planning 设计规格 §4](../superpowers/specs/2026-04-19-planning-phase-design.md) |
+| **架构变更钩子 apply**（授权 → 原子落盘） | §5.2 + [infra/state-machine-hook-pattern.md](infra/state-machine-hook-pattern.md) |
+| **三产物列并行**（DesignStatus / PlanStatus / SpecStatus） | §5.2 |
+| **级联 restart**（`/plan restart` 清 Spec；`/design restart` 清 Plan+Spec） | §5.2 |
+| **三元组**(约束集 / 反馈集 / 边界锚) | §5.3 |
+| **转化博弈**(`SPEC_TRANSFORMING` 内部循环) | §5.3 |
+| **`context_token`** + **revision round-trip** | §5.3 ARCHITECTURE 关系 + [infra/context-chain-principle.md §七](infra/context-chain-principle.md#七并发写回契约)；ARCHITECTURE 场景下 2026-04-19 起退出，由规划层钩子事务替代 |
+| **`spec_source_revision`** | §5.3 转化博弈的设计哲学 |
 
 ### 2.4 命名区分(避免混用近义词)
 
@@ -143,9 +152,11 @@ AI 的行为规则写入 CLAUDE.md 和 ACM，不靠每次对话约定。规格�
 |---|---|---|
 | **Spec** | 特指「飞书 9 节 Spec(原始)+ GitHub `docs/specs/REQ-*/` 四文件(派生)」的两阶段载体 | 泛指"规格文档" |
 | **Specification** | ❌ 本文不用此词 | 误以为与 Spec 等同 |
-| **Plan** | ❌ 本文不用此词作为文件名 | 误以为有 `plan.md` |
+| **Plan** | **2026-04-19 起重新定义**：规划层产出的 `docs/specs/REQ-*/plan.md`，一份结构化的多决策日志（YAML frontmatter + Markdown body），可选含 `architecture_change` 块 | 误以为是自由文本设计稿；或误以为 plan 包含代码/AC 细节（那是 spec 职责） |
+| **plan-author** | 规划层 Agent，在 PlanStatus.DRAFTING 期间通过 IM 多轮交互产出 plan.md | 误以为 plan-author 做架构定稿（人授权） |
+| **design-author** | 规划层 Agent，在 DesignStatus.DRAFTING 期间产出 UI/交互设计产物；等 claude design 能力落地后实装 | — |
 | **tasks.md** | 规格层派生产出之一,每行 `- [ ] T-NN: verb (acceptance: AC-K)` | 误以为是自由格式计划稿 |
-| **ARCHITECTURE** | 项目级上下文,跨 REQ 演化的飞书文档;**被规格层消费并增量写回**,但**不是规格层的专属产出物** | 误以为是规格层交付物或前置基础设施 |
+| **ARCHITECTURE** | 项目级上下文,跨 REQ 演化的飞书文档（+ GitHub 侧 ARCHITECTURE.md 镜像）；**2026-04-19 起演化主通道迁至规划层**（通过 plan 的 `architecture_change` 块 + 人工授权 + 钩子原子 apply）；规格层只读消费 | 误以为仍归规格层演化；或误以为是规格层交付物 |
 | **design.md** | 四文件 Spec 之一,承载 **约束集**(接口契约 + 数据模型 + 架构接合点 + supersedes 节) | 误以为是架构文档 |
 | **acceptance.yaml** | ❌ 已更名为 `ac-schedule.yaml`(强调"本 REQ 的 AC 排班表") | 沿用旧名 |
 | **requirements.md** | ❌ v2 不再单独产出(信息并入飞书 9 节 Spec) | 仍按 v1 假定存在 |
@@ -157,28 +168,31 @@ AI 的行为规则写入 CLAUDE.md 和 ACM，不靠每次对话约定。规格�
 整个工作流由三个维度构成：
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                           横向基础设施                                │
-│   人工协同轨（飞书 + OpenClaw）  ║   工程自动化轨（GitHub + CI）       │
-├──────────╥──────────╥─────────╥──────╥──────╥────────╥─────────────┤
-│  需求层   ║ 规格层  ║Harness 层║生成层║验证层║集成层 ║交付层         │
-│Coordinator║  Spec   ║ Harness ║      ║      ║        ║             │
-│ Service  ║          ║         ║      ║      ║        ║             │
-├──────────╨──────────╨─────────╨──────╨──────╨────────╨─────────────┤
-│                     层内子流程（AI 自主处理）                          │
-└─────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              横向基础设施                                      │
+│   人工协同轨（飞书 + OpenClaw）    ║    工程自动化轨（GitHub + CI）             │
+├──────────╥──────────╥──────────╥──────────╥──────╥──────╥────────╥──────────┤
+│ 需求层    ║ 规划层   ║ 规格层   ║Harness 层║生成层║验证层║集成层 ║交付层      │
+│Coordinator║design-   ║  Spec   ║ Harness  ║      ║      ║        ║           │
+│ Service  ║author +  ║          ║          ║      ║      ║        ║           │
+│          ║plan-     ║          ║          ║      ║      ║        ║           │
+│          ║author    ║          ║          ║      ║      ║        ║           │
+├──────────╨──────────╨──────────╨──────────╨──────╨──────╨────────╨──────────┤
+│                        层内子流程（AI 自主处理）                                │
+└──────────────────────────────────────────────────────────────────────────────┘
 
 REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：
-  飞书文档 → Bitable → GitHub branch → PR → ACM → Harness → Impl PR
+  飞书文档 → Bitable → plan.md → GitHub branch → PR → ACM → Harness → Impl PR
 
-四个人工卡点：
-  ⚡ 1a  方案门（Design 层确认，规格层）
-  ⚡ 1b  Harness 门（测试覆盖确认，Harness 层）
-  ⚡ 2   质量门（CI 全量通过，验证层）
-  ⚡ 3   发布门（Staging 验收，集成层）
+五个人工卡点（2026-04-19 起新增「架构授权闸门」）：
+  ⚡ 规划授权  架构变更授权门（仅当 plan.architecture_change 非空，规划层）
+  ⚡ 1a       方案门（规格层飞书 9 节 Spec 确认）
+  ⚡ 1b       Harness 门（测试覆盖确认，Harness 层）
+  ⚡ 2        质量门（CI 全量通过，验证层）
+  ⚡ 3        发布门（Staging 验收，集成层）
 ```
 
-**纵向流程**：从需求到交付的七层流水线（规格层与 Harness 层并列为独立工程层），定义"做什么"。
+**纵向流程**：从需求到交付的八层流水线（2026-04-19 起规划层独立于规格层，spec-author 不再做决策），定义"做什么"。
 
 **横向基础设施**：贯穿所有层的共用基础设施，分为人工协同轨（飞书 + OpenClaw）和工程自动化轨（GitHub + CI）。
 
@@ -207,7 +221,7 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：
 
 | 覆盖层 | 工作流服务 | 说明 |
 |---|---|---|
-| 需求层 + 规格层 | Coordinator Service | 需求层首个参考实现（`Snowziio/requirement-workflow-feishu`）；规格层复用同一服务，延伸出 Spec 子状态机（见 §5.2）并负责卡点 1a 卡片 |
+| 需求层 + 规格层 | Coordinator Service | 需求层首个参考实现（`Snowziio/requirement-workflow-feishu`）；规格层复用同一服务，延伸出 Spec 子状态机（见 §5.3）并负责卡点 1a 卡片 |
 | Harness 层 → 交付层 | checkpoint-handler | 卡点 1b/2/3 卡片、CI 触发、PR 创建 |
 | 生成→验证→集成→交付层 | *待建* | 按同一模板扩展 |
 
@@ -347,13 +361,57 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 
 ---
 
-### 5.2 规格层
+### 5.2 规划层
+
+> **实现状态**：⚙️ 设计完成，待实现（Phase 2a，2026-04-19 引入）｜**细节文件**：[layers/planning-harness-layer.md](layers/planning-harness-layer.md) ｜ **设计规格**：[docs/superpowers/specs/2026-04-19-planning-phase-design.md](../superpowers/specs/2026-04-19-planning-phase-design.md)
+
+**驱动者**：Coordinator Service（Workflow Service 层）+ OpenClaw `design-author` / `plan-author`（能力层，两个新 Agent）。
+
+**使命**：把「怎么做的决策」从规格层剥离出来，分两步完成——先由 `design-author` 在 IM 多轮交互中产出 UI/交互设计产物（`needs_ui = true` 时），再由 `plan-author` 产出 `plan.md`（一份结构化的多决策日志，可选含架构变更块）。规格层在下游**只做决策翻译**，不再自己做决策。
+
+| | 内容 |
+|---|---|
+| **输入** | APPROVED 需求文档 + `needs_ui` 位 + 当前 ARCHITECTURE.md + acm-registry 切片 + 历史 plan（brown-field） |
+| **输出** | `docs/specs/REQ-*/design/`（`needs_ui=true` 时）+ `docs/specs/REQ-*/plan.md`（不可变）+ 可选 ARCHITECTURE.md 增量 commit |
+| **完成标准** | PlanStatus = READY：plan.md 已 commit；若含架构变更，已通过人工授权闸门并原子 apply 到 ARCHITECTURE.md |
+
+**核心机制**：
+
+**三产物列并行架构**（与现有 SpecStatus 同构）：
+
+```
+DesignStatus：None → DRAFTING → READY              （仅 needs_ui=true 时激活）
+PlanStatus：  None → DRAFTING → AUTH_PENDING → READY
+SpecStatus：  None → DRAFTING → TRANSFORMING → LOCKED
+```
+
+列与列之间的推进由 Coordinator 检查 precondition（DesignStatus.READY 是 PlanStatus 启动的前提；PlanStatus.READY 是 SpecStatus 启动的前提），列自身是纯状态机。
+
+**plan.md 的"决策显式化"价值**：plan.md 的每个 Decision 包含 `problem / alternatives[{name, summary, pros, cons, risks}] / chosen / rationale / trade_offs`——强制 plan-author 展示推理过程，拒绝单一"选定方案"的黑盒。spec-author 消费 plan.md 时用 `decision_id` 引用，严禁重新推理。
+
+**架构变更授权闸门**：plan.md 可选包含 `architecture_change` 块（含结构化 `changes[]`：`section_path / before / after / rationale`）。若非空，PlanStatus.DRAFTING 结束后进入 AUTH_PENDING 态、卡片触发人工授权；授权通过后 `on_enter(PlanStatus.READY)` 钩子原子 apply 到 ARCHITECTURE.md 并与 plan.md 同 commit（见 [infra/state-machine-hook-pattern.md](infra/state-machine-hook-pattern.md)）。
+
+**级联 restart**：`/plan restart` 自动 reset SpecStatus；`/design restart` 自动 reset PlanStatus + SpecStatus；用确认卡片列出将清理的下游产物，避免用户意外丢失工作。
+
+**交互模式**：plan-author 走"骨架 + 深入 + 定稿"三阶段——先产出 decision 骨架 let 人确认范围，然后逐个 decision 多轮提问讨论（pros/cons/rationale 来自真实对话），最后一次性产出 plan.md 整体定稿供人 final approve。这个模式和 claude design 未来的交互风格保持同构。
+
+**本阶段实施范围**：`plan-author` + `plan.md` 完整落地；`design-author` 仅占状态机位置和端点 stub（等 claude design 能力落地后再实装）。
+
+**ARCHITECTURE 关系**：规划层是 ARCHITECTURE **演化的主通道**（规格层只读消费 ARCHITECTURE，不再负责演化）。架构变更走 `architecture_change` 块 → 人工授权 → 钩子原子 apply 的单一路径，消除了规格层期间的并发写回复杂度。
+
+实现细节（`plan.md` schema、状态机事件表、卡片模板、钩子契约、端点契约、Agent prompt 契约）见 [layers/planning-harness-layer.md](layers/planning-harness-layer.md) 和 [docs/superpowers/specs/2026-04-19-planning-phase-design.md](../superpowers/specs/2026-04-19-planning-phase-design.md)。
+
+---
+
+### 5.3 规格层
 
 > **实现状态**：⚙️ 设计完成，待实现（Phase 2）｜**细节文件**：[layers/spec-harness-layer.md](layers/spec-harness-layer.md)
 
 **驱动者**：Coordinator Service（Workflow Service 层）+ OpenClaw spec-author / spec-reviewer / spec-transformer / spec-transformer-reviewer（能力层）。
 
-**使命**：把「模糊的客户需求」转化为「让生成层能够自驱 coding 的**机器可解析三元组**」。飞书 9 节 Spec 不是本层交付物，而是「人-AI 协作协议」；一旦卡点 1a 通过，后续各层只消费 GitHub 四文件。
+**使命**：把「规划层已定决策」+「APPROVED 需求」转化为「让生成层能够自驱 coding 的**机器可解析三元组**」。飞书 9 节 Spec 不是本层交付物，而是「人-AI 协作协议」；一旦卡点 1a 通过，后续各层只消费 GitHub 四文件。
+
+> **2026-04-19 起**：规格层**不再做决策**——所有「怎么做」的决策由规划层（§5.2）的 plan-author 产出 plan.md 承载；spec-author 的职责回落为**决策翻译**（把 Decision 翻译为 9 节 Spec 的工程契约），引用 `decision_id` 而非重新推理。
 
 **三元组交付**（本层的唯一实质产出）：
 
@@ -363,7 +421,7 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 
 | | 内容 |
 |---|---|
-| **输入** | APPROVED 需求文档 + `needs_ui = true` 时的高保真 UI 原型 + 项目级上下文（ARCHITECTURE 当前 revision + ACM 注册表 + 设计系统快照） |
+| **输入** | APPROVED 需求文档 + **规划层产出的 `plan.md`**（必备，从 2026-04-19 起）+ `needs_ui = true` 时的高保真 UI 原型（规划层 design 产物，claude design 实装后）+ 项目级上下文（ARCHITECTURE 当前 revision + ACM 注册表 + 设计系统快照） |
 | **输出** | **原始产出**：飞书 9 节 Spec（卡点 1a 锁定的协作草稿）<br>**派生产出**：GitHub 四文件（`design.md` + `tasks.md` + `ac-schedule.yaml` + harness 骨架）+ `acm-registry.yaml` patch，统一落在 `docs/specs/REQ-{PROJECT}-{NNN}/` 的 Spec PR |
 | **完成标准** | 卡点 1a 通过 → 博弈收敛（或死锁后人工兜底）→ Spec PR 合入 → `SPEC_LOCKED` |
 
@@ -425,13 +483,13 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 - **凭据隔离**——所有 GitHub I/O 由 Coordinator 的 `GitHubGateway` 独占，agent 只产文本；能力层替换零风险，凭据审计面收敛到单一进程。
 - **单向审计**——`spec_source_revision` + Spec PR number + `transform_round` 合成单向链路（飞书 → GitHub），不做双向握手（飞书 Spec PR 合入后已冻结，无并发写回风险）。
 
-**ARCHITECTURE 与本层的关系**：ARCHITECTURE 是**项目级上下文**（见 §4.2），被规格层"消费并演化"，不是本层专属产出物。并发写回的 `context_token` + revision round-trip 协议见 [infra/context-chain-principle.md §七](infra/context-chain-principle.md#七并发写回契约)。ACM / 设计系统快照在本层是**只读输入**。
+**ARCHITECTURE 与本层的关系**：**2026-04-19 起调整**——ARCHITECTURE 的**演化主通道回迁到规划层**（通过 plan.md 的 `architecture_change` 块 + 人工授权闸门 + `on_enter(PlanStatus.READY)` 钩子原子 apply）。**规格层只读消费 ARCHITECTURE**，不再负责并发写回。原先在本层的 `context_token` + revision round-trip 协议（见 [infra/context-chain-principle.md §七](infra/context-chain-principle.md#七并发写回契约)）在 ARCHITECTURE 的写回场景下退出，规划层钩子事务替代之；本层仅在未来如需触发架构二次变更时保留该协议作为 fallback。ACM / 设计系统快照在本层是**只读输入**。
 
 实现细节（四文件字段 schema、Agent prompt 契约、博弈参数、卡片模板、harness 目录结构、治理事件）见 [layers/spec-harness-layer.md](layers/spec-harness-layer.md)。
 
 ---
 
-### 5.3 Harness 层
+### 5.4 Harness 层
 
 > **实现状态**：⚙️ 设计完成，待实现（Phase 3）｜**细节文件**：[layers/spec-harness-layer.md §十](layers/spec-harness-layer.md)
 
@@ -457,9 +515,9 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 
 ---
 
-### 5.4 生成层
+### 5.5 生成层
 
-> **实现状态**：📋 概念阶段（Phase 3）｜**细节文件**：[layers/generation-delivery-layers.md](layers/generation-delivery-layers.md)（5.4–5.7 合并，待层成熟时拆分）
+> **实现状态**：📋 概念阶段（Phase 3）｜**细节文件**：[layers/generation-delivery-layers.md](layers/generation-delivery-layers.md)（5.5–5.8 合并，待层成熟时拆分）
 
 **驱动者**：`harness-confirmed.yml` GitHub Actions workflow 触发 Claude Code CLI
 
@@ -479,9 +537,9 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 
 ---
 
-### 5.5 验证层
+### 5.6 验证层
 
-> **实现状态**：📋 概念阶段（Phase 3）｜**细节文件**：[layers/generation-delivery-layers.md](layers/generation-delivery-layers.md)（5.4–5.7 合并，待层成熟时拆分）
+> **实现状态**：📋 概念阶段（Phase 3）｜**细节文件**：[layers/generation-delivery-layers.md](layers/generation-delivery-layers.md)（5.5–5.8 合并，待层成熟时拆分）
 
 **驱动者**：GitHub Actions CI（自动）+ checkpoint-handler（卡点2）
 
@@ -497,9 +555,9 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 
 ---
 
-### 5.6 集成层
+### 5.7 集成层
 
-> **实现状态**：📋 概念阶段（Phase 3）｜**细节文件**：[layers/generation-delivery-layers.md](layers/generation-delivery-layers.md)（5.4–5.7 合并，待层成熟时拆分）
+> **实现状态**：📋 概念阶段（Phase 3）｜**细节文件**：[layers/generation-delivery-layers.md](layers/generation-delivery-layers.md)（5.5–5.8 合并，待层成熟时拆分）
 
 **驱动者**：`staging.yml` GitHub Actions workflow（合并后自动触发）
 
@@ -515,9 +573,9 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 
 ---
 
-### 5.7 交付层
+### 5.8 交付层
 
-> **实现状态**：📋 概念阶段（Phase 3）｜**细节文件**：[layers/generation-delivery-layers.md](layers/generation-delivery-layers.md)（5.4–5.7 合并，待层成熟时拆分）
+> **实现状态**：📋 概念阶段（Phase 3）｜**细节文件**：[layers/generation-delivery-layers.md](layers/generation-delivery-layers.md)（5.5–5.8 合并，待层成熟时拆分）
 
 **驱动者**：`deploy.yml` GitHub Actions workflow（卡点3 后触发）
 
@@ -698,6 +756,7 @@ Coordinator 侧所有对 GitHub 等外部系统的写入（commit、PR、分支�
 ---
 
 *v2.0 | 2026-04-14 | 方法论文档重构：总-分结构，实现细节移入 layers/ 和 infra/ 细分文件*
-*v2.0 · §5.2 更新 | 2026-04-16 | 规格层引入 `SPEC_TRANSFORMING` 中间态 + spec-transformer 博弈 + 四文件 Spec（`docs/specs/REQ-*/`）；ARCHITECTURE 定位回归「项目级上下文」。*
+*v2.0 · §5.3 更新 | 2026-04-16 | 规格层引入 `SPEC_TRANSFORMING` 中间态 + spec-transformer 博弈 + 四文件 Spec（`docs/specs/REQ-*/`）；ARCHITECTURE 定位回归「项目级上下文」。*
 *v2.0 · §2 新增 | 2026-04-16 | 术语与产出物地图章节前置；原 §2–§6 顺延为 §3–§7。*
-*v2.0 · 规格层命名与 §5.2/§5.3 精简 | 2026-04-16 | 规格层 A/B 子层命名收敛为「规格层 + Harness 层」；§5.2/§5.3 压缩为概念/流程/哲学层面（六阶段 TL;DR + 四道工程闸门 + 博弈哲学），四文件字段 schema、博弈参数、卡片模板等实现细节统一指向 layers/spec-harness-layer.md。*
+*v2.0 · 规格层命名与 §5.3/§5.4 精简 | 2026-04-16 | 规格层 A/B 子层命名收敛为「规格层 + Harness 层」；§5.3/§5.4 压缩为概念/流程/哲学层面（六阶段 TL;DR + 四道工程闸门 + 博弈哲学），四文件字段 schema、博弈参数、卡片模板等实现细节统一指向 layers/spec-harness-layer.md。*
+*v2.1 · 新增规划层 §5.2 | 2026-04-19 | 在需求层与规格层之间插入「规划层」：承接 APPROVED 需求的决策性产出汇总（plan.md · Decision 结构化），以 `architecture_change` 块作为架构演化的显式授权闸门；DesignStatus / PlanStatus / SpecStatus 三列并行，新增「⚡ 规划授权」为第 5 道工程闸门；spec-author 不再拥有架构变更权。原 §5.2–§5.7 顺延为 §5.3–§5.8；§三 架构图 "七层"→"八层"；§2.3 / §2.4 同步新增相关术语。详见 [docs/superpowers/specs/2026-04-19-planning-phase-design.md](../superpowers/specs/2026-04-19-planning-phase-design.md)。*
