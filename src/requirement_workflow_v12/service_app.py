@@ -980,6 +980,7 @@ class CoordinatorRuntimeApp:
         try:
             if event == "plan_outline_submit":
                 self.service.set_plan_outline(req_id, payload.get("outline", []))
+                self._save_state()
                 return 200, {"req_id": req_id, "plan_phase": "decisions_in_progress"}
             if event == "plan_submit":
                 self.service.plan_submit(
@@ -987,6 +988,7 @@ class CoordinatorRuntimeApp:
                     plan_md_content=payload.get("plan_md_content", ""),
                     architecture_change=payload.get("architecture_change"),
                 )
+                self._save_state()
                 return 200, {
                     "req_id": req_id,
                     "plan_status": r.plan_status.value if r.plan_status else None,
