@@ -66,3 +66,26 @@ class RepoRef:
     html_url: str
     default_branch: str
     initial_commit_sha: str
+
+
+@dataclass(frozen=True)
+class PlanArtifacts:
+    """plan.md content + optional structured architecture diff.
+
+    ``architecture_change`` is the raw payload (dict) carrying
+    ``summary`` / ``changes[]`` / ``authorized*`` — matches plan-author's
+    callback schema. ``None`` means this plan doesn't touch ARCHITECTURE.md.
+    """
+    project_repo: str
+    req_id: str
+    plan_md_content: str
+    architecture_change: dict | None
+    commit_message: str
+
+
+@dataclass(frozen=True)
+class PlanCommitResult:
+    commit_sha: str
+    branch: str
+    plan_md_path: str
+    architecture_updated: bool
