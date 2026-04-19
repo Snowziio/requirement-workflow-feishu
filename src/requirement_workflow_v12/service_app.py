@@ -256,6 +256,10 @@ class CoordinatorRuntimeApp:
         if m:
             return self._handle_spec_restart_command(req_id=m.group(1), context=context)
 
+        reply = self.handle_slash_command(text)
+        if reply is not None:
+            return [OutboundMessage(receive_id=context.chat_id, text=reply)]
+
         if self._is_creation_group_message(context):
             return self._handle_creation_group_message(context)
 
@@ -949,21 +953,23 @@ class CoordinatorRuntimeApp:
             req_id = m.group(1)
             try:
                 self.service.plan_restart(req_id)
-                return f"规划层已重置（含下游 spec 级联清理）：{req_id}"
             except KeyError:
                 return f"未知需求：{req_id}"
             except ValueError as exc:
                 return f"不能执行 /plan restart {req_id}：{exc}"
+            self._save_state()
+            return f"规划层已重置（含下游 spec 级联清理）：{req_id}"
         m = DESIGN_RESTART_RE.match(text.strip())
         if m:
             req_id = m.group(1)
             try:
                 self.service.design_restart(req_id)
-                return f"设计层已重置（含下游 plan + spec 级联清理）：{req_id}"
             except KeyError:
                 return f"未知需求：{req_id}"
             except ValueError as exc:
                 return f"不能执行 /design restart {req_id}：{exc}"
+            self._save_state()
+            return f"设计层已重置（含下游 plan + spec 级联清理）：{req_id}"
         return None
 
     def handle_openclaw_plan_callback(

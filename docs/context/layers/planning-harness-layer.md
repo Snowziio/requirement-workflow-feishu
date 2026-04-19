@@ -250,7 +250,7 @@ plan-author 分三阶段与人协作；每阶段通过 IM 卡片驱动：
 
 ## 八、钩子装配
 
-复用 [infra/state-machine-hook-pattern.md](../infra/state-machine-hook-pattern.md) 模式。装配阶段（`configure_plan_orchestrator`）注册：
+复用 [infra/state-machine-hook-pattern.md](../infra/state-machine-hook-pattern.md) 模式。装配阶段（`configure_plan_hooks`）注册：
 
 ```python
 hooks.on_enter(DesignStatus.DRAFTING, _dispatch_design_author)
@@ -272,7 +272,7 @@ hooks.on_exit(PlanStatus.READY, _notify_spec_precondition_met)
 | 卡片 | 触发点 | 按钮 |
 |---|---|---|
 | 规划启动提醒 | `on_enter(PlanStatus.DRAFTING)` | （无，仅通知） |
-| 骨架确认卡 | plan-author 回调 `plan_outline_ready` | 确认 / 调整（文本回复） |
+| 骨架确认卡 | plan-author 回调 `plan_outline_submit` | 确认 / 调整（文本回复） |
 | 决策进度卡 | 每条 decision 定稿（plan-author 回调） | 继续下一条 / 回看修改 |
 | 定稿预览卡 | plan-author 回调 `plan_draft_ready` | 确认定稿（`PLAN_SUBMIT`） / 打回 |
 | **架构授权卡** | `on_enter(PlanStatus.AUTH_PENDING)` | **授权** / **驳回** |

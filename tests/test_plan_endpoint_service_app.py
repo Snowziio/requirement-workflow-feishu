@@ -159,3 +159,18 @@ def test_slash_plan_restart_unknown_req_returns_error_message(app):
     response = app.handle_slash_command("/plan restart REQ-NOPE")
     assert response is not None
     assert "REQ-NOPE" in response
+
+
+def test_handle_text_message_dispatches_plan_restart(app):
+    from requirement_workflow_v12.plan_state_machine import PlanStatus
+    from requirement_workflow_v12.service_app import MessageContext
+    r = _approved_req(app)
+    r.plan_status = PlanStatus.DRAFTING
+
+    outbound = app.handle_text_message(MessageContext(
+        chat_id="c", chat_type="p2p", user_id="u", text="/plan restart REQ-P-1",
+    ))
+
+    assert len(outbound) == 1
+    assert "REQ-P-1" in outbound[0].text
+    assert r.plan_status is None
