@@ -65,8 +65,10 @@ def _build_runtime_app(tmp_path, *, project_configs=None):
     return app, service, gateway, MessageContext
 
 
-def test_handle_text_message_routes_create_req_command(tmp_path):
+def test_handle_text_message_routes_create_req_bare_returns_card(tmp_path):
+    """Bare `/create req` with at least one PROVISIONED project returns the req card."""
     from requirement_workflow_v12.project_config import ProjectConfig
+    from requirement_workflow_v12.service_app import OutboundCard
 
     project_configs = {
         "test3": ProjectConfig(
@@ -88,12 +90,13 @@ def test_handle_text_message_routes_create_req_command(tmp_path):
         chat_type="group",
         user_id="ou_creator",
         sender_name="Alice",
-        text="/create req test3 会话鉴权",
+        text="/create req",
     )
     messages = app.handle_text_message(ctx)
-    assert len(messages) >= 1
-    reqs = list(service.requirements.values())
-    assert any(r.project == "test3" and r.name == "会话鉴权" for r in reqs)
+    assert len(messages) == 1
+    assert isinstance(messages[0], OutboundCard)
+    # No requirement is created by the slash command itself — only by submit.
+    assert len(service.requirements) == 0
 
 
 def test_handle_text_message_rejects_free_text_creation_in_group(tmp_path):

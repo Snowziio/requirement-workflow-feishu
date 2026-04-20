@@ -411,46 +411,18 @@ class CoordinatorRuntimeApp:
     def _handle_create_req_command(
         self, cmd: "CreateReqCommand", context: MessageContext,
     ) -> list[OutboundMessage | OutboundCard]:
-        existing = self.service.project_configs.get(cmd.project)
-        if existing is None:
+        provisioned = [
+            name for name, cfg in self.service.project_configs.items()
+            if cfg.bootstrap_status == "PROVISIONED"
+        ]
+        if not provisioned:
             return [OutboundMessage(
                 receive_id=context.chat_id,
-                text=(
-                    f"项目 {cmd.project} 不存在。请先 "
-                    "`/create project <name> --category <c> --owner <uid>`。"
-                ),
+                text="尚无已注册（PROVISIONED）的项目，请先 `/create project`。",
             )]
-        if existing.bootstrap_status != "PROVISIONED":
-            return [OutboundMessage(
-                receive_id=context.chat_id,
-                text=(
-                    f"项目 {cmd.project} 当前状态 {existing.bootstrap_status}，"
-                    "未完成 Bootstrap，无法创建 REQ。"
-                ),
-            )]
-        if cmd.category and cmd.category != existing.category:
-            return [OutboundMessage(
-                receive_id=context.chat_id,
-                text=(
-                    f"category 不一致：命令中 {cmd.category!r} 与项目 {cmd.project} "
-                    f"实际 {existing.category!r} 冲突，拒绝创建"
-                ),
-            )]
-        payload = CreationFormPayload(
-            project=cmd.project,
-            name=cmd.name,
-            summary=cmd.summary or cmd.name,
-            creator=context.sender_name or context.user_id,
-            creator_user_id=context.user_id,
-            creation_chat_id=context.chat_id,
-            needs_ui=False,
-            category=existing.category,
-        )
-        request, _, req_id = self._create_requirement_from_form(payload)
-        self._provision_requirement_after_creation(request, req_id)
-        return [OutboundMessage(
+        return [OutboundCard(
             receive_id=context.chat_id,
-            text=f"{req_id} 已创建（project={cmd.project}, name={cmd.name}）。",
+            card=self._build_requirement_creation_card(context),
         )]
 
     def _handle_create_project_command(
@@ -517,12 +489,6 @@ class CoordinatorRuntimeApp:
                     "Bootstrap should have populated it; skipping project-init",
                     req_id, form_payload.project,
                 )
-            else:
-                if form_payload.category and form_payload.category != existing.category:
-                    LOGGER.warning(
-                        "Form supplied mismatched category for existing project %s: got %s, have %s",
-                        form_payload.project, form_payload.category, existing.category,
-                    )
 
         requirement = self.service.get_requirement(req_id)
         if requirement is None:
@@ -1445,6 +1411,10 @@ class CoordinatorRuntimeApp:
             form_payload = self._extract_creation_form_payload(payload, user_id=user_id, user_name=user_name)
             if form_payload is None:
                 return 200, {"toast": {"type": "error", "content": "创建表单字段不完整，请补充项目、名称和简述。"}}
+            project_cfg = self.service.project_configs.get(form_payload.project)
+            if project_cfg is None or project_cfg.bootstrap_status != "PROVISIONED":
+                status_label = project_cfg.bootstrap_status if project_cfg else "不存在"
+                return 200, {"toast": {"type": "error", "content": f"项目 {form_payload.project} 当前状态 {status_label}，无法新建需求。"}}
             request, _, req_id = self._create_requirement_from_form(form_payload)
             threading.Thread(
                 target=self._provision_requirement_after_creation,
@@ -1627,7 +1597,6 @@ class CoordinatorRuntimeApp:
         creation_chat_id = self._normalize_form_value(value.get("creation_chat_id")) or self._observed_creation_group_chat_id
         needs_ui_raw = self._normalize_form_value(form_value.get("needs_ui")).lower()
         needs_ui = needs_ui_raw in ("yes", "true", "1", "是", "需要")
-        category = self._normalize_form_value(form_value.get("category"))
         return CreationFormPayload(
             project=project,
             name=name,
@@ -1639,7 +1608,6 @@ class CoordinatorRuntimeApp:
             priority=self._normalize_form_value(form_value.get("priority")),
             expected_due_date=self._normalize_form_value(form_value.get("expected_due_date")),
             needs_ui=needs_ui,
-            category=category,
         )
 
     def _extract_project_form_payload(
@@ -1877,13 +1845,13 @@ class CoordinatorRuntimeApp:
         }
 
     def _build_requirement_creation_card(self, context: MessageContext) -> dict[str, object]:
-        known_projects = sorted(self.service.project_configs.keys())
-        category_options = [
-            {"text": {"tag": "plain_text", "content": "公开 Web 站点"}, "value": "public-web-site"},
-            {"text": {"tag": "plain_text", "content": "小程序"}, "value": "miniprogram"},
-            {"text": {"tag": "plain_text", "content": "企业内 Bot / Agent"}, "value": "enterprise-bot"},
-            {"text": {"tag": "plain_text", "content": "企业内部应用"}, "value": "enterprise-app"},
-            {"text": {"tag": "plain_text", "content": "SaaS AI 自动化"}, "value": "saas-ai-automation"},
+        provisioned_projects = sorted(
+            name for name, cfg in self.service.project_configs.items()
+            if cfg.bootstrap_status == "PROVISIONED"
+        )
+        project_options = [
+            {"text": {"tag": "plain_text", "content": name}, "value": name}
+            for name in provisioned_projects
         ]
         return {
             "schema": "2.0",
@@ -1900,12 +1868,13 @@ class CoordinatorRuntimeApp:
                         "name": "requirement_create_form",
                         "elements": [
                             {
-                                "tag": "input",
+                                "tag": "select_static",
                                 "name": "project",
                                 "required": True,
                                 "width": "fill",
-                                "label": {"tag": "plain_text", "content": "项目代号"},
-                                "placeholder": {"tag": "plain_text", "content": "例如 HARNESS"},
+                                "label": {"tag": "plain_text", "content": "项目（必填）"},
+                                "placeholder": {"tag": "plain_text", "content": "选择已就绪的项目"},
+                                "options": project_options,
                             },
                             {
                                 "tag": "input",
@@ -1924,25 +1893,6 @@ class CoordinatorRuntimeApp:
                                 "max_length": 500,
                                 "label": {"tag": "plain_text", "content": "需求简述"},
                                 "placeholder": {"tag": "plain_text", "content": "要解决什么问题，期望得到什么结果"},
-                            },
-                            {
-                                "tag": "div",
-                                "text": {
-                                    "tag": "plain_text",
-                                    "content": (
-                                        "项目类目（首次为该项目创建需求时必填；"
-                                        f"已注册的项目：{', '.join(known_projects) or '（无）'}"
-                                        "，已有项目可留空）"
-                                    ),
-                                },
-                            },
-                            {
-                                "tag": "select_static",
-                                "name": "category",
-                                "required": False,
-                                "width": "fill",
-                                "placeholder": {"tag": "plain_text", "content": "选择项目类目"},
-                                "options": category_options,
                             },
                             {
                                 "tag": "input",
