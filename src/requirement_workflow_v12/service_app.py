@@ -349,11 +349,78 @@ class CoordinatorRuntimeApp:
         return []
 
     def _handle_creation_group_message(self, context: MessageContext) -> list[OutboundMessage | OutboundCard]:
-        if "创建需求" not in context.text and "新建需求" not in context.text:
-            return []
+        text = context.text.strip()
+        project_cmd = parse_create_project_command(text)
+        if project_cmd is not None:
+            return self._handle_create_project_command(project_cmd, context)
+        req_cmd = parse_create_req_command(text)
+        if req_cmd is not None:
+            return self._handle_create_req_command(req_cmd, context)
+        if "创建需求" in context.text or "新建需求" in context.text:
+            self._observed_creation_group_chat_id = context.chat_id
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text=(
+                    "REQ 创建已改用固化命令：\n"
+                    "`/create req <project> <name>` （可选 --summary / --category）\n"
+                    "示例：`/create req test3 会话鉴权改造 --summary \"支持JWT\"`"
+                ),
+            )]
+        return []
 
-        self._observed_creation_group_chat_id = context.chat_id
-        return [OutboundCard(receive_id=context.chat_id, card=self._build_requirement_creation_card(context))]
+    def _handle_create_req_command(
+        self, cmd: "CreateReqCommand", context: MessageContext,
+    ) -> list[OutboundMessage | OutboundCard]:
+        existing = self.service.project_configs.get(cmd.project)
+        if existing is None:
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text=(
+                    f"项目 {cmd.project} 不存在。请先 "
+                    "`/create project <name> --category <c> --owner <uid>`。"
+                ),
+            )]
+        if existing.bootstrap_status != "PROVISIONED":
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text=(
+                    f"项目 {cmd.project} 当前状态 {existing.bootstrap_status}，"
+                    "未完成 Bootstrap，无法创建 REQ。"
+                ),
+            )]
+        if cmd.category and cmd.category != existing.category:
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text=(
+                    f"category 不一致：命令中 {cmd.category!r} 与项目 {cmd.project} "
+                    f"实际 {existing.category!r} 冲突，拒绝创建"
+                ),
+            )]
+        payload = CreationFormPayload(
+            project=cmd.project,
+            name=cmd.name,
+            summary=cmd.summary or cmd.name,
+            creator=context.sender_name or context.user_id,
+            creator_user_id=context.user_id,
+            creation_chat_id=context.chat_id,
+            needs_ui=False,
+            category=existing.category,
+        )
+        request, _, req_id = self._create_requirement_from_form(payload)
+        self._provision_requirement_after_creation(request, req_id)
+        return [OutboundMessage(
+            receive_id=context.chat_id,
+            text=f"{req_id} 已创建（project={cmd.project}, name={cmd.name}）。",
+        )]
+
+    def _handle_create_project_command(
+        self, cmd: "CreateProjectCommand", context: MessageContext,
+    ) -> list[OutboundMessage | OutboundCard]:
+        # Task E5 wires this method to the project bootstrap service.
+        return [OutboundMessage(
+            receive_id=context.chat_id,
+            text=f"/create project {cmd.project}: bootstrap wiring pending (Task E5).",
+        )]
 
     def _handle_spec_restart_command(self, *, req_id: str, context: MessageContext) -> list[OutboundMessage]:
         try:
