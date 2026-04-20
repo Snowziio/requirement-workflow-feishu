@@ -491,6 +491,67 @@ class CoordinatorRuntimeApp:
             )
         return request, requirement, response.req_id
 
+    def _run_project_bootstrap_async(self, req) -> None:
+        """Run ProjectBootstrapService.run in a daemon thread and dispatch
+        the result (success or failure) back to the creator chat by text."""
+        from .project_bootstrap.types import BootstrapStepError
+        from .project_bootstrap.service import ValidationError
+        try:
+            result = self._project_bootstrap_service.run(req)
+        except ValidationError as exc:
+            LOGGER.warning("Bootstrap validation failed project=%s: %s", req.project, exc)
+            try:
+                self.gateway.send_text(
+                    req.creator_chat_id, f"Bootstrap 校验失败：{exc}",
+                )
+            except Exception:
+                LOGGER.exception("Failed to send validation-error text")
+            return
+        except BootstrapStepError as exc:
+            LOGGER.warning(
+                "Bootstrap step failed project=%s step=%s: %s",
+                req.project, exc.step.name, exc.message,
+            )
+            try:
+                self.gateway.send_text(
+                    req.creator_chat_id,
+                    (
+                        f"Bootstrap 中断于 Step {int(exc.step)} ({exc.step.name})：{exc.message}\n"
+                        f"请重新 `/create project`，填同样的项目代号即可自动续跑。"
+                    ),
+                )
+            except Exception:
+                LOGGER.exception("Failed to send step-error text")
+            return
+        except Exception:
+            LOGGER.exception("Unexpected Bootstrap failure project=%s", req.project)
+            try:
+                self.gateway.send_text(
+                    req.creator_chat_id,
+                    f"Bootstrap 内部错误，请联系运维查日志。项目：{req.project}",
+                )
+            except Exception:
+                LOGGER.exception("Failed to send unexpected-error text")
+            return
+
+        try:
+            self._save_state()
+        except Exception:
+            LOGGER.exception("Failed to persist state after Bootstrap project=%s", req.project)
+        try:
+            self.gateway.send_text(
+                req.creator_chat_id,
+                (
+                    f"项目 {result.project} 已就绪：\n"
+                    f"- Repo: {result.github_repo_url}\n"
+                    f"- ARCHITECTURE: {result.architecture_doc_url}\n"
+                    f"- 群 chat_id: {result.feishu_chat_id}\n"
+                    f"可开始用 `/create req` 创建需求。"
+                ),
+            )
+        except Exception:
+            LOGGER.exception("Failed to send Bootstrap success text project=%s", req.project)
+
     def _provision_requirement_after_creation(self, request: CreationRequest, req_id: str) -> None:
         form_payload = self._pending_form_payloads.pop(req_id, None)
         if form_payload is not None:
@@ -1386,8 +1447,7 @@ class CoordinatorRuntimeApp:
 
             resume = existing is not None and existing.bootstrap_status != "PROVISIONED"
 
-            from .project_bootstrap.types import BootstrapRequest, BootstrapStepError
-            from .project_bootstrap.service import ValidationError
+            from .project_bootstrap.types import BootstrapRequest
             req = BootstrapRequest(
                 project=form.project,
                 category=form.category,
@@ -1401,34 +1461,16 @@ class CoordinatorRuntimeApp:
                     "tech_stack": form.tech_stack,
                 },
             )
-            try:
-                result = self._project_bootstrap_service.run(req)
-            except ValidationError as exc:
-                self.gateway.send_text(
-                    form.creator_chat_id, f"Bootstrap 校验失败：{exc}",
-                )
-                return 200, {"toast": {"type": "error", "content": str(exc)}}
-            except BootstrapStepError as exc:
-                self.gateway.send_text(
-                    form.creator_chat_id,
-                    (
-                        f"Bootstrap 中断于 Step {int(exc.step)} ({exc.step.name})：{exc.message}\n"
-                        f"请重新 `/create project`，填同样的项目代号即可自动续跑。"
-                    ),
-                )
-                return 200, {"toast": {"type": "error", "content": f"Bootstrap 失败：Step {exc.step.name}"}}
-            self._save_state()
-            self.gateway.send_text(
-                form.creator_chat_id,
-                (
-                    f"项目 {result.project} 已就绪：\n"
-                    f"- Repo: {result.github_repo_url}\n"
-                    f"- ARCHITECTURE: {result.architecture_doc_url}\n"
-                    f"- 群 chat_id: {result.feishu_chat_id}\n"
-                    f"可开始用 `/create req` 创建需求。"
-                ),
-            )
-            return 200, {"toast": {"type": "success", "content": f"项目 {result.project} 已就绪。"}}
+            # Bootstrap takes ~30s (clone, push, docs, group). Feishu drops
+            # the card with 回调超时 if we block the callback that long, so
+            # kick Bootstrap onto a daemon thread and ack immediately.
+            threading.Thread(
+                target=self._run_project_bootstrap_async,
+                args=(req,),
+                daemon=True,
+            ).start()
+            verb = "续跑" if resume else "创建"
+            return 200, {"toast": {"type": "info", "content": f"{verb}中：{req.project}（Bootstrap 约需 30s，完成后会发群消息）"}}
 
         if action_name == "submit_create_requirement":
             form_payload = self._extract_creation_form_payload(payload, user_id=user_id, user_name=user_name)

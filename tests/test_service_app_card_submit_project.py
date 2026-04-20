@@ -20,6 +20,17 @@ from requirement_workflow_v12.project_bootstrap.types import (  # noqa: E402
 from requirement_workflow_v12.project_config import ProjectConfig  # noqa: E402
 
 
+def _wait_for_background_threads(deadline_seconds: float = 5.0) -> None:
+    import threading
+    import time
+    deadline = time.time() + deadline_seconds
+    while time.time() < deadline:
+        non_main = [t for t in threading.enumerate() if t is not threading.main_thread()]
+        if not non_main:
+            return
+        time.sleep(0.02)
+
+
 def _make_app(tmp_path, *, project_configs=None):
     settings = MagicMock(spec=Settings)
     settings.state_store_path = str(tmp_path / "state.json")
@@ -77,6 +88,8 @@ def test_submit_new_project_runs_bootstrap_without_resume(tmp_path):
     app, bootstrap_svc = _make_app(tmp_path)
     status, resp = app._handle_card_action_payload(_submit_payload())
     assert status == 200
+    # Bootstrap runs in a background thread — wait for it.
+    _wait_for_background_threads()
     bootstrap_svc.run.assert_called_once()
     req: BootstrapRequest = bootstrap_svc.run.call_args.args[0]
     assert req.project == "test5"
@@ -85,8 +98,42 @@ def test_submit_new_project_runs_bootstrap_without_resume(tmp_path):
     assert req.creator_chat_id == "oc_chat_x"
     assert req.resume is False
     assert req.github_username == "alice"
-    # Toast shows success
-    assert resp.get("toast", {}).get("type") == "success"
+    # Toast is a fast-path ack, not the final success.
+    assert resp.get("toast", {}).get("type") in ("info", "success")
+
+
+def test_submit_returns_before_bootstrap_completes(tmp_path):
+    """The callback must return within a few hundred ms even if Bootstrap
+    takes tens of seconds — otherwise Feishu shows 回调超时."""
+    import threading
+    import time
+
+    app, bootstrap_svc = _make_app(tmp_path)
+    release = threading.Event()
+
+    def _slow_run(_req):
+        release.wait(timeout=5.0)
+        return BootstrapResult(
+            project="test5",
+            github_repo_url="https://github.com/Snowziio/test5",
+            architecture_doc_id="doc_x",
+            architecture_doc_url="https://feishu.example/doc_x",
+            feishu_chat_id="oc_test5",
+            template_version="saas-ai-automation.v1",
+        )
+
+    bootstrap_svc.run.side_effect = _slow_run
+
+    started = time.time()
+    status, resp = app._handle_card_action_payload(_submit_payload())
+    elapsed = time.time() - started
+    assert status == 200
+    # Must return quickly even though Bootstrap is blocked on `release`.
+    assert elapsed < 0.5, f"callback blocked for {elapsed:.2f}s (>0.5s)"
+
+    release.set()
+    _wait_for_background_threads()
+    bootstrap_svc.run.assert_called_once()
 
 
 def test_submit_existing_nonprovisioned_project_resumes(tmp_path):
@@ -101,6 +148,7 @@ def test_submit_existing_nonprovisioned_project_resumes(tmp_path):
     app, bootstrap_svc = _make_app(tmp_path, project_configs={"test5": existing})
     status, _ = app._handle_card_action_payload(_submit_payload())
     assert status == 200
+    _wait_for_background_threads()
     bootstrap_svc.run.assert_called_once()
     req = bootstrap_svc.run.call_args.args[0]
     assert req.resume is True
@@ -136,6 +184,7 @@ def test_submit_bootstrap_step_error_reports_step(tmp_path):
     )
     status, resp = app._handle_card_action_payload(_submit_payload())
     assert status == 200
+    _wait_for_background_threads()
     app.gateway.send_text.assert_called()
     text = app.gateway.send_text.call_args.args[1]
     assert "CREATE_REPO" in text
@@ -159,6 +208,7 @@ def test_submit_passes_seed_to_bootstrap_via_architecture_md(tmp_path):
     # the full BootstrapRequest; we exposed the seed via its own attribute.
     status, _ = app._handle_card_action_payload(_submit_payload())
     assert status == 200
+    _wait_for_background_threads()
     req: BootstrapRequest = bootstrap_svc.run.call_args.args[0]
     assert req.architecture_seed == {
         "display_name": "Test 5",

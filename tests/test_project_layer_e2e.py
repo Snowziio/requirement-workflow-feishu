@@ -112,6 +112,16 @@ def test_e2e_bootstrap_then_create_req_appends_registry(tmp_path):
     })
     assert status_a == 200
 
+    # Bootstrap runs in a daemon thread — wait for it before asserting.
+    import threading as _threading
+    import time as _time
+    deadline = _time.time() + 5.0
+    while _time.time() < deadline:
+        non_main = [t for t in _threading.enumerate() if t is not _threading.main_thread()]
+        if not non_main:
+            break
+        _time.sleep(0.05)
+
     cfg = state["test3"]
     assert cfg.bootstrap_status == "PROVISIONED"
     service.project_configs["test3"] = cfg
