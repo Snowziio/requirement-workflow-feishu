@@ -180,6 +180,9 @@ class CoordinatorRuntimeApp:
         # Dedupe by message_id; bounded so we don't grow unbounded.
         self._seen_message_ids: collections.OrderedDict[str, None] = collections.OrderedDict()
         self._seen_message_ids_max = 1024
+        # Feishu also re-delivers card actions; dedupe by (open_message_id, action_name).
+        self._seen_card_action_ids: collections.OrderedDict[tuple[str, str], None] = collections.OrderedDict()
+        self._seen_card_action_ids_max = 1024
 
         if settings.github_token:
             from pathlib import Path
@@ -347,6 +350,16 @@ class CoordinatorRuntimeApp:
         self._seen_message_ids[message_id] = None
         while len(self._seen_message_ids) > self._seen_message_ids_max:
             self._seen_message_ids.popitem(last=False)
+        return True
+
+    def _mark_card_action_seen(self, open_message_id: str, action_name: str) -> bool:
+        """Returns True if (open_message_id, action_name) is new; False if already seen."""
+        key = (open_message_id, action_name)
+        if key in self._seen_card_action_ids:
+            return False
+        self._seen_card_action_ids[key] = None
+        while len(self._seen_card_action_ids) > self._seen_card_action_ids_max:
+            self._seen_card_action_ids.popitem(last=False)
         return True
 
     def _on_card_action_trigger(self, data: P2CardActionTrigger):
@@ -1335,6 +1348,17 @@ class CoordinatorRuntimeApp:
         operator = payload.get("operator", {}) or {}
         user_id = operator.get("open_id", "")
         user_name = operator.get("name", "")
+
+        context = payload.get("context", {}) or {}
+        open_message_id = context.get("open_message_id", "") or ""
+        if open_message_id and action_name and not self._mark_card_action_seen(
+            open_message_id, str(action_name)
+        ):
+            LOGGER.info(
+                "Dropping duplicate card action open_message_id=%s action=%s",
+                open_message_id, action_name,
+            )
+            return 200, {"toast": {"type": "info", "content": "已处理，跳过重复回调。"}}
 
         if action_name == "submit_create_project":
             form = self._extract_project_form_payload(
