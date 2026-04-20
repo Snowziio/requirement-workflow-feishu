@@ -2575,6 +2575,21 @@ class CoordinatorRuntimeApp:
                     "value": {"action": "send_spec_author_start", "req_id": requirement.req_id},
                 },
             ]
+        if trigger == "plan_submitted_pending_review":
+            return [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "通过"},
+                    "type": "primary",
+                    "value": {"action": "approve_plan_submit", "req_id": requirement.req_id},
+                },
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "需要修改"},
+                    "type": "default",
+                    "value": {"action": "reject_plan_submit", "req_id": requirement.req_id},
+                },
+            ]
         return []
 
     def _transition_notification_content(self, requirement: Requirement, *, trigger: str) -> tuple[str, str, str, str, str]:

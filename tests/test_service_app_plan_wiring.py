@@ -137,3 +137,18 @@ def test_final_review_passed_card_content_mentions_plan(app):
         r, trigger="final_review_passed"
     )
     assert "Plan" in next_action
+
+
+def test_plan_submitted_pending_review_content_and_actions(app):
+    r = _approved_req(app)
+
+    template, title, reason, result, next_action = app._transition_notification_content(
+        r, trigger="plan_submitted_pending_review"
+    )
+    assert title  # non-empty
+    assert "Plan" in title
+    assert "审查" in result or "审查" in next_action
+
+    actions = app._build_transition_notification_actions(r, trigger="plan_submitted_pending_review")
+    action_names = {a["value"]["action"] for a in actions}
+    assert action_names == {"approve_plan_submit", "reject_plan_submit"}
