@@ -44,6 +44,9 @@ class Settings:
         "OPENCLAW_SPEC_TRANSFORMER_REVIEWER_AGENT_NAME", "Spec 转化审查助手",
     )
     feishu_spec_transform_ops_chat_id: str = os.environ.get("FEISHU_SPEC_TRANSFORM_OPS_CHAT_ID", "")
+    github_template_owner: str = os.environ.get("GITHUB_TEMPLATE_OWNER", "Snowziio")
+    github_template_repo: str = os.environ.get("GITHUB_TEMPLATE_REPO", "Template-repository")
+    github_org_owner: str = os.environ.get("GITHUB_ORG_OWNER", "Snowziio")
 
     def validate_runtime(self) -> None:
         missing = []

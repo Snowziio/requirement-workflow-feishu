@@ -172,12 +172,14 @@ class CoordinatorRuntimeApp:
         store: JsonStateStore | None = None,
         service: CoordinatorService | None = None,
         gateway: FeishuGateway | None = None,
+        project_bootstrap_service: object | None = None,
     ) -> None:
         self.settings = settings
         self.settings.validate_runtime()
         self.store = store or JsonStateStore(settings.state_store_path)
         self.service = service or CoordinatorService()
         self.gateway = gateway or FeishuGateway(settings)
+        self._project_bootstrap_service = project_bootstrap_service
         requirements, active_req_by_user, project_groups, _legacy_project_configs = self.store.load_snapshot()
         project_configs: dict = {}
         list_fn = getattr(self.gateway, "list_project_configs", None)
@@ -213,6 +215,16 @@ class CoordinatorRuntimeApp:
                 trace_dir=trace_dir,
                 feishu=self.gateway,
             )
+            if self._project_bootstrap_service is None:
+                from .project_bootstrap.service import ProjectBootstrapService
+                self._project_bootstrap_service = ProjectBootstrapService(
+                    repo_tools=tools,
+                    feishu_gateway=self.gateway,
+                    github_gateway=github_gateway,
+                    template_owner=settings.github_template_owner,
+                    template_repo=settings.github_template_repo,
+                    new_owner=settings.github_org_owner,
+                )
 
         from .spec_context import SpecContextBuilder
 
@@ -416,10 +428,46 @@ class CoordinatorRuntimeApp:
     def _handle_create_project_command(
         self, cmd: "CreateProjectCommand", context: MessageContext,
     ) -> list[OutboundMessage | OutboundCard]:
-        # Task E5 wires this method to the project bootstrap service.
+        if self._project_bootstrap_service is None:
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text="Bootstrap 服务未启用；请联系运维检查 settings.github_token 配置",
+            )]
+        from .project_bootstrap.types import BootstrapRequest, BootstrapStepError
+        from .project_bootstrap.service import ValidationError
+        req = BootstrapRequest(
+            project=cmd.project,
+            category=cmd.category,
+            owner_user_id=cmd.owner_user_id,
+            creator_chat_id=context.chat_id,
+            resume=cmd.resume,
+        )
+        try:
+            result = self._project_bootstrap_service.run(req)
+        except ValidationError as exc:
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text=f"Bootstrap 校验失败：{exc}",
+            )]
+        except BootstrapStepError as exc:
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text=(
+                    f"Bootstrap 中断于 Step {int(exc.step)} ({exc.step.name})：{exc.message}\n"
+                    f"可使用 `/create project {cmd.project} --category {cmd.category} "
+                    f"--owner {cmd.owner_user_id} --resume` 续跑"
+                ),
+            )]
+        self._save_state()
         return [OutboundMessage(
             receive_id=context.chat_id,
-            text=f"/create project {cmd.project}: bootstrap wiring pending (Task E5).",
+            text=(
+                f"项目 {result.project} 已就绪：\n"
+                f"- Repo: {result.github_repo_url}\n"
+                f"- ARCHITECTURE: {result.architecture_doc_url}\n"
+                f"- 群 chat_id: {result.feishu_chat_id}\n"
+                f"可开始用 `/create req {result.project} <name>` 创建需求。"
+            ),
         )]
 
     def _handle_spec_restart_command(self, *, req_id: str, context: MessageContext) -> list[OutboundMessage]:
