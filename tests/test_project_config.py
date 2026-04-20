@@ -51,3 +51,36 @@ def test_project_config_from_dict_ignores_legacy_onboarding_fields():
     assert cfg.category == "enterprise-bot"
     assert not hasattr(cfg, "onboarding_state")
     assert not hasattr(cfg, "is_new_project")
+
+
+def test_project_config_from_dict_includes_bootstrap_fields():
+    cfg = ProjectConfig.from_dict({
+        "category": "saas-ai-automation",
+        "template_version": "saas-ai-automation.v1",
+        "architecture_doc_id": "doc_x",
+        "architecture_doc_url": "https://example/doc_x",
+        "bootstrap_status": "PROVISIONED",
+        "bootstrap_log": [{"step": 1, "ts": "2026-04-20T10:00:00", "status": "ok"}],
+        "bootstrap_completed_at": "2026-04-20T10:15:00",
+        "project_status": "PROVISIONED",
+        "feishu_chat_id": "oc_chat123",
+    })
+    assert cfg.bootstrap_status == "PROVISIONED"
+    assert cfg.bootstrap_log == [{"step": 1, "ts": "2026-04-20T10:00:00", "status": "ok"}]
+    assert cfg.bootstrap_completed_at == "2026-04-20T10:15:00"
+    assert cfg.project_status == "PROVISIONED"
+    assert cfg.feishu_chat_id == "oc_chat123"
+
+
+def test_project_config_defaults_for_new_fields():
+    cfg = ProjectConfig(
+        category="saas-ai-automation",
+        template_version="saas-ai-automation.v1",
+        architecture_doc_id="",
+        architecture_doc_url="",
+    )
+    assert cfg.bootstrap_status == "UNBOOTSTRAPPED"
+    assert cfg.bootstrap_log == []
+    assert cfg.bootstrap_completed_at is None
+    assert cfg.project_status == "UNBOOTSTRAPPED"
+    assert cfg.feishu_chat_id == ""
