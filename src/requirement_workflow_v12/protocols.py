@@ -51,6 +51,18 @@ class CreationFormPayload:
 
 
 @dataclass
+class ProjectCreationFormPayload:
+    project: str
+    category: str
+    owner_user_id: str
+    creator_chat_id: str
+    display_name: str = ""
+    brief: str = ""
+    github_username: str = ""
+    tech_stack: str = ""
+
+
+@dataclass
 class AgentAuthorEventPayload:
     req_id: str
     event: str
