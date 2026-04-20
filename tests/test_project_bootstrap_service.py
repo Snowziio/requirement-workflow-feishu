@@ -328,3 +328,75 @@ def test_upsert_config_preserves_existing_fields_on_resume():
     cfg = svc.upsert_config(req, template_version="saas-ai-automation.v1")
     assert cfg.architecture_doc_id == "doc_old"
     assert cfg.bootstrap_status == "BOOTSTRAPPING"
+
+
+def test_create_feishu_group_persists_chat_id():
+    from requirement_workflow_v12.project_config import ProjectConfig
+    from requirement_workflow_v12.project_bootstrap.types import BootstrapStep
+
+    prior_steps = [
+        BootstrapStep.UPSERT_CONFIG,
+        BootstrapStep.CREATE_REPO,
+        BootstrapStep.POPULATE_MAIN,
+        BootstrapStep.CREATE_ARCHITECTURE_DOC,
+    ]
+    existing = ProjectConfig(
+        category="saas-ai-automation",
+        template_version="saas-ai-automation.v1",
+        architecture_doc_id="doc_x",
+        architecture_doc_url="https://example/doc_x",
+        bootstrap_status="BOOTSTRAPPING",
+        bootstrap_log=[
+            {"step": int(s), "step_name": s.name, "ts": "t", "status": "ok"}
+            for s in prior_steps
+        ],
+    )
+    svc, _, feishu_gw, _ = _make_service(existing_projects={"test3": existing})
+    feishu_gw.create_project_group.return_value = MagicMock(chat_id="oc_test3_group")
+
+    req = BootstrapRequest(
+        project="test3",
+        category="saas-ai-automation",
+        owner_user_id="ou_1",
+        creator_chat_id="c1",
+    )
+    cfg = svc.create_feishu_group(req)
+    assert cfg.feishu_chat_id == "oc_test3_group"
+    feishu_gw.create_project_group.assert_called_once_with(
+        project="test3", owner_user_id="ou_1", member_user_ids=["ou_1"]
+    )
+
+
+def test_create_feishu_group_skip_when_chat_id_already_set():
+    from requirement_workflow_v12.project_config import ProjectConfig
+    from requirement_workflow_v12.project_bootstrap.types import BootstrapStep
+
+    prior_steps = [
+        BootstrapStep.UPSERT_CONFIG,
+        BootstrapStep.CREATE_REPO,
+        BootstrapStep.POPULATE_MAIN,
+        BootstrapStep.CREATE_ARCHITECTURE_DOC,
+        BootstrapStep.CREATE_FEISHU_GROUP,
+    ]
+    existing = ProjectConfig(
+        category="saas-ai-automation",
+        template_version="saas-ai-automation.v1",
+        architecture_doc_id="doc_x",
+        architecture_doc_url="",
+        bootstrap_status="BOOTSTRAPPING",
+        feishu_chat_id="oc_existing",
+        bootstrap_log=[
+            {"step": int(s), "step_name": s.name, "ts": "t", "status": "ok"}
+            for s in prior_steps
+        ],
+    )
+    svc, _, feishu_gw, _ = _make_service(existing_projects={"test3": existing})
+    req = BootstrapRequest(
+        project="test3",
+        category="saas-ai-automation",
+        owner_user_id="ou_1",
+        creator_chat_id="c1",
+        resume=True,
+    )
+    svc.create_feishu_group(req)
+    feishu_gw.create_project_group.assert_not_called()

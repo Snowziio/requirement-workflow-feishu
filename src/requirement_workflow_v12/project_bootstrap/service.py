@@ -223,3 +223,42 @@ class ProjectBootstrapService:
         )
         self._feishu.upsert_project_config(request.project, cfg)
         return cfg
+
+    def create_feishu_group(self, request: BootstrapRequest) -> ProjectConfig:
+        cfg = self._feishu.list_project_configs()[request.project]
+        if last_completed_step(cfg.bootstrap_log) >= int(
+            BootstrapStep.CREATE_FEISHU_GROUP
+        ):
+            _logger.info(
+                "bootstrap: skipping create_feishu_group (already ok) project=%s",
+                request.project,
+            )
+            return cfg
+
+        try:
+            created = self._feishu.create_project_group(
+                project=request.project,
+                owner_user_id=request.owner_user_id,
+                member_user_ids=[request.owner_user_id],
+            )
+        except Exception as exc:
+            failed_log = append_log_entry(
+                cfg.bootstrap_log,
+                step=BootstrapStep.CREATE_FEISHU_GROUP,
+                status="error",
+                error_msg=str(exc),
+            )
+            cfg = replace(cfg, bootstrap_log=failed_log)
+            self._feishu.upsert_project_config(request.project, cfg)
+            raise BootstrapStepError(
+                step=BootstrapStep.CREATE_FEISHU_GROUP, message=str(exc)
+            ) from exc
+
+        new_log = append_log_entry(
+            cfg.bootstrap_log,
+            step=BootstrapStep.CREATE_FEISHU_GROUP,
+            status="ok",
+        )
+        cfg = replace(cfg, feishu_chat_id=created.chat_id, bootstrap_log=new_log)
+        self._feishu.upsert_project_config(request.project, cfg)
+        return cfg
