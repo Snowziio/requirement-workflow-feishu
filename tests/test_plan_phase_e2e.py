@@ -16,7 +16,7 @@ from requirement_workflow_v12.project_repo import PlanCommitResult
 from requirement_workflow_v12.spec_context import SpecContextBuilder
 
 
-def test_planning_e2e_with_architecture_change():
+def test_planning_e2e_with_project_context_change():
     svc = CoordinatorService()
 
     svc.project_configs["P"] = ProjectConfig(
@@ -66,6 +66,7 @@ decisions:
     arch_change = {
         "summary": "add storage",
         "changes": [{
+            "artifact": "architecture",
             "section_path": "## Storage",
             "before": "",
             "after": "## Storage\n\nRedis.",
@@ -74,7 +75,7 @@ decisions:
         "authorized": False,
     }
     svc.plan_submit(
-        r.req_id, plan_md_content=plan_md, architecture_change=arch_change,
+        r.req_id, plan_md_content=plan_md, project_context_change=arch_change,
     )
     assert r.plan_status is PlanStatus.AUTH_PENDING
 
@@ -95,7 +96,7 @@ decisions:
     assert result.context["plan_decision_ids"] == ["D1", "D2"]
 
 
-def test_planning_e2e_without_architecture_change():
+def test_planning_e2e_without_project_context_change():
     svc = CoordinatorService()
     svc.project_configs["P"] = ProjectConfig(
         category="web", template_version="v1",
@@ -119,7 +120,7 @@ def test_planning_e2e_without_architecture_change():
     svc.plan_start(r.req_id)
     svc.plan_submit(
         r.req_id, plan_md_content="---\nreq_id: REQ-P-2\n---\n",
-        architecture_change=None,
+        project_context_change=None,
     )
 
     assert r.plan_status is PlanStatus.READY

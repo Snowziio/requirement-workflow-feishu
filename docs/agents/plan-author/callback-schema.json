@@ -40,7 +40,7 @@
           "required": ["plan_md_content"],
           "properties": {
             "plan_md_content": {"type": "string", "minLength": 1},
-            "architecture_change": {
+            "project_context_change": {
               "oneOf": [
                 {"type": "null"},
                 {
@@ -52,8 +52,9 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["section_path", "before", "after", "rationale"],
+                        "required": ["artifact", "section_path", "before", "after", "rationale"],
                         "properties": {
+                          "artifact": {"enum": ["architecture", "environments", "skill_md"]},
                           "section_path": {"type": "string"},
                           "before": {"type": "string"},
                           "after": {"type": "string"},

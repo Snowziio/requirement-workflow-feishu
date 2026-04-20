@@ -84,16 +84,17 @@ class BootstrapRepoResult:
 
 @dataclass(frozen=True)
 class PlanArtifacts:
-    """plan.md content + optional structured architecture diff.
+    """plan.md content + optional project_context_change envelope.
 
-    ``architecture_change`` is the raw payload (dict) carrying
-    ``summary`` / ``changes[]`` / ``authorized*`` — matches plan-author's
-    callback schema. ``None`` means this plan doesn't touch ARCHITECTURE.md.
+    ``project_context_change`` carries the unified payload with
+    ``summary`` / ``changes[]`` (each with artifact/section_path/
+    before/after/rationale). ``None`` means the plan doesn't touch
+    project-level context.
     """
     project_repo: str
     req_id: str
     plan_md_content: str
-    architecture_change: dict | None
+    project_context_change: dict | None
     commit_message: str
 
 

@@ -104,7 +104,7 @@ curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/plan-ca
 
 ### Phase C — FINAL_REVIEW_PENDING（定稿提交）
 
-**目标**：组装 plan.md + 判断 architecture_change，调 `plan_submit` callback。
+**目标**：组装 plan.md + 判断 project_context_change，调 `plan_submit` callback。
 
 1. 组装 plan.md 正文，schema 如下：
 
@@ -132,16 +132,17 @@ decisions:
 ## 决策（N 条，格式同 YAML 头，人可读展开）
 ```
 
-2. 判断是否有 `architecture_change`：
-   - **任一 decision 触及项目 ARCHITECTURE** 的条目（新增服务/模块/数据模型）→ 生成 change block
+2. 判断是否有 `project_context_change`：
+   - **任一 decision 触及项目级制品** (ARCHITECTURE.md / project/environments.yaml / SKILL.md) → 生成 change block
    - 纯业务配置决策（如限流数值、超时时长）→ 置 null
 
-3. architecture_change 格式（如非 null）：
+3. project_context_change 格式（如非 null）：
 
 ```json
 {
   "summary": "Add session storage via Redis",
   "changes": [{
+    "artifact": "architecture",
     "section_path": "## Storage",
     "before": "",
     "after": "## Storage\n\nRedis for session state with 24h TTL",
@@ -151,17 +152,19 @@ decisions:
 }
 ```
 
+`artifact` 枚举：`architecture` | `environments` | `skill_md`。MVP 仅 `architecture` 有执行器，其余为占位 stub。
+
 4. 调 callback：
 
 ```bash
 curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/plan-callback" \
   -H "Content-Type: application/json" \
-  -d "{\"req_id\": \"{req_id}\", \"event\": \"plan_submit\", \"payload\": {\"plan_md_content\": ${plan_md_json_escaped}, \"architecture_change\": ${arch_change_json_or_null}}}"
+  -d "{\"req_id\": \"{req_id}\", \"event\": \"plan_submit\", \"payload\": {\"plan_md_content\": ${plan_md_json_escaped}, \"project_context_change\": ${pcc_json_or_null}}}"
 ```
 
 200 响应：
-- `"plan_status": "ready"` → 无 architecture_change，已 commit 到 repo，流程推进
-- `"plan_status": "auth_pending"` → 有 architecture_change，等人通过授权卡授权
+- `"plan_status": "ready"` → 无 project_context_change，已 commit 到 repo，流程推进
+- `"plan_status": "auth_pending"` → 有 project_context_change，等人通过授权卡授权
 
 ## 异常分支
 
@@ -169,7 +172,7 @@ curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/plan-ca
 
 **异常 2：plan_submit 返回 409（invalid_state）** → coordinator 状态机拒绝，大概率是 schema 校验失败。重读响应 error message，修正后重试。
 
-**异常 3：architecture_change 被驳回（AUTH_REJECT 信号）** → coordinator 会拉回 DRAFTING 并给 reason。重新从 Phase A 拉 plan-context（此时 plan_outline 已存在），ARCHITECTURE 可能已更新，根据 reason 改写 architecture_change 块再提交。
+**异常 3：project_context_change 被驳回（AUTH_REJECT 信号）** → coordinator 会拉回 DRAFTING 并给 reason。重新从 Phase A 拉 plan-context（此时 plan_outline 已存在），项目级制品可能已更新，根据 reason 改写 project_context_change 块再提交。
 
 ## 硬约束
 

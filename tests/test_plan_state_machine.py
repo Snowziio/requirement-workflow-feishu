@@ -20,19 +20,19 @@ def test_plan_start_from_drafting_rejected():
     assert d.allowed is False
 
 
-def test_plan_submit_with_architecture_change_goes_auth_pending():
+def test_plan_submit_with_project_context_change_goes_auth_pending():
     d = apply_plan_event(
         PlanStatus.DRAFTING, PlanEvent.PLAN_SUBMIT,
-        has_architecture_change=True,
+        has_project_context_change=True,
     )
     assert d.allowed is True
     assert d.next_status is PlanStatus.AUTH_PENDING
 
 
-def test_plan_submit_without_architecture_change_goes_ready():
+def test_plan_submit_without_project_context_change_goes_ready():
     d = apply_plan_event(
         PlanStatus.DRAFTING, PlanEvent.PLAN_SUBMIT,
-        has_architecture_change=False,
+        has_project_context_change=False,
     )
     assert d.allowed is True
     assert d.next_status is PlanStatus.READY

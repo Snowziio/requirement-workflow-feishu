@@ -75,7 +75,7 @@ def apply_plan_event(
     current: Optional[PlanStatus],
     event: PlanEvent,
     *,
-    has_architecture_change: bool = False,
+    has_project_context_change: bool = False,
 ) -> PlanTransitionDecision:
     if event is PlanEvent.PLAN_RESTART:
         if current is None:
@@ -92,7 +92,7 @@ def apply_plan_event(
 
     if event is PlanEvent.PLAN_SUBMIT and current is PlanStatus.DRAFTING:
         next_status = (
-            PlanStatus.AUTH_PENDING if has_architecture_change else PlanStatus.READY
+            PlanStatus.AUTH_PENDING if has_project_context_change else PlanStatus.READY
         )
         return PlanTransitionDecision(
             allowed=True,

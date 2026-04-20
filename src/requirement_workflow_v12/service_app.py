@@ -1162,7 +1162,10 @@ class CoordinatorRuntimeApp:
                 self.service.plan_submit(
                     req_id,
                     plan_md_content=payload.get("plan_md_content", ""),
-                    architecture_change=payload.get("architecture_change"),
+                    project_context_change=(
+                        payload.get("project_context_change")
+                        or payload.get("architecture_change")
+                    ),
                 )
                 self._save_state()
                 return 200, {

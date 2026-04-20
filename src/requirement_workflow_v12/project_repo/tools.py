@@ -11,7 +11,7 @@ import logging
 from typing import Protocol, runtime_checkable
 
 from ..github_gateway import FileChange, GitHubGateway, GitHubGatewayError
-from .architecture_apply import ArchitectureApplyError, apply_architecture_changes
+from .architecture_apply import ArchitectureApplyError
 from .types import (
     BootstrapRepoResult,
     PlanArtifacts,
@@ -136,6 +136,10 @@ class GitHubProjectRepoTools:
     def commit_plan_artifacts(
         self, artifacts: PlanArtifacts,
     ) -> PlanCommitResult:
+        from ..project_context_apply import (
+            ProjectContextApplyError,
+            apply_project_context_change,
+        )
         owner, name = artifacts.project_repo.split("/", 1)
         plan_path = f"docs/specs/{artifacts.req_id}/plan.md"
         files_to_commit = [
@@ -143,7 +147,7 @@ class GitHubProjectRepoTools:
         ]
         architecture_updated = False
 
-        if artifacts.architecture_change is not None:
+        if artifacts.project_context_change is not None:
             try:
                 _arch_sha, arch_text = self._gw.fetch_file_sha(
                     artifacts.project_repo, "main", "ARCHITECTURE.md",
@@ -154,18 +158,22 @@ class GitHubProjectRepoTools:
                     recoverable=False,
                 ) from exc
             try:
-                new_arch = apply_architecture_changes(
-                    arch_text, artifacts.architecture_change.get("changes", []),
+                updated_files = apply_project_context_change(
+                    original_files={"ARCHITECTURE.md": arch_text},
+                    change=artifacts.project_context_change,
                 )
-            except ArchitectureApplyError as exc:
+            except ProjectContextApplyError as exc:
+                recoverable = isinstance(exc.__cause__, ArchitectureApplyError) and exc.__cause__.recoverable
                 raise ProjectRepoError(
-                    f"commit_plan_artifacts: architecture apply failed: {exc}",
-                    recoverable=exc.recoverable,
+                    f"commit_plan_artifacts: project_context_change apply failed: {exc}",
+                    recoverable=recoverable,
                 ) from exc
-            files_to_commit.append(
-                FileChange(path="ARCHITECTURE.md", content=new_arch),
-            )
-            architecture_updated = True
+            new_arch = updated_files.get("ARCHITECTURE.md")
+            if new_arch is not None and new_arch != arch_text:
+                files_to_commit.append(
+                    FileChange(path="ARCHITECTURE.md", content=new_arch),
+                )
+                architecture_updated = True
 
         try:
             sha = self._gw.commit_files(
