@@ -9,29 +9,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from requirement_workflow_v12.service_app import parse_create_req_command  # noqa: E402
 
 
-def test_parse_create_req_minimal():
-    cmd = parse_create_req_command("/create req test3 会话鉴权改造")
+def test_parse_create_req_matches_bare_command():
+    cmd = parse_create_req_command("/create req")
     assert cmd is not None
-    assert cmd.project == "test3"
-    assert cmd.name == "会话鉴权改造"
-    assert cmd.summary == ""
-    assert cmd.category == ""
 
 
-def test_parse_create_req_with_summary_and_category():
-    cmd = parse_create_req_command(
-        '/create req test3 会话鉴权改造 --summary "支持JWT" --category saas-ai-automation'
-    )
-    assert cmd is not None
-    assert cmd.project == "test3"
-    assert cmd.name == "会话鉴权改造"
-    assert cmd.summary == "支持JWT"
-    assert cmd.category == "saas-ai-automation"
+def test_parse_create_req_rejects_trailing_args():
+    assert parse_create_req_command("/create req test3 foo") is None
+    assert parse_create_req_command("/create req test3 foo --summary bar") is None
+    assert parse_create_req_command("/create req --project x") is None
 
 
-def test_parse_create_req_rejects_other_prefix():
-    assert parse_create_req_command("/create project test3 ...") is None
-    assert parse_create_req_command("创建需求 test3") is None
+def test_parse_create_req_returns_none_for_other_text():
+    assert parse_create_req_command("随便聊聊") is None
+    assert parse_create_req_command("/create project test3") is None
 
 
 def _build_runtime_app(tmp_path, *, project_configs=None):

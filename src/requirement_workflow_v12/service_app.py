@@ -7,7 +7,6 @@ import hashlib
 import json
 import logging
 import re
-import shlex
 import threading
 import time
 from dataclasses import dataclass, replace
@@ -27,6 +26,7 @@ from .protocols import (
     AuthorStartBinding,
     CreationFormPayload,
     CreationRequest,
+    ProjectCreationFormPayload,
 )
 from .store import JsonStateStore
 
@@ -71,18 +71,14 @@ def _strip_mention_prefix(text: str) -> str:
 
 @dataclass(frozen=True)
 class CreateProjectCommand:
-    project: str
-    category: str
-    owner_user_id: str
-    resume: bool = False
+    """Marker object: `/create project` with no args was received.
+
+    Card-based flow: the actual form values come later via
+    _handle_card_action_payload(action_name='submit_create_project').
+    """
 
 
-_CREATE_PROJECT_RE = re.compile(
-    r"^/create\s+project\s+(?P<name>\S+)"
-    r"(?:\s+--category\s+(?P<category>\S+))?"
-    r"(?:\s+--owner\s+(?P<owner>\S+))?"
-    r"(?P<resume>\s+--resume)?\s*$"
-)
+_CREATE_PROJECT_RE = re.compile(r"^/create\s+project\s*$")
 
 # Categories supported by Bootstrap. Keep in sync with
 # project_bootstrap.static_content._SECRETS_CATEGORY_HINTS.
@@ -96,62 +92,23 @@ KNOWN_PROJECT_CATEGORIES: tuple[str, ...] = (
 
 
 def parse_create_project_command(text: str) -> CreateProjectCommand | None:
-    m = _CREATE_PROJECT_RE.match(text.strip())
-    if not m:
+    if not _CREATE_PROJECT_RE.match(text.strip()):
         return None
-    return CreateProjectCommand(
-        project=m.group("name"),
-        category=m.group("category") or "",
-        owner_user_id=m.group("owner") or "",
-        resume=bool(m.group("resume")),
-    )
+    return CreateProjectCommand()
 
 
 @dataclass(frozen=True)
 class CreateReqCommand:
-    project: str
-    name: str
-    summary: str = ""
-    category: str = ""
+    """Marker: `/create req` with no args was received."""
+
+
+_CREATE_REQ_RE = re.compile(r"^/create\s+req\s*$")
 
 
 def parse_create_req_command(text: str) -> CreateReqCommand | None:
-    stripped = text.strip()
-    if not stripped.startswith("/create req "):
+    if not _CREATE_REQ_RE.match(text.strip()):
         return None
-    try:
-        tokens = shlex.split(stripped)
-    except ValueError:
-        return None
-    if len(tokens) < 4 or tokens[:2] != ["/create", "req"]:
-        return None
-    project = tokens[2]
-
-    positional: list[str] = []
-    summary = ""
-    category = ""
-    i = 3
-    while i < len(tokens):
-        tok = tokens[i]
-        if tok == "--summary" and i + 1 < len(tokens):
-            summary = tokens[i + 1]
-            i += 2
-            continue
-        if tok == "--category" and i + 1 < len(tokens):
-            category = tokens[i + 1]
-            i += 2
-            continue
-        positional.append(tok)
-        i += 1
-
-    if not positional:
-        return None
-    return CreateReqCommand(
-        project=project,
-        name=" ".join(positional),
-        summary=summary,
-        category=category,
-    )
+    return CreateReqCommand()
 
 
 @dataclass
@@ -424,6 +381,12 @@ class CoordinatorRuntimeApp:
         if req_cmd is not None:
             return self._handle_create_req_command(req_cmd, context)
 
+        if text.strip() in {"/create", "/create "}:
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text="请用 `/create project` 或 `/create req`",
+            )]
+
         if self._is_creation_group_message(context):
             return self._handle_creation_group_message(context)
 
@@ -498,61 +461,9 @@ class CoordinatorRuntimeApp:
                 receive_id=context.chat_id,
                 text="Bootstrap 服务未启用；请联系运维检查 settings.github_token 配置",
             )]
-        category = cmd.category
-        if not category:
-            return [OutboundMessage(
-                receive_id=context.chat_id,
-                text=(
-                    "缺少 --category。可选项：\n"
-                    + "\n".join(f"  - {c}" for c in KNOWN_PROJECT_CATEGORIES)
-                    + f"\n示例：`/create project {cmd.project} "
-                    f"--category {KNOWN_PROJECT_CATEGORIES[-1]}`"
-                ),
-            )]
-        if category not in KNOWN_PROJECT_CATEGORIES:
-            return [OutboundMessage(
-                receive_id=context.chat_id,
-                text=(
-                    f"category {category!r} 不在已知列表内。可选项：\n"
-                    + "\n".join(f"  - {c}" for c in KNOWN_PROJECT_CATEGORIES)
-                ),
-            )]
-        owner = cmd.owner_user_id or context.user_id
-        from .project_bootstrap.types import BootstrapRequest, BootstrapStepError
-        from .project_bootstrap.service import ValidationError
-        req = BootstrapRequest(
-            project=cmd.project,
-            category=category,
-            owner_user_id=owner,
-            creator_chat_id=context.chat_id,
-            resume=cmd.resume,
-        )
-        try:
-            result = self._project_bootstrap_service.run(req)
-        except ValidationError as exc:
-            return [OutboundMessage(
-                receive_id=context.chat_id,
-                text=f"Bootstrap 校验失败：{exc}",
-            )]
-        except BootstrapStepError as exc:
-            return [OutboundMessage(
-                receive_id=context.chat_id,
-                text=(
-                    f"Bootstrap 中断于 Step {int(exc.step)} ({exc.step.name})：{exc.message}\n"
-                    f"可使用 `/create project {cmd.project} --category {category} "
-                    f"--owner {owner} --resume` 续跑"
-                ),
-            )]
-        self._save_state()
-        return [OutboundMessage(
+        return [OutboundCard(
             receive_id=context.chat_id,
-            text=(
-                f"项目 {result.project} 已就绪：\n"
-                f"- Repo: {result.github_repo_url}\n"
-                f"- ARCHITECTURE: {result.architecture_doc_url}\n"
-                f"- 群 chat_id: {result.feishu_chat_id}\n"
-                f"可开始用 `/create req {result.project} <name>` 创建需求。"
-            ),
+            card=self._build_project_creation_card(context),
         )]
 
     def _handle_spec_restart_command(self, *, req_id: str, context: MessageContext) -> list[OutboundMessage]:
@@ -1660,6 +1571,40 @@ class CoordinatorRuntimeApp:
             category=category,
         )
 
+    def _extract_project_form_payload(
+        self,
+        payload: dict[str, object],
+        *,
+        user_id: str,
+        user_name: str,
+    ) -> ProjectCreationFormPayload | None:
+        action = payload.get("action", {}) or {}
+        value = self._extract_callback_value(action)
+        form_value = action.get("form_value") or payload.get("form_value") or {}
+        if not isinstance(form_value, dict):
+            form_value = {}
+
+        project = self._normalize_form_value(form_value.get("project"))
+        category = self._normalize_form_value(form_value.get("category"))
+        if not project or not category:
+            return None
+
+        context = payload.get("context", {}) or {}
+        creator_chat_id = (
+            self._normalize_form_value(value.get("creator_chat_id"))
+            or self._normalize_form_value(context.get("open_chat_id"))
+        )
+        return ProjectCreationFormPayload(
+            project=project,
+            category=category,
+            owner_user_id=user_id,
+            creator_chat_id=creator_chat_id,
+            display_name=self._normalize_form_value(form_value.get("display_name")),
+            brief=self._normalize_form_value(form_value.get("brief")),
+            github_username=self._normalize_form_value(form_value.get("github_username")),
+            tech_stack=self._normalize_form_value(form_value.get("tech_stack")),
+        )
+
     def _normalize_form_value(self, value: object) -> str:
         if value is None:
             return ""
@@ -1759,6 +1704,106 @@ class CoordinatorRuntimeApp:
         if not hmac.compare_digest(expected, signature):
             return 401, {"error": "unauthorized", "message": "OpenClaw 回调签名不匹配。"}
         return None
+
+    def _build_project_creation_card(self, context: MessageContext) -> dict[str, object]:
+        category_options = [
+            {"text": {"tag": "plain_text", "content": label}, "value": value}
+            for label, value in (
+                ("企业内部应用", "enterprise-app"),
+                ("企业内 Bot / Agent", "enterprise-bot"),
+                ("小程序", "miniprogram"),
+                ("公开 Web 站点", "public-web-site"),
+                ("SaaS AI 自动化", "saas-ai-automation"),
+            )
+        ]
+        return {
+            "schema": "2.0",
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": "green",
+                "title": {"tag": "plain_text", "content": "新建项目"},
+                "subtitle": {"tag": "plain_text", "content": "填写项目基本信息 · 提交后自动跑 Bootstrap 并生成 ARCHITECTURE.md"},
+            },
+            "body": {
+                "elements": [
+                    {
+                        "tag": "form",
+                        "name": "project_create_form",
+                        "elements": [
+                            {
+                                "tag": "input",
+                                "name": "project",
+                                "required": True,
+                                "width": "fill",
+                                "label": {"tag": "plain_text", "content": "项目代号（必填，小写字母开头，2-30 位）"},
+                                "placeholder": {"tag": "plain_text", "content": "例如 test5 / payment-core"},
+                            },
+                            {
+                                "tag": "select_static",
+                                "name": "category",
+                                "required": True,
+                                "width": "fill",
+                                "label": {"tag": "plain_text", "content": "项目类目（必填）"},
+                                "placeholder": {"tag": "plain_text", "content": "选择项目类目"},
+                                "options": category_options,
+                            },
+                            {
+                                "tag": "input",
+                                "name": "display_name",
+                                "required": False,
+                                "width": "fill",
+                                "label": {"tag": "plain_text", "content": "项目显示名（选填）"},
+                                "placeholder": {"tag": "plain_text", "content": "例如 测试项目 5"},
+                            },
+                            {
+                                "tag": "input",
+                                "name": "brief",
+                                "required": False,
+                                "width": "fill",
+                                "input_type": "multiline_text",
+                                "max_length": 500,
+                                "label": {"tag": "plain_text", "content": "项目简述（选填，会写进 ARCHITECTURE.md）"},
+                                "placeholder": {"tag": "plain_text", "content": "一两句话描述项目做什么"},
+                            },
+                            {
+                                "tag": "input",
+                                "name": "github_username",
+                                "required": False,
+                                "width": "fill",
+                                "label": {"tag": "plain_text", "content": "GitHub 用户名（选填，会加为 repo collaborator）"},
+                                "placeholder": {"tag": "plain_text", "content": "例如 alice"},
+                            },
+                            {
+                                "tag": "input",
+                                "name": "tech_stack",
+                                "required": False,
+                                "width": "fill",
+                                "input_type": "multiline_text",
+                                "max_length": 500,
+                                "label": {"tag": "plain_text", "content": "技术栈备注（选填，会写进 ARCHITECTURE.md）"},
+                                "placeholder": {"tag": "plain_text", "content": "例如 FastAPI + PostgreSQL + Redis"},
+                            },
+                            {
+                                "tag": "button",
+                                "name": "submit_create_project",
+                                "text": {"tag": "plain_text", "content": "提交"},
+                                "type": "primary_filled",
+                                "form_action_type": "submit",
+                                "behaviors": [
+                                    {
+                                        "type": "callback",
+                                        "value": {
+                                            "action": "submit_create_project",
+                                            "creator_chat_id": context.chat_id,
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                ]
+            },
+        }
 
     def _build_requirement_creation_card(self, context: MessageContext) -> dict[str, object]:
         known_projects = sorted(self.service.project_configs.keys())
