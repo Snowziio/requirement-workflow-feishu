@@ -5,6 +5,15 @@
 >
 > 完整设计论证见 [docs/superpowers/specs/2026-04-19-planning-phase-design.md](../../superpowers/specs/2026-04-19-planning-phase-design.md)。本文是实施者每日参考；设计文档是"为什么"。
 
+> **前置依赖**：本层依赖 **§5.0 Project 层 Bootstrap** 已完成。REQ 只能挂靠在
+> `project_configs.bootstrap_status == PROVISIONED` 的项目上；非 PROVISIONED
+> 状态下 coordinator 会直接拒绝 `/create req` 命令。
+>
+> **schema 变更（2026-04-20）**：`architecture_change` 已泛化为统一的
+> `project_context_change`（支持 `architecture` / `environments` / `skill_md`
+> 三种 artifact）。MVP 只实现 `architecture` 执行器；其他 artifact 为 stub。
+> 详见 [docs/superpowers/specs/2026-04-20-project-layer-design.md](../../superpowers/specs/2026-04-20-project-layer-design.md)。
+
 ---
 
 ## 零、实现状态与变更记录
