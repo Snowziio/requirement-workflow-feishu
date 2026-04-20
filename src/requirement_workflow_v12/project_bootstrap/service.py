@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import replace
 
 from ..architecture_templates import available_categories
-from .types import BootstrapRequest
+from ..project_config import ProjectConfig
+from .state import append_log_entry
+from .types import BootstrapRequest, BootstrapStep
 
 
 _logger = logging.getLogger(__name__)
@@ -65,3 +68,31 @@ class ProjectBootstrapService:
             raise ValidationError(
                 f"GitHub repo {self._new_owner}/{request.project} already exists"
             )
+
+    def upsert_config(
+        self, request: BootstrapRequest, *, template_version: str
+    ) -> ProjectConfig:
+        existing = self._feishu.list_project_configs().get(request.project)
+        if existing is None:
+            cfg = ProjectConfig(
+                category=request.category,
+                template_version=template_version,
+                architecture_doc_id="",
+                architecture_doc_url="",
+                bootstrap_status="BOOTSTRAPPING",
+                project_status="BOOTSTRAPPING",
+            )
+        else:
+            cfg = replace(
+                existing,
+                category=request.category,
+                template_version=template_version,
+                bootstrap_status="BOOTSTRAPPING",
+                project_status="BOOTSTRAPPING",
+            )
+        new_log = append_log_entry(
+            cfg.bootstrap_log, step=BootstrapStep.UPSERT_CONFIG, status="ok"
+        )
+        cfg = replace(cfg, bootstrap_log=new_log)
+        self._feishu.upsert_project_config(request.project, cfg)
+        return cfg

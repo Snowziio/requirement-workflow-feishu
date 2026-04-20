@@ -119,3 +119,51 @@ def test_validate_accepts_valid_name_and_category():
         creator_chat_id="c1",
     )
     svc.validate(req)
+
+
+def test_upsert_config_creates_new_row_with_bootstrapping_status():
+    from requirement_workflow_v12.project_bootstrap.types import BootstrapStep
+
+    svc, _, feishu_gw, _ = _make_service()
+    req = BootstrapRequest(
+        project="test3",
+        category="saas-ai-automation",
+        owner_user_id="ou_1",
+        creator_chat_id="c1",
+    )
+    cfg = svc.upsert_config(req, template_version="saas-ai-automation.v1")
+    assert cfg.bootstrap_status == "BOOTSTRAPPING"
+    assert cfg.project_status == "BOOTSTRAPPING"
+    assert cfg.category == "saas-ai-automation"
+    assert cfg.template_version == "saas-ai-automation.v1"
+    feishu_gw.upsert_project_config.assert_called_once()
+    assert any(
+        e["step"] == int(BootstrapStep.UPSERT_CONFIG) and e["status"] == "ok"
+        for e in cfg.bootstrap_log
+    )
+
+
+def test_upsert_config_preserves_existing_fields_on_resume():
+    from requirement_workflow_v12.project_config import ProjectConfig
+
+    existing = ProjectConfig(
+        category="saas-ai-automation",
+        template_version="saas-ai-automation.v1",
+        architecture_doc_id="doc_old",
+        architecture_doc_url="https://old",
+        bootstrap_status="BOOTSTRAPPING",
+        bootstrap_log=[
+            {"step": 2, "step_name": "UPSERT_CONFIG", "ts": "old-ts", "status": "ok"}
+        ],
+    )
+    svc, _, _, _ = _make_service(existing_projects={"test3": existing})
+    req = BootstrapRequest(
+        project="test3",
+        category="saas-ai-automation",
+        owner_user_id="ou_1",
+        creator_chat_id="c1",
+        resume=True,
+    )
+    cfg = svc.upsert_config(req, template_version="saas-ai-automation.v1")
+    assert cfg.architecture_doc_id == "doc_old"
+    assert cfg.bootstrap_status == "BOOTSTRAPPING"
