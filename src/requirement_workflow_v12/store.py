@@ -14,6 +14,7 @@ from .models import (
     WorkflowStatus,
     utc_now,
 )
+from .plan_state_machine import DesignStatus, PlanPhase, PlanStatus
 from .project_config import ProjectConfig
 from .spec_state_machine import SpecStatus
 
@@ -95,6 +96,14 @@ class JsonStateStore:
             spec_status = None
         else:
             spec_status = SpecStatus(str(raw_spec_status))
+
+        raw_plan_status = data.get("plan_status")
+        plan_status = PlanStatus(str(raw_plan_status)) if raw_plan_status else None
+        raw_plan_phase = data.get("plan_phase")
+        plan_phase = PlanPhase(str(raw_plan_phase)) if raw_plan_phase else None
+        raw_design_status = data.get("design_status")
+        design_status = DesignStatus(str(raw_design_status)) if raw_design_status else None
+
         requirement = Requirement(
             req_id=data["req_id"],
             name=data["name"],
@@ -131,6 +140,19 @@ class JsonStateStore:
             spec_review_summary=data.get("spec_review_summary", ""),
             active_spec_context_token=data.get("active_spec_context_token", ""),
             spec_context_snapshot_revision=data.get("spec_context_snapshot_revision", ""),
+            spec_deadlocked=bool(data.get("spec_deadlocked", False)),
+            spec_transform_snapshot=data.get("spec_transform_snapshot"),
+            spec_pr_url=data.get("spec_pr_url", ""),
+            spec_source_revision=data.get("spec_source_revision", ""),
+            transform_trace_digest=data.get("transform_trace_digest", ""),
+            plan_status=plan_status,
+            plan_phase=plan_phase,
+            plan_pr_url=data.get("plan_pr_url", ""),
+            plan_outline=list(data.get("plan_outline", []) or []),
+            plan_decisions_wip=list(data.get("plan_decisions_wip", []) or []),
+            pending_plan_draft=data.get("pending_plan_draft"),
+            pending_plan_review=data.get("pending_plan_review"),
+            design_status=design_status,
             discussion_history=[self._discussion_turn_from_payload(item) for item in discussion_history_payload],
             review_history=[self._review_result_from_payload(item) for item in review_history_payload],
             human_review_history=[
