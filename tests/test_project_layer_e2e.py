@@ -88,25 +88,59 @@ def test_e2e_bootstrap_then_create_req_appends_registry(tmp_path):
     # Redirect registry append to the github gateway mock we control.
     app._github_gateway = github_gw_mock
 
+    # Step A: bare `/create project` opens the card (no side effects).
     ctx_bootstrap = MessageContext(
         message_id="m1", chat_id="group_c", chat_type="group",
         user_id="ou_alice", sender_name="Alice",
-        text="/create project test3 --category saas-ai-automation --owner ou_alice",
+        text="/create project",
     )
     msgs = app.handle_text_message(ctx_bootstrap)
-    assert any("已就绪" in getattr(m, "text", "") for m in msgs)
+    assert msgs, "bare /create project should produce an outbound card"
+
+    # Step B: submit the project creation form → Bootstrap runs.
+    status_a, _ = app._handle_card_action_payload({
+        "operator": {"open_id": "ou_alice", "name": "Alice"},
+        "context": {"open_chat_id": "group_c", "open_message_id": "om_proj_1"},
+        "action": {
+            "value": {"action": "submit_create_project", "creator_chat_id": "group_c"},
+            "form_value": {
+                "project": "test3",
+                "category": "saas-ai-automation",
+                "display_name": "", "brief": "", "github_username": "", "tech_stack": "",
+            },
+        },
+    })
+    assert status_a == 200
 
     cfg = state["test3"]
     assert cfg.bootstrap_status == "PROVISIONED"
     service.project_configs["test3"] = cfg
 
-    ctx_req = MessageContext(
-        message_id="m2", chat_id="group_c", chat_type="group",
-        user_id="ou_alice", sender_name="Alice",
-        text="/create req test3 会话鉴权改造",
-    )
-    msgs2 = app.handle_text_message(ctx_req)
-    assert any("REQ-" in getattr(m, "text", "") for m in msgs2)
+    # Step C: submit the requirement creation form → REQ created + registry appended.
+    status_b, _ = app._handle_card_action_payload({
+        "operator": {"open_id": "ou_alice", "name": "Alice"},
+        "context": {"open_chat_id": "group_c", "open_message_id": "om_req_1"},
+        "action": {
+            "value": {"action": "submit_create_requirement", "creation_chat_id": "group_c"},
+            "form_value": {
+                "project": "test3",
+                "name": "会话鉴权改造",
+                "summary": "支持 JWT 单点登录",
+            },
+        },
+    })
+    assert status_b == 200
+
+    # Provisioning runs in a daemon thread — wait for it to finish so the
+    # registry append completes before we assert.
+    import threading as _threading
+    import time as _time
+    deadline = _time.time() + 5.0
+    while _time.time() < deadline:
+        non_main = [t for t in _threading.enumerate() if t is not _threading.main_thread()]
+        if not non_main:
+            break
+        _time.sleep(0.05)
 
     reqs = list(service.requirements.values())
     assert len(reqs) == 1

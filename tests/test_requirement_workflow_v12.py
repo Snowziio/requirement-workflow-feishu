@@ -333,6 +333,8 @@ class RequirementWorkflowV12Test(unittest.TestCase):
                 architecture_doc_url="https://feishu.example/docx/doc_pre",
                 tech_stack={},
             )
+            runtime_service.project_configs["HARNESS"].bootstrap_status = "PROVISIONED"
+            runtime_service.project_configs["HARNESS"].project_status = "PROVISIONED"
             gateway = FakeGateway()
             app = CoordinatorRuntimeApp(
                 Settings(
