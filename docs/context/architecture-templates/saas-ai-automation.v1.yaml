@@ -1,5 +1,8 @@
 # Generated from template: saas-ai-automation.v1
-# Placeholders: {project} {pkg} {date}
+# Placeholders: {project} {pkg} {date} {{display_name}} {{brief}} {{tech_stack}}
+display_name: "{{display_name}}"
+brief: "{{brief}}"
+tech_stack_notes: "{{tech_stack}}"
 version: "{date}"
 project: "{project}"
 category: saas-ai-automation

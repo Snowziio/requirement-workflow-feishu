@@ -50,14 +50,23 @@ def derive_pkg(project: str) -> str:
     return re.sub(r"[^\w]+", "_", lowered, flags=re.UNICODE).strip("_")
 
 
-def render_template(category: str, *, project: str) -> tuple[str, str]:
+def render_template(
+    category: str,
+    *,
+    project: str,
+    seed: dict[str, str] | None = None,
+) -> tuple[str, str]:
     version, path = _latest_template_path(category)
     raw = path.read_text(encoding="utf-8")
     pkg = derive_pkg(project)
     today = date.today().isoformat()
+    seed = seed or {}
     text = (
         raw.replace("{pkg}", pkg)
            .replace("{project}", project)
            .replace("{date}", today)
+           .replace("{{display_name}}", seed.get("display_name", ""))
+           .replace("{{brief}}", seed.get("brief", ""))
+           .replace("{{tech_stack}}", seed.get("tech_stack", ""))
     )
     return version, text
