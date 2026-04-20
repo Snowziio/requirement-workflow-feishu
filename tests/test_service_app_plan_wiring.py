@@ -77,3 +77,45 @@ def test_build_plan_author_handoff_text_contains_agent_and_req(app):
     assert r.req_id in text
     assert r.name in text
     assert "https://feishu.example/req-doc" in text
+
+
+def test_send_plan_author_start_transitions_state_and_dispatches_dm(app):
+    r = _approved_req(app)
+    app.gateway.user_id_from_open_id = MagicMock(return_value=("ou_alice", "open_id"))
+
+    status, resp = app._handle_card_action_payload(
+        _card_payload("send_plan_author_start", r.req_id)
+    )
+
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "success"
+    assert r.plan_status == PlanStatus.DRAFTING
+    assert r.plan_phase == PlanPhase.OUTLINE_PENDING
+    app.gateway.send_text.assert_called_once()
+    send_args = app.gateway.send_text.call_args
+    text = send_args.args[1]
+    assert "Plan 撰写" in text
+    assert r.req_id in text
+
+
+def test_send_plan_author_start_rejects_when_not_approved(app):
+    r = _approved_req(app)
+    r.status = WorkflowStatus.DRAFTING
+
+    status, resp = app._handle_card_action_payload(
+        _card_payload("send_plan_author_start", r.req_id)
+    )
+
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "error"
+    assert r.plan_status is None
+    app.gateway.send_text.assert_not_called()
+
+
+def test_send_plan_author_start_unknown_req_id_returns_error_toast(app):
+    status, resp = app._handle_card_action_payload(
+        _card_payload("send_plan_author_start", "NOPE")
+    )
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "error"
+    app.gateway.send_text.assert_not_called()

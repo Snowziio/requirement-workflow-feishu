@@ -1540,6 +1540,34 @@ class CoordinatorRuntimeApp:
                 }
             return 200, {"toast": {"type": "success", "content": "已将启动指令私发给你。"}}
 
+        if action_name == "send_plan_author_start":
+            req_id = value.get("req_id", "")
+            if not req_id:
+                return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            requirement = self.service.get_requirement(req_id)
+            if requirement is None:
+                return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
+            if requirement.status != WorkflowStatus.APPROVED:
+                return 200, {"toast": {"type": "error", "content": f"当前需求不处于 APPROVED 阶段（status={requirement.status.value}），不能启动 Plan 撰写。"}}
+            try:
+                self.service.plan_start(req_id)
+            except ValueError as exc:
+                return 200, {"toast": {"type": "error", "content": f"Plan 启动失败：{exc}"}}
+            self._save_state()
+            target_user_id, receive_id_type = self._resolve_operator_receive_target(operator)
+            if not target_user_id:
+                return 200, {"toast": {"type": "error", "content": "无法识别当前点击人身份，请手动私聊 Plan 撰写助手。"}}
+            try:
+                self.gateway.send_text(
+                    target_user_id,
+                    self._build_plan_author_handoff_text(requirement),
+                    receive_id_type=receive_id_type,
+                )
+            except Exception as exc:
+                LOGGER.warning("Failed to send plan author handoff req_id=%s: %s", req_id, exc)
+                return 200, {"toast": {"type": "error", "content": "私发失败，请手动私聊 Plan 撰写助手。"}}
+            return 200, {"toast": {"type": "success", "content": "已将 Plan 撰写启动指令私发给你。"}}
+
         if action_name == "send_spec_author_start":
             req_id = value.get("req_id", "")
             if not req_id:
