@@ -201,6 +201,36 @@ def test_submit_invalid_form_returns_toast_error(tmp_path):
     assert resp.get("toast", {}).get("type") == "error"
 
 
+def test_submit_bootstrap_refreshes_project_configs_after_success(tmp_path):
+    """After async Bootstrap succeeds, the new project must land in
+    `service.project_configs` so the next `/create req` can see it.
+
+    Without this refresh, Bitable has the new project (via
+    `upsert_project_config`) but the in-memory dict is still the snapshot
+    taken at `CoordinatorRuntimeApp.__init__` — and `/create req` would
+    report "no PROVISIONED projects" after a successful Bootstrap.
+    """
+    app, bootstrap_svc = _make_app(tmp_path)
+    assert "test5" not in app.service.project_configs
+    new_cfg = ProjectConfig(
+        category="saas-ai-automation",
+        template_version="saas-ai-automation.v1",
+        architecture_doc_id="doc_x",
+        architecture_doc_url="https://feishu.example/doc_x",
+        bootstrap_status="PROVISIONED",
+        project_status="PROVISIONED",
+    )
+    # Simulate Bitable having the project after Bootstrap's upsert.
+    app.gateway.list_project_configs.return_value = {"test5": new_cfg}
+
+    status, _ = app._handle_card_action_payload(_submit_payload())
+    assert status == 200
+    _wait_for_background_threads()
+
+    assert app.service.project_configs.get("test5") is not None
+    assert app.service.project_configs["test5"].bootstrap_status == "PROVISIONED"
+
+
 def test_submit_passes_seed_to_bootstrap_via_architecture_md(tmp_path):
     """Seed fields from the card should drive render_template's seed kwarg."""
     app, bootstrap_svc = _make_app(tmp_path)

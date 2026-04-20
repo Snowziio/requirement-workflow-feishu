@@ -534,6 +534,17 @@ class CoordinatorRuntimeApp:
                 LOGGER.exception("Failed to send unexpected-error text")
             return
 
+        # Bootstrap wrote the project to Bitable via `upsert_project_config`,
+        # but `service.project_configs` is only loaded at startup. Refresh
+        # the entry for this project so `/create req` sees it immediately.
+        try:
+            fresh = self.gateway.list_project_configs()
+            if fresh and req.project in fresh:
+                self.service.project_configs[req.project] = fresh[req.project]
+        except Exception:
+            LOGGER.exception(
+                "Failed to refresh project_configs after Bootstrap project=%s", req.project,
+            )
         try:
             self._save_state()
         except Exception:
