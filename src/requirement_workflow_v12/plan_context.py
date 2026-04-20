@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .models import WorkflowStatus
-from .plan_state_machine import DesignStatus, PlanStatus
+from .plan_state_machine import PlanStatus
 
 
 PLAN_CONTEXT_ALLOWED_STATUSES = {None, PlanStatus.DRAFTING}
@@ -36,13 +36,6 @@ class PlanContextBuilder:
                 "不允许获取 plan-context",
                 current_status=r.status.value,
             )
-        if r.needs_ui and r.design_status != DesignStatus.READY:
-            design_label = r.design_status.value if r.design_status else "None"
-            raise PlanContextGateError(
-                f"needs_ui=True 但 design_status={design_label}，必须先完成设计",
-                current_status=r.status.value,
-            )
-
         cfg = self._service.project_configs.get(r.project)
         if cfg is None:
             raise PlanContextMisconfigured(f"项目 {r.project} 未初始化")

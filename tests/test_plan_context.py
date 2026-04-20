@@ -68,3 +68,16 @@ def test_plan_context_allowed_when_drafting():
     builder = PlanContextBuilder(service=svc)
     ctx = builder.build(r.req_id)
     assert ctx["req_id"] == "REQ-P-1"
+
+
+def test_plan_context_allowed_when_needs_ui_true_and_no_design():
+    """MVP (2026-04-21): plan_start no longer couples to needs_ui/design_status;
+    plan_context must stay consistent with that — it should NOT gate on design."""
+    svc = CoordinatorService()
+    r = _req(svc)
+    r.needs_ui = True
+    # design_status stays None
+    builder = PlanContextBuilder(service=svc)
+    ctx = builder.build(r.req_id)
+    assert ctx["req_id"] == "REQ-P-1"
+    assert ctx["needs_ui"] is True
