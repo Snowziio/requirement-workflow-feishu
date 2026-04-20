@@ -48,11 +48,16 @@ from .config import Settings
 from .bitable_schema import (
     PROJECT_CONFIG_FIELD_ARCH_DOC_ID,
     PROJECT_CONFIG_FIELD_ARCH_DOC_URL,
+    PROJECT_CONFIG_FIELD_BOOTSTRAP_COMPLETED_AT,
+    PROJECT_CONFIG_FIELD_BOOTSTRAP_LOG_JSON,
+    PROJECT_CONFIG_FIELD_BOOTSTRAP_STATUS,
     PROJECT_CONFIG_FIELD_CATEGORY,
     PROJECT_CONFIG_FIELD_DESIGN_SYSTEM_DOC_ID,
+    PROJECT_CONFIG_FIELD_FEISHU_CHAT_ID,
     PROJECT_CONFIG_FIELD_GITHUB_OWNER_USERNAME,
     PROJECT_CONFIG_FIELD_GITHUB_REPO_URL,
     PROJECT_CONFIG_FIELD_PROJECT,
+    PROJECT_CONFIG_FIELD_PROJECT_STATUS,
     PROJECT_CONFIG_FIELD_TECH_STACK_JSON,
     PROJECT_CONFIG_FIELD_TEMPLATE_VERSION,
     build_coordinator_record_fields,
@@ -423,6 +428,13 @@ class FeishuGateway:
             PROJECT_CONFIG_FIELD_DESIGN_SYSTEM_DOC_ID: cfg.design_system_doc_id or "",
             PROJECT_CONFIG_FIELD_GITHUB_REPO_URL: cfg.github_repo_url,
             PROJECT_CONFIG_FIELD_GITHUB_OWNER_USERNAME: cfg.github_owner_username,
+            PROJECT_CONFIG_FIELD_BOOTSTRAP_STATUS: cfg.bootstrap_status,
+            PROJECT_CONFIG_FIELD_BOOTSTRAP_LOG_JSON: json.dumps(
+                cfg.bootstrap_log, ensure_ascii=False
+            ),
+            PROJECT_CONFIG_FIELD_BOOTSTRAP_COMPLETED_AT: cfg.bootstrap_completed_at or "",
+            PROJECT_CONFIG_FIELD_PROJECT_STATUS: cfg.project_status,
+            PROJECT_CONFIG_FIELD_FEISHU_CHAT_ID: cfg.feishu_chat_id,
         }
 
     @staticmethod
@@ -496,6 +508,20 @@ class FeishuGateway:
                 design_system_doc_id = self._extract_field_text(
                     fields.get(PROJECT_CONFIG_FIELD_DESIGN_SYSTEM_DOC_ID)
                 ) or None
+                bootstrap_log_raw = self._extract_field_text(
+                    fields.get(PROJECT_CONFIG_FIELD_BOOTSTRAP_LOG_JSON)
+                )
+                try:
+                    bootstrap_log = json.loads(bootstrap_log_raw) if bootstrap_log_raw else []
+                    if not isinstance(bootstrap_log, list):
+                        bootstrap_log = []
+                except json.JSONDecodeError:
+                    LOGGER.warning(
+                        "Invalid bootstrap_log JSON for project=%s record_id=%s; resetting to empty list",
+                        project,
+                        item.record_id,
+                    )
+                    bootstrap_log = []
                 configs[project] = ProjectConfig(
                     category=self._extract_field_text(fields.get(PROJECT_CONFIG_FIELD_CATEGORY)),
                     template_version=self._extract_field_text(
@@ -516,6 +542,19 @@ class FeishuGateway:
                         fields.get(PROJECT_CONFIG_FIELD_GITHUB_OWNER_USERNAME)
                     ),
                     bitable_record_id=item.record_id or "",
+                    bootstrap_status=self._extract_field_text(
+                        fields.get(PROJECT_CONFIG_FIELD_BOOTSTRAP_STATUS)
+                    ) or "UNBOOTSTRAPPED",
+                    bootstrap_log=bootstrap_log,
+                    bootstrap_completed_at=self._extract_field_text(
+                        fields.get(PROJECT_CONFIG_FIELD_BOOTSTRAP_COMPLETED_AT)
+                    ) or None,
+                    project_status=self._extract_field_text(
+                        fields.get(PROJECT_CONFIG_FIELD_PROJECT_STATUS)
+                    ) or "UNBOOTSTRAPPED",
+                    feishu_chat_id=self._extract_field_text(
+                        fields.get(PROJECT_CONFIG_FIELD_FEISHU_CHAT_ID)
+                    ),
                 )
             if not data.has_more:
                 break
