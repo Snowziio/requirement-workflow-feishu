@@ -58,6 +58,38 @@ PLAN_RESTART_RE = re.compile(r"^/plan\s+restart\s+(REQ-\S+)\s*$")
 DESIGN_RESTART_RE = re.compile(r"^/design\s+restart\s+(REQ-\S+)\s*$")
 
 
+@dataclass(frozen=True)
+class CreateProjectCommand:
+    project: str
+    category: str
+    owner_user_id: str
+    resume: bool = False
+
+
+_CREATE_PROJECT_RE = re.compile(
+    r"^/create\s+project\s+(?P<name>\S+)"
+    r"(?:\s+--category\s+(?P<category>\S+))?"
+    r"(?:\s+--owner\s+(?P<owner>\S+))?"
+    r"(?P<resume>\s+--resume)?\s*$"
+)
+
+
+def parse_create_project_command(text: str) -> CreateProjectCommand | None:
+    m = _CREATE_PROJECT_RE.match(text.strip())
+    if not m:
+        return None
+    category = m.group("category") or ""
+    owner = m.group("owner") or ""
+    if not category or not owner:
+        return None
+    return CreateProjectCommand(
+        project=m.group("name"),
+        category=category,
+        owner_user_id=owner,
+        resume=bool(m.group("resume")),
+    )
+
+
 @dataclass
 class MessageContext:
     chat_id: str
