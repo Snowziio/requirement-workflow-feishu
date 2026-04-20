@@ -463,42 +463,17 @@ class CoordinatorRuntimeApp:
             )
         return request, requirement, response.req_id
 
-    def _initialize_project_for_first_req(self, payload: CreationFormPayload) -> None:
-        from .architecture_templates import UnknownCategory, render_template
-
-        if not payload.category:
-            raise ValueError(
-                "category is required when creating the first requirement for a project"
-            )
-        try:
-            template_version, rendered = render_template(
-                payload.category, project=payload.project
-            )
-        except UnknownCategory as exc:
-            raise ValueError(f"未知类目：{payload.category}") from exc
-
-        created = self.gateway.create_architecture_document(payload.project)
-        if created is None:
-            raise RuntimeError("failed to create ARCHITECTURE feishu document (missing folder token)")
-        self.gateway.write_document_text(created.document_id, rendered)
-
-        self.service.initialize_project(
-            project=payload.project,
-            category=payload.category,
-            template_version=template_version,
-            architecture_doc_id=created.document_id,
-            architecture_doc_url=created.document_url,
-            tech_stack={},
-        )
-
     def _provision_requirement_after_creation(self, request: CreationRequest, req_id: str) -> None:
         form_payload = self._pending_form_payloads.pop(req_id, None)
         if form_payload is not None:
-            if form_payload.project not in self.service.project_configs:
-                self._initialize_project_for_first_req(form_payload)
-                self._save_state()
+            existing = self.service.project_configs.get(form_payload.project)
+            if existing is None:
+                LOGGER.warning(
+                    "REQ %s created but project %s missing from project_configs — "
+                    "Bootstrap should have populated it; skipping project-init",
+                    req_id, form_payload.project,
+                )
             else:
-                existing = self.service.project_configs[form_payload.project]
                 if form_payload.category and form_payload.category != existing.category:
                     LOGGER.warning(
                         "Form supplied mismatched category for existing project %s: got %s, have %s",
