@@ -264,3 +264,67 @@ def test_handle_create_project_invalid_category_lists_choices(tmp_path):
     text = "\n".join(getattr(m, "text", "") for m in msgs)
     assert "saas-ai-automation" in text
     assert "not-a-real-category" in text
+
+
+def _fake_receive_event(*, message_id: str, chat_id: str, text: str):
+    """Build a shim matching what _extract_message_context reads off P2ImMessageReceiveV1."""
+    from types import SimpleNamespace
+    import json as _json
+
+    return SimpleNamespace(
+        event=SimpleNamespace(
+            sender=SimpleNamespace(sender_id=SimpleNamespace(open_id="ou_alice")),
+            message=SimpleNamespace(
+                chat_id=chat_id,
+                chat_type="group",
+                message_id=message_id,
+                thread_id="",
+                message_type="text",
+                content=_json.dumps({"text": text}),
+            ),
+        )
+    )
+
+
+def test_on_message_receive_dedupes_by_message_id(tmp_path):
+    """Duplicate Feishu deliveries with the same message_id must not invoke the handler twice."""
+    app, bootstrap_svc = _make_app(tmp_path)
+    event = _fake_receive_event(
+        message_id="msg_dup_42",
+        chat_id="oc_abc",
+        text="/create project test3 --category saas-ai-automation",
+    )
+    app._on_message_receive(event)
+    app._on_message_receive(event)
+    # Bootstrap must run exactly once despite two identical deliveries.
+    bootstrap_svc.run.assert_called_once()
+    # Gateway.send_text must also be called exactly once.
+    assert app.gateway.send_text.call_count == 1
+
+
+def test_on_message_receive_still_allows_distinct_message_ids(tmp_path):
+    """Different message_ids must both be processed."""
+    app, bootstrap_svc = _make_app(tmp_path)
+    app._on_message_receive(_fake_receive_event(
+        message_id="msg_a", chat_id="oc_abc",
+        text="/create project test3 --category saas-ai-automation",
+    ))
+    app._on_message_receive(_fake_receive_event(
+        message_id="msg_b", chat_id="oc_abc",
+        text="/create project test3 --category saas-ai-automation --resume",
+    ))
+    assert bootstrap_svc.run.call_count == 2
+
+
+def test_mark_message_seen_evicts_oldest_when_full(tmp_path):
+    """Bounded cache: old ids get evicted to keep memory footprint fixed."""
+    app, _ = _make_app(tmp_path)
+    app._seen_message_ids_max = 3
+    assert app._mark_message_seen("a") is True
+    assert app._mark_message_seen("b") is True
+    assert app._mark_message_seen("c") is True
+    assert app._mark_message_seen("d") is True  # evicts 'a'
+    # 'a' was evicted, so it looks new again
+    assert app._mark_message_seen("a") is True
+    # 'd' is still cached
+    assert app._mark_message_seen("d") is False

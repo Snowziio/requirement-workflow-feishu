@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import concurrent.futures
 import hmac
 import hashlib
@@ -217,6 +218,11 @@ class CoordinatorRuntimeApp:
         self._health_server: HTTPServer | None = None
         self._observed_creation_group_chat_id = settings.creation_group_chat_id
         self._pending_form_payloads: dict[str, CreationFormPayload] = {}
+        # Feishu can re-deliver the same IM event (at-least-once). Paired
+        # with idempotent slash handlers this surfaces as duplicate replies.
+        # Dedupe by message_id; bounded so we don't grow unbounded.
+        self._seen_message_ids: collections.OrderedDict[str, None] = collections.OrderedDict()
+        self._seen_message_ids_max = 1024
 
         if settings.github_token:
             from pathlib import Path
@@ -336,6 +342,12 @@ class CoordinatorRuntimeApp:
         context = self._extract_message_context(data)
         if context is None:
             return
+        if context.message_id and not self._mark_message_seen(context.message_id):
+            LOGGER.info(
+                "Dropping duplicate message_id=%s chat_id=%s text=%r",
+                context.message_id, context.chat_id, context.text,
+            )
+            return
         LOGGER.info(
             "Received message chat_id=%s chat_type=%s user_id=%s text=%r",
             context.chat_id,
@@ -370,6 +382,15 @@ class CoordinatorRuntimeApp:
                     "send failed receive_id=%s receive_id_type=%s",
                     outbound.receive_id, outbound.receive_id_type,
                 )
+
+    def _mark_message_seen(self, message_id: str) -> bool:
+        """Returns True if message_id is new (and records it), False if already seen."""
+        if message_id in self._seen_message_ids:
+            return False
+        self._seen_message_ids[message_id] = None
+        while len(self._seen_message_ids) > self._seen_message_ids_max:
+            self._seen_message_ids.popitem(last=False)
+        return True
 
     def _on_card_action_trigger(self, data: P2CardActionTrigger):
         payload = self._card_event_to_payload(data)
