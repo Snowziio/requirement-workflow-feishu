@@ -119,3 +119,21 @@ def test_send_plan_author_start_unknown_req_id_returns_error_toast(app):
     assert status == 200
     assert resp.get("toast", {}).get("type") == "error"
     app.gateway.send_text.assert_not_called()
+
+
+def test_final_review_passed_card_has_plan_button(app):
+    r = _approved_req(app)
+
+    actions = app._build_transition_notification_actions(r, trigger="final_review_passed")
+
+    assert len(actions) == 1
+    assert actions[0]["value"]["action"] == "send_plan_author_start"
+    assert "Plan 撰写" in actions[0]["text"]["content"]
+
+
+def test_final_review_passed_card_content_mentions_plan(app):
+    r = _approved_req(app)
+    template, title, reason, result, next_action = app._transition_notification_content(
+        r, trigger="final_review_passed"
+    )
+    assert "Plan" in next_action

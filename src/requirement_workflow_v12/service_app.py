@@ -2541,9 +2541,9 @@ class CoordinatorRuntimeApp:
             return [
                 {
                     "tag": "button",
-                    "text": {"tag": "plain_text", "content": "开始 Spec 撰写"},
+                    "text": {"tag": "plain_text", "content": "开始 Plan 撰写"},
                     "type": "primary",
-                    "value": {"action": "send_spec_author_start", "req_id": requirement.req_id},
+                    "value": {"action": "send_plan_author_start", "req_id": requirement.req_id},
                 },
             ]
         if trigger == "spec_submitted":
@@ -2612,13 +2612,13 @@ class CoordinatorRuntimeApp:
                 f"请由 {author_name} 根据反馈继续修改，并准备下一轮 AI Review。",
             )
         if trigger == "final_review_passed":
-            spec_agent_name = self.settings.openclaw_spec_agent_name
+            plan_agent_name = self.settings.openclaw_plan_author_agent_name
             return (
                 "green",
                 f"{requirement.req_id} 已批准通过",
                 latest_review,
-                "正式审查已通过，需求进入 Spec 撰写阶段。",
-                f"请点击「开始 Spec 撰写」，将启动指令私发给自己后转发给 {spec_agent_name}。",
+                "正式审查已通过，需求进入 Plan 撰写阶段。",
+                f"请点击「开始 Plan 撰写」，将启动指令私发给自己后转发给 {plan_agent_name}。",
             )
         if trigger == "final_review_rejected":
             return (
