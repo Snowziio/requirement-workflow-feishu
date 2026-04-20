@@ -56,6 +56,36 @@
       "field_type": "text",
       "required": false,
       "description": "项目 GitHub admin 用户名,用于新建 repo 时授予 admin 权限。"
+    },
+    {
+      "name": "引导状态",
+      "field_type": "text",
+      "required": false,
+      "description": "Bootstrap 状态机: UNBOOTSTRAPPED / BOOTSTRAPPING / PROVISIONED / FAILED / ARCHIVED / DECOMMISSIONED。"
+    },
+    {
+      "name": "引导日志JSON",
+      "field_type": "text",
+      "required": false,
+      "description": "bootstrap_log 的 JSON 字符串(list[dict]);每步执行情况记录。"
+    },
+    {
+      "name": "引导完成时间",
+      "field_type": "text",
+      "required": false,
+      "description": "Bootstrap 成功进入 PROVISIONED 的 ISO 时间戳;未完成时为空。"
+    },
+    {
+      "name": "项目状态",
+      "field_type": "text",
+      "required": false,
+      "description": "项目生命周期状态(MVP 等同引导状态;Phase 2 引入 ARCHIVED/DECOMMISSIONED)。"
+    },
+    {
+      "name": "飞书群chat_id",
+      "field_type": "text",
+      "required": false,
+      "description": "Bootstrap 创建的项目群 chat_id(用于后续 needs_ui/通告等)。"
     }
   ]
 }
