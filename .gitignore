@@ -9,5 +9,6 @@ reports/
 
 # Tool / editor local state
 .claude/
+.superpowers/
 docs/context/.obsidian/graph.json
 docs/context/.obsidian/workspace.json
