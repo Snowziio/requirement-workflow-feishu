@@ -260,3 +260,19 @@ def test_reject_plan_submit_rejects_if_no_pending(app):
 
     assert status == 200
     assert resp.get("toast", {}).get("type") == "error"
+
+
+def test_plan_ready_content_and_actions(app):
+    r = _approved_req(app)
+    r.plan_status = PlanStatus.READY
+    r.plan_pr_url = "https://github.com/o/r/pull/42"
+
+    template, title, reason, result, next_action = app._transition_notification_content(
+        r, trigger="plan_ready"
+    )
+    assert "READY" in title or "已提交" in title or "Plan" in title
+    assert "Spec" in next_action
+
+    actions = app._build_transition_notification_actions(r, trigger="plan_ready")
+    action_names = {a["value"]["action"] for a in actions}
+    assert action_names == {"send_spec_author_start"}

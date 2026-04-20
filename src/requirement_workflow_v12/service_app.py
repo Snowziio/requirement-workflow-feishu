@@ -2630,6 +2630,15 @@ class CoordinatorRuntimeApp:
                     "value": {"action": "reject_plan_submit", "req_id": requirement.req_id},
                 },
             ]
+        if trigger == "plan_ready":
+            return [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "开始 Spec 撰写"},
+                    "type": "primary",
+                    "value": {"action": "send_spec_author_start", "req_id": requirement.req_id},
+                },
+            ]
         return []
 
     def _transition_notification_content(self, requirement: Requirement, *, trigger: str) -> tuple[str, str, str, str, str]:
@@ -2734,6 +2743,15 @@ class CoordinatorRuntimeApp:
                 "Plan Author 已完成 plan.md 终稿提交。",
                 "Plan 文档已进入最终审查阶段，等待需求提出者裁决。",
                 "请 review plan.md 内容后，点击「通过」提交 PR，或「需要修改」驳回重写。",
+            )
+        if trigger == "plan_ready":
+            spec_agent_name = self.settings.openclaw_spec_agent_name
+            return (
+                "green",
+                f"{requirement.req_id} Plan 已通过",
+                f"Plan PR：{requirement.plan_pr_url or '（创建中）'}",
+                "Plan 已合并至项目仓库，需求进入 Spec 撰写阶段。",
+                f"请点击「开始 Spec 撰写」，将启动指令私发给自己后转发给 {spec_agent_name}。",
             )
         return ("grey", "", "", "", "")
 
