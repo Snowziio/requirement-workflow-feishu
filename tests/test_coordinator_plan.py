@@ -40,18 +40,6 @@ def test_plan_start_rejected_when_not_approved():
         svc.plan_start(r.req_id)
 
 
-def test_plan_start_needs_ui_requires_design_ready():
-    svc = CoordinatorService()
-    r = _approved_req(svc, needs_ui=True)
-
-    with pytest.raises(ValueError, match="design_status"):
-        svc.plan_start(r.req_id)
-
-    r.design_status = DesignStatus.READY
-    svc.plan_start(r.req_id)
-    assert r.plan_status is PlanStatus.DRAFTING
-
-
 def test_plan_start_rejected_when_already_drafting():
     svc = CoordinatorService()
     r = _approved_req(svc)
@@ -214,3 +202,18 @@ def test_on_enter_ready_hook_propagates_recoverable_error():
             r.req_id, plan_md_content="---\n---\n", project_context_change=None,
         )
     assert exc_info.value.recoverable is True
+
+
+def test_plan_start_does_not_require_design_ready_when_needs_ui_true():
+    """needs_ui coupling dropped 2026-04-21 — design flow does not exist yet."""
+    svc = CoordinatorService()
+    r = Requirement(req_id="R-UI", name="n", project="P", summary="s", creator="c")
+    r.status = WorkflowStatus.APPROVED
+    r.needs_ui = True
+    r.design_status = None
+    svc.requirements["R-UI"] = r
+
+    result = svc.plan_start("R-UI")
+
+    assert result.plan_status == PlanStatus.DRAFTING
+    assert result.plan_phase == PlanPhase.OUTLINE_PENDING

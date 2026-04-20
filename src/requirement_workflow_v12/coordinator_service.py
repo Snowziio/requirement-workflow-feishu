@@ -17,7 +17,7 @@ from .protocols import (
     CreationResponse,
 )
 from .plan_state_machine import (
-    DesignEvent, DesignStatus, PlanEvent, PlanPhase, PlanStatus,
+    DesignEvent, PlanEvent, PlanPhase, PlanStatus,
     apply_design_event, apply_plan_event,
 )
 from .project_repo import PlanArtifacts
@@ -797,11 +797,6 @@ class CoordinatorService:
         if r.status != WorkflowStatus.APPROVED:
             raise ValueError(
                 f"plan_start requires workflow_status=APPROVED, got {r.status.value}"
-            )
-        if r.needs_ui and r.design_status != DesignStatus.READY:
-            raise ValueError(
-                f"plan_start requires design_status=READY when needs_ui=True, "
-                f"got design_status={r.design_status}"
             )
         decision = apply_plan_event(r.plan_status, PlanEvent.PLAN_START)
         if not decision.allowed:
