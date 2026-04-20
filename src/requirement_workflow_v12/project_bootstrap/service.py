@@ -12,8 +12,16 @@ from dataclasses import replace
 
 from ..architecture_templates import available_categories
 from ..project_config import ProjectConfig
-from .state import append_log_entry
-from .types import BootstrapRequest, BootstrapStep
+from .state import append_log_entry, last_completed_step
+from .static_content import (
+    PROJECT_README_MD,
+    render_claude_md,
+    render_environments_yaml,
+    render_req_registry_yaml,
+    render_secrets_todo,
+    render_skill_md,
+)
+from .types import BootstrapRequest, BootstrapStep, BootstrapStepError
 
 
 _logger = logging.getLogger(__name__)
@@ -94,5 +102,72 @@ class ProjectBootstrapService:
             cfg.bootstrap_log, step=BootstrapStep.UPSERT_CONFIG, status="ok"
         )
         cfg = replace(cfg, bootstrap_log=new_log)
+        self._feishu.upsert_project_config(request.project, cfg)
+        return cfg
+
+    def create_repo_and_populate(
+        self,
+        request: BootstrapRequest,
+        *,
+        template_version: str,
+        rendered_architecture_md: str,
+    ) -> ProjectConfig:
+        cfg = self._feishu.list_project_configs()[request.project]
+        last_step = last_completed_step(cfg.bootstrap_log)
+        if last_step >= int(BootstrapStep.POPULATE_MAIN):
+            _logger.info(
+                "bootstrap: skipping create_repo+populate (already completed) project=%s",
+                request.project,
+            )
+            return cfg
+
+        populate_files = {
+            "docs/ARCHITECTURE.md": rendered_architecture_md,
+            "project/README.md": PROJECT_README_MD,
+            "project/req-registry.yaml": render_req_registry_yaml(
+                project=request.project
+            ),
+            "project/environments.yaml": render_environments_yaml(
+                category=request.category
+            ),
+            "project/SECRETS-TODO.md": render_secrets_todo(category=request.category),
+            "CLAUDE.md": render_claude_md(project=request.project),
+            "SKILL.md": render_skill_md(project=request.project),
+        }
+        try:
+            result = self._repo_tools.bootstrap_project_repo(
+                template_owner=self._template_owner,
+                template_repo=self._template_repo,
+                new_owner=self._new_owner,
+                new_name=request.project,
+                populate_files=populate_files,
+                populate_commit_message=(
+                    f"project bootstrap: populate initial files for {request.project}"
+                ),
+                collaborator_username=request.github_username,
+            )
+        except Exception as exc:
+            failed_log = append_log_entry(
+                cfg.bootstrap_log,
+                step=BootstrapStep.CREATE_REPO,
+                status="error",
+                error_msg=str(exc),
+            )
+            cfg = replace(cfg, bootstrap_log=failed_log)
+            self._feishu.upsert_project_config(request.project, cfg)
+            raise BootstrapStepError(
+                step=BootstrapStep.CREATE_REPO, message=str(exc)
+            ) from exc
+
+        log = append_log_entry(
+            cfg.bootstrap_log, step=BootstrapStep.CREATE_REPO, status="ok"
+        )
+        log = append_log_entry(log, step=BootstrapStep.POPULATE_MAIN, status="ok")
+        cfg = replace(
+            cfg,
+            github_repo_url=result.html_url,
+            github_owner_username=request.github_username or "",
+            bootstrap_log=log,
+        )
         self._feishu.upsert_project_config(request.project, cfg)
         return cfg

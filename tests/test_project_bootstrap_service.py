@@ -143,6 +143,95 @@ def test_upsert_config_creates_new_row_with_bootstrapping_status():
     )
 
 
+def test_create_repo_and_populate_renders_all_seven_files_and_records_sha():
+    from requirement_workflow_v12.project_bootstrap.types import BootstrapStep
+    from requirement_workflow_v12.project_repo.types import BootstrapRepoResult
+    from requirement_workflow_v12.project_config import ProjectConfig
+
+    existing = ProjectConfig(
+        category="saas-ai-automation",
+        template_version="saas-ai-automation.v1",
+        architecture_doc_id="",
+        architecture_doc_url="",
+        bootstrap_status="BOOTSTRAPPING",
+        bootstrap_log=[
+            {"step": 2, "step_name": "UPSERT_CONFIG", "ts": "t", "status": "ok"}
+        ],
+    )
+    svc, repo_tools, _, _ = _make_service(existing_projects={"test3": existing})
+    repo_tools.bootstrap_project_repo.return_value = BootstrapRepoResult(
+        html_url="https://github.com/Snowziio/test3",
+        default_branch="main",
+        initial_populate_commit_sha="sha_xyz",
+    )
+    req = BootstrapRequest(
+        project="test3",
+        category="saas-ai-automation",
+        owner_user_id="ou_1",
+        creator_chat_id="c1",
+        github_username="alice",
+        resume=True,
+    )
+    rendered_arch = "# arch for test3"
+
+    cfg_after = svc.create_repo_and_populate(
+        req,
+        template_version="saas-ai-automation.v1",
+        rendered_architecture_md=rendered_arch,
+    )
+    call = repo_tools.bootstrap_project_repo.call_args
+    populate_files = call.kwargs["populate_files"]
+    assert set(populate_files.keys()) == {
+        "docs/ARCHITECTURE.md",
+        "project/README.md",
+        "project/req-registry.yaml",
+        "project/environments.yaml",
+        "project/SECRETS-TODO.md",
+        "CLAUDE.md",
+        "SKILL.md",
+    }
+    assert populate_files["docs/ARCHITECTURE.md"] == rendered_arch
+    assert "project: test3" in populate_files["project/req-registry.yaml"]
+    assert cfg_after.github_repo_url == "https://github.com/Snowziio/test3"
+    step_numbers = {e["step"] for e in cfg_after.bootstrap_log}
+    assert int(BootstrapStep.CREATE_REPO) in step_numbers
+    assert int(BootstrapStep.POPULATE_MAIN) in step_numbers
+
+
+def test_create_repo_skips_when_already_present_in_log():
+    from requirement_workflow_v12.project_config import ProjectConfig
+    from requirement_workflow_v12.project_bootstrap.types import BootstrapStep
+
+    prior_log = [
+        {"step": int(BootstrapStep.UPSERT_CONFIG), "step_name": "UPSERT_CONFIG", "ts": "t", "status": "ok"},
+        {"step": int(BootstrapStep.CREATE_REPO), "step_name": "CREATE_REPO", "ts": "t", "status": "ok"},
+        {"step": int(BootstrapStep.POPULATE_MAIN), "step_name": "POPULATE_MAIN", "ts": "t", "status": "ok"},
+    ]
+    existing = ProjectConfig(
+        category="saas-ai-automation",
+        template_version="saas-ai-automation.v1",
+        architecture_doc_id="",
+        architecture_doc_url="",
+        bootstrap_status="BOOTSTRAPPING",
+        bootstrap_log=prior_log,
+        github_repo_url="https://github.com/Snowziio/test3",
+    )
+    svc, repo_tools, _, _ = _make_service(existing_projects={"test3": existing})
+    req = BootstrapRequest(
+        project="test3",
+        category="saas-ai-automation",
+        owner_user_id="ou_1",
+        creator_chat_id="c1",
+        resume=True,
+    )
+    svc.create_repo_and_populate(
+        req,
+        template_version="saas-ai-automation.v1",
+        rendered_architecture_md="# arch",
+    )
+    repo_tools.bootstrap_project_repo.assert_not_called()
+
+
 def test_upsert_config_preserves_existing_fields_on_resume():
     from requirement_workflow_v12.project_config import ProjectConfig
 
