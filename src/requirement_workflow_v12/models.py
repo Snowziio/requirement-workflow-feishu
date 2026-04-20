@@ -132,6 +132,7 @@ class Requirement:
     plan_outline: list[dict] = field(default_factory=list)
     plan_decisions_wip: list[dict] = field(default_factory=list)
     pending_plan_draft: dict | None = None
+    pending_plan_review: dict | None = None
     design_status: "DesignStatus | None" = None
     updated_at: datetime = field(default_factory=utc_now)
 
