@@ -16,7 +16,8 @@ from typing import Any
 from .config import Settings, load_settings
 from .coordinator_service import CoordinatorService
 from .feishu_gateway import FeishuGateway
-from .models import DISCUSSION_FIELDS, Requirement, ReviewFinding, ReviewResult, WorkflowStatus
+from .models import DISCUSSION_FIELDS, Requirement, ReviewFinding, ReviewResult, WorkflowStatus, utc_now
+from .plan_state_machine import PlanPhase, PlanStatus
 from .spec_state_machine import SpecStatus
 from .project_config import ProjectConfig
 from .protocols import (
@@ -1222,18 +1223,28 @@ class CoordinatorRuntimeApp:
                 self._save_state()
                 return 200, {"req_id": req_id, "plan_phase": "decisions_in_progress"}
             if event == "plan_submit":
-                self.service.plan_submit(
-                    req_id,
-                    plan_md_content=payload.get("plan_md_content", ""),
-                    project_context_change=(
+                if r.plan_status != PlanStatus.DRAFTING:
+                    return 409, {
+                        "error": "invalid_state",
+                        "message": f"plan_submit requires plan_status=DRAFTING, got {r.plan_status.value if r.plan_status else 'None'}",
+                    }
+                r.pending_plan_review = {
+                    "plan_md_content": payload.get("plan_md_content", ""),
+                    "project_context_change": (
                         payload.get("project_context_change")
                         or payload.get("architecture_change")
                     ),
-                )
+                    "submitted_at": utc_now().isoformat(),
+                }
+                r.plan_phase = PlanPhase.FINAL_REVIEW_PENDING
                 self._save_state()
+                self._dispatch_transition_notifications(
+                    r, trigger="plan_submitted_pending_review"
+                )
                 return 200, {
                     "req_id": req_id,
-                    "plan_status": r.plan_status.value if r.plan_status else None,
+                    "plan_status": r.plan_status.value,
+                    "plan_phase": r.plan_phase.value,
                 }
             return 400, {"error": "unknown_event", "event": event}
         except ValueError as exc:
@@ -2660,6 +2671,14 @@ class CoordinatorRuntimeApp:
                 requirement.spec_review_summary or "Spec 需要修改",
                 "Spec Reviewer 判定当前文档未达到标准，已通知 Spec Agent 修改。",
                 "等待 Spec Agent 修改后重新提交。",
+            )
+        if trigger == "plan_submitted_pending_review":
+            return (
+                "indigo",
+                f"{requirement.req_id} Plan 已提交，待审查",
+                "Plan Author 已完成 plan.md 终稿提交。",
+                "Plan 文档已进入最终审查阶段，等待需求提出者裁决。",
+                "请 review plan.md 内容后，点击「通过」提交 PR，或「需要修改」驳回重写。",
             )
         return ("grey", "", "", "", "")
 

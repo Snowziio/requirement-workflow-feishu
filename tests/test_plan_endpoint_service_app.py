@@ -94,11 +94,10 @@ def test_plan_callback_outline_submit_writes_outline_and_advances_phase(app):
 
 
 def test_plan_callback_plan_submit_branches_to_ready_when_no_architecture(app):
+    """After 2026-04-21 plan-wiring: plan_submit callback buffers into
+    pending_plan_review; state remains DRAFTING until human approves via card."""
     r = _approved_req(app)
     app.service.plan_start(r.req_id)
-    # stub the READY hook so test doesn't need tools
-    from requirement_workflow_v12.plan_state_machine import PlanStatus
-    app.service._hooks.on_enter(PlanStatus.READY, lambda _r: None)
 
     body = {
         "req_id": "REQ-P-1",
@@ -110,8 +109,11 @@ def test_plan_callback_plan_submit_branches_to_ready_when_no_architecture(app):
     }
     status, resp = app.handle_openclaw_plan_callback(body)
 
+    from requirement_workflow_v12.plan_state_machine import PlanStatus, PlanPhase
     assert status == 200
-    assert r.plan_status is PlanStatus.READY
+    assert r.plan_status is PlanStatus.DRAFTING
+    assert r.plan_phase is PlanPhase.FINAL_REVIEW_PENDING
+    assert r.pending_plan_review is not None
 
 
 def test_plan_callback_unknown_event_returns_400(app):
@@ -174,3 +176,63 @@ def test_handle_text_message_dispatches_plan_restart(app):
     assert len(outbound) == 1
     assert "REQ-P-1" in outbound[0].text
     assert r.plan_status is None
+
+
+def test_plan_callback_plan_submit_buffers_draft_and_keeps_drafting(app):
+    r = _approved_req(app, req_id="REQ-PB-1")
+    app.service.plan_start(r.req_id)
+
+    body = {
+        "req_id": r.req_id,
+        "event": "plan_submit",
+        "payload": {
+            "plan_md_content": "# plan\n...",
+            "project_context_change": None,
+        },
+    }
+    status, resp = app.handle_openclaw_plan_callback(body)
+
+    assert status == 200
+    from requirement_workflow_v12.plan_state_machine import PlanStatus, PlanPhase
+    assert r.plan_status == PlanStatus.DRAFTING  # NOT READY — review pending
+    assert r.plan_phase == PlanPhase.FINAL_REVIEW_PENDING
+    assert r.pending_plan_review is not None
+    assert r.pending_plan_review["plan_md_content"] == "# plan\n..."
+    assert r.pending_plan_review["project_context_change"] is None
+    assert "submitted_at" in r.pending_plan_review
+
+
+def test_plan_callback_plan_submit_dispatches_review_notification(app):
+    r = _approved_req(app, req_id="REQ-PB-2")
+    r.creator_user_id = "ou_alice"
+    app.service.plan_start(r.req_id)
+
+    body = {
+        "req_id": r.req_id,
+        "event": "plan_submit",
+        "payload": {"plan_md_content": "# plan", "project_context_change": None},
+    }
+    app.handle_openclaw_plan_callback(body)
+
+    # Either send_card or send_text was called at least once with the review trigger
+    assert app.gateway.send_card.called or app.gateway.send_text.called
+
+
+def test_plan_callback_plan_submit_retry_overwrites_pending(app):
+    r = _approved_req(app, req_id="REQ-PB-3")
+    app.service.plan_start(r.req_id)
+
+    app.handle_openclaw_plan_callback({
+        "req_id": r.req_id, "event": "plan_submit",
+        "payload": {"plan_md_content": "v1", "project_context_change": None},
+    })
+    first_submitted = r.pending_plan_review["submitted_at"]
+
+    app.handle_openclaw_plan_callback({
+        "req_id": r.req_id, "event": "plan_submit",
+        "payload": {"plan_md_content": "v2", "project_context_change": None},
+    })
+
+    assert r.pending_plan_review["plan_md_content"] == "v2"
+    # submitted_at should be re-stamped (may equal if called in same millisecond, so just assert string exists)
+    assert r.pending_plan_review["submitted_at"] is not None
