@@ -1370,6 +1370,77 @@ class CoordinatorRuntimeApp:
         user_id = operator.get("open_id", "")
         user_name = operator.get("name", "")
 
+        if action_name == "submit_create_project":
+            form = self._extract_project_form_payload(
+                payload, user_id=user_id, user_name=user_name,
+            )
+            if form is None:
+                return 200, {"toast": {"type": "error", "content": "项目代号 / 类目为必填字段。"}}
+            if not re.match(r"^[a-z][a-z0-9-]{1,30}$", form.project):
+                self.gateway.send_text(
+                    form.creator_chat_id,
+                    f"项目代号格式不合法：{form.project!r}（需小写字母开头、2-30 位、仅含 a-z 0-9 -）",
+                )
+                return 200, {"toast": {"type": "error", "content": "项目代号格式不合法。"}}
+            if form.category not in KNOWN_PROJECT_CATEGORIES:
+                return 200, {"toast": {"type": "error", "content": f"未知类目：{form.category}"}}
+            if self._project_bootstrap_service is None:
+                return 200, {"toast": {"type": "error", "content": "Bootstrap 服务未启用。"}}
+
+            existing = self.service.project_configs.get(form.project)
+            if existing is not None and existing.bootstrap_status == "PROVISIONED":
+                self.gateway.send_text(
+                    form.creator_chat_id,
+                    f"项目 {form.project} 已经完成 Bootstrap，请用 `/create req` 创建需求。",
+                )
+                return 200, {"toast": {"type": "info", "content": "项目已完成 Bootstrap。"}}
+
+            resume = existing is not None and existing.bootstrap_status != "PROVISIONED"
+
+            from .project_bootstrap.types import BootstrapRequest, BootstrapStepError
+            from .project_bootstrap.service import ValidationError
+            req = BootstrapRequest(
+                project=form.project,
+                category=form.category,
+                owner_user_id=form.owner_user_id,
+                creator_chat_id=form.creator_chat_id,
+                resume=resume,
+                github_username=form.github_username,
+                architecture_seed={
+                    "display_name": form.display_name,
+                    "brief": form.brief,
+                    "tech_stack": form.tech_stack,
+                },
+            )
+            try:
+                result = self._project_bootstrap_service.run(req)
+            except ValidationError as exc:
+                self.gateway.send_text(
+                    form.creator_chat_id, f"Bootstrap 校验失败：{exc}",
+                )
+                return 200, {"toast": {"type": "error", "content": str(exc)}}
+            except BootstrapStepError as exc:
+                self.gateway.send_text(
+                    form.creator_chat_id,
+                    (
+                        f"Bootstrap 中断于 Step {int(exc.step)} ({exc.step.name})：{exc.message}\n"
+                        f"请重新 `/create project`，填同样的项目代号即可自动续跑。"
+                    ),
+                )
+                return 200, {"toast": {"type": "error", "content": f"Bootstrap 失败：Step {exc.step.name}"}}
+            self._save_state()
+            self.gateway.send_text(
+                form.creator_chat_id,
+                (
+                    f"项目 {result.project} 已就绪：\n"
+                    f"- Repo: {result.github_repo_url}\n"
+                    f"- ARCHITECTURE: {result.architecture_doc_url}\n"
+                    f"- 群 chat_id: {result.feishu_chat_id}\n"
+                    f"可开始用 `/create req` 创建需求。"
+                ),
+            )
+            return 200, {"toast": {"type": "success", "content": f"项目 {result.project} 已就绪。"}}
+
         if action_name == "submit_create_requirement":
             form_payload = self._extract_creation_form_payload(payload, user_id=user_id, user_name=user_name)
             if form_payload is None:

@@ -306,7 +306,9 @@ class ProjectBootstrapService:
     def run(self, request: BootstrapRequest) -> BootstrapResult:
         self.validate(request)
         template_version, rendered_arch_md = render_template(
-            request.category, project=request.project
+            request.category,
+            project=request.project,
+            seed=request.architecture_seed or None,
         )
         self.upsert_config(request, template_version=template_version)
         self.create_repo_and_populate(

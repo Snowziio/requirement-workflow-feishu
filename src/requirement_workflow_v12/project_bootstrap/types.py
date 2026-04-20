@@ -1,7 +1,7 @@
 """Domain types for the project bootstrap orchestrator."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum
 
 
@@ -23,6 +23,7 @@ class BootstrapRequest:
     creator_chat_id: str
     github_username: str | None = None
     resume: bool = False
+    architecture_seed: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
