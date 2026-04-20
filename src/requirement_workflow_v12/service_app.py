@@ -1626,9 +1626,14 @@ class CoordinatorRuntimeApp:
             requirement = self.service.get_requirement(req_id)
             if requirement is None:
                 return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
-            if requirement.status != WorkflowStatus.APPROVED or requirement.spec_status not in {None, SpecStatus.DRAFTING}:
+            if (
+                requirement.status != WorkflowStatus.APPROVED
+                or requirement.spec_status not in {None, SpecStatus.DRAFTING}
+                or requirement.plan_status != PlanStatus.READY
+            ):
                 spec_label = requirement.spec_status.value if requirement.spec_status else "None"
-                return 200, {"toast": {"type": "error", "content": f"当前需求不处于 Spec 撰写阶段（status={requirement.status.value} spec_status={spec_label}）。"}}
+                plan_label = requirement.plan_status.value if requirement.plan_status else "None"
+                return 200, {"toast": {"type": "error", "content": f"当前需求不处于 Spec 撰写阶段（status={requirement.status.value} spec_status={spec_label} plan_status={plan_label}）。Plan 未 READY，不能启动 Spec 撰写。"}}
             target_user_id, receive_id_type = self._resolve_operator_receive_target(operator)
             if not target_user_id:
                 return 200, {"toast": {"type": "error", "content": "无法识别当前点击人身份，请手动私聊 Spec 撰写助手。"}}

@@ -276,3 +276,30 @@ def test_plan_ready_content_and_actions(app):
     actions = app._build_transition_notification_actions(r, trigger="plan_ready")
     action_names = {a["value"]["action"] for a in actions}
     assert action_names == {"send_spec_author_start"}
+
+
+def test_send_spec_author_start_rejects_when_plan_not_ready(app):
+    r = _approved_req(app)
+    # plan_status is still None — Plan never ran
+
+    status, resp = app._handle_card_action_payload(
+        _card_payload("send_spec_author_start", r.req_id)
+    )
+
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "error"
+    assert "Plan" in resp["toast"]["content"] or "plan" in resp["toast"]["content"]
+    app.gateway.send_text.assert_not_called()
+
+
+def test_send_spec_author_start_allows_when_plan_ready(app):
+    r = _approved_req(app)
+    r.plan_status = PlanStatus.READY
+
+    status, resp = app._handle_card_action_payload(
+        _card_payload("send_spec_author_start", r.req_id)
+    )
+
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "success"
+    app.gateway.send_text.assert_called_once()
