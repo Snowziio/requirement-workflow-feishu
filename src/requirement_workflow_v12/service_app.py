@@ -414,9 +414,8 @@ class CoordinatorRuntimeApp:
             return [OutboundMessage(
                 receive_id=context.chat_id,
                 text=(
-                    "REQ 创建已改用固化命令：\n"
-                    "`/create req <project> <name>` （可选 --summary / --category）\n"
-                    "示例：`/create req test3 会话鉴权改造 --summary \"支持JWT\"`"
+                    "REQ 创建已改用卡片：\n"
+                    "直接发送 `/create req`，在弹出的卡片里选项目、填名称和简述。"
                 ),
             )]
         return []
