@@ -400,3 +400,48 @@ def test_create_feishu_group_skip_when_chat_id_already_set():
     )
     svc.create_feishu_group(req)
     feishu_gw.create_project_group.assert_not_called()
+
+
+def test_run_end_to_end_produces_provisioned_config_and_bootstrap_result():
+    from requirement_workflow_v12.project_bootstrap.types import BootstrapStep
+    from requirement_workflow_v12.project_repo.types import BootstrapRepoResult
+
+    svc, repo_tools, feishu_gw, _ = _make_service()
+    repo_tools.bootstrap_project_repo.return_value = BootstrapRepoResult(
+        html_url="https://github.com/Snowziio/test3",
+        default_branch="main",
+        initial_populate_commit_sha="sha1",
+    )
+    feishu_gw.create_architecture_document.return_value = MagicMock(
+        document_id="doc_x", document_url="https://feishu.example/doc_x",
+    )
+    feishu_gw.write_document_text.return_value = None
+    feishu_gw.create_project_group.return_value = MagicMock(chat_id="oc_test3_group")
+
+    state: dict = {}
+
+    def _upsert(project, cfg):
+        state[project] = cfg
+        return cfg
+
+    feishu_gw.upsert_project_config.side_effect = _upsert
+    feishu_gw.list_project_configs.side_effect = lambda: dict(state)
+
+    req = BootstrapRequest(
+        project="test3",
+        category="saas-ai-automation",
+        owner_user_id="ou_1",
+        creator_chat_id="c1",
+        github_username="alice",
+    )
+    result = svc.run(req)
+    assert result.project == "test3"
+    assert result.github_repo_url == "https://github.com/Snowziio/test3"
+    assert result.architecture_doc_id == "doc_x"
+    assert result.feishu_chat_id == "oc_test3_group"
+    final_cfg = state["test3"]
+    assert final_cfg.bootstrap_status == "PROVISIONED"
+    assert final_cfg.project_status == "PROVISIONED"
+    assert final_cfg.bootstrap_completed_at is not None
+    step_numbers = {e["step"] for e in final_cfg.bootstrap_log if e["status"] == "ok"}
+    assert step_numbers == {int(s) for s in BootstrapStep}

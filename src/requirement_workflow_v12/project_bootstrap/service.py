@@ -10,7 +10,9 @@ import logging
 import re
 from dataclasses import replace
 
-from ..architecture_templates import available_categories
+from datetime import datetime, timezone
+
+from ..architecture_templates import available_categories, render_template
 from ..project_config import ProjectConfig
 from .state import append_log_entry, last_completed_step
 from .static_content import (
@@ -21,7 +23,12 @@ from .static_content import (
     render_secrets_todo,
     render_skill_md,
 )
-from .types import BootstrapRequest, BootstrapStep, BootstrapStepError
+from .types import (
+    BootstrapRequest,
+    BootstrapResult,
+    BootstrapStep,
+    BootstrapStepError,
+)
 
 
 _logger = logging.getLogger(__name__)
@@ -98,8 +105,13 @@ class ProjectBootstrapService:
                 bootstrap_status="BOOTSTRAPPING",
                 project_status="BOOTSTRAPPING",
             )
+        new_log = cfg.bootstrap_log
+        if last_completed_step(new_log) < int(BootstrapStep.VALIDATE):
+            new_log = append_log_entry(
+                new_log, step=BootstrapStep.VALIDATE, status="ok"
+            )
         new_log = append_log_entry(
-            cfg.bootstrap_log, step=BootstrapStep.UPSERT_CONFIG, status="ok"
+            new_log, step=BootstrapStep.UPSERT_CONFIG, status="ok"
         )
         cfg = replace(cfg, bootstrap_log=new_log)
         self._feishu.upsert_project_config(request.project, cfg)
@@ -262,3 +274,56 @@ class ProjectBootstrapService:
         cfg = replace(cfg, feishu_chat_id=created.chat_id, bootstrap_log=new_log)
         self._feishu.upsert_project_config(request.project, cfg)
         return cfg
+
+    def finalize(self, request: BootstrapRequest) -> ProjectConfig:
+        cfg = self._feishu.list_project_configs()[request.project]
+        if cfg.bootstrap_status == "PROVISIONED":
+            _logger.info(
+                "bootstrap: skipping finalize (already PROVISIONED) project=%s",
+                request.project,
+            )
+            return cfg
+        if last_completed_step(cfg.bootstrap_log) < int(
+            BootstrapStep.CREATE_FEISHU_GROUP
+        ):
+            raise BootstrapStepError(
+                step=BootstrapStep.FINALIZE,
+                message="earlier steps not complete",
+            )
+        new_log = append_log_entry(
+            cfg.bootstrap_log, step=BootstrapStep.FINALIZE, status="ok"
+        )
+        cfg = replace(
+            cfg,
+            bootstrap_status="PROVISIONED",
+            project_status="PROVISIONED",
+            bootstrap_completed_at=datetime.now(timezone.utc).isoformat(),
+            bootstrap_log=new_log,
+        )
+        self._feishu.upsert_project_config(request.project, cfg)
+        return cfg
+
+    def run(self, request: BootstrapRequest) -> BootstrapResult:
+        self.validate(request)
+        template_version, rendered_arch_md = render_template(
+            request.category, project=request.project
+        )
+        self.upsert_config(request, template_version=template_version)
+        self.create_repo_and_populate(
+            request,
+            template_version=template_version,
+            rendered_architecture_md=rendered_arch_md,
+        )
+        self.create_architecture_doc(
+            request, rendered_architecture_md=rendered_arch_md
+        )
+        self.create_feishu_group(request)
+        final_cfg = self.finalize(request)
+        return BootstrapResult(
+            project=request.project,
+            github_repo_url=final_cfg.github_repo_url,
+            architecture_doc_id=final_cfg.architecture_doc_id,
+            architecture_doc_url=final_cfg.architecture_doc_url,
+            feishu_chat_id=final_cfg.feishu_chat_id,
+            template_version=final_cfg.template_version,
+        )
