@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import re
+import shlex
 import threading
 import time
 from dataclasses import dataclass
@@ -87,6 +88,53 @@ def parse_create_project_command(text: str) -> CreateProjectCommand | None:
         category=category,
         owner_user_id=owner,
         resume=bool(m.group("resume")),
+    )
+
+
+@dataclass(frozen=True)
+class CreateReqCommand:
+    project: str
+    name: str
+    summary: str = ""
+    category: str = ""
+
+
+def parse_create_req_command(text: str) -> CreateReqCommand | None:
+    stripped = text.strip()
+    if not stripped.startswith("/create req "):
+        return None
+    try:
+        tokens = shlex.split(stripped)
+    except ValueError:
+        return None
+    if len(tokens) < 4 or tokens[:2] != ["/create", "req"]:
+        return None
+    project = tokens[2]
+
+    positional: list[str] = []
+    summary = ""
+    category = ""
+    i = 3
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--summary" and i + 1 < len(tokens):
+            summary = tokens[i + 1]
+            i += 2
+            continue
+        if tok == "--category" and i + 1 < len(tokens):
+            category = tokens[i + 1]
+            i += 2
+            continue
+        positional.append(tok)
+        i += 1
+
+    if not positional:
+        return None
+    return CreateReqCommand(
+        project=project,
+        name=" ".join(positional),
+        summary=summary,
+        category=category,
     )
 
 
