@@ -171,3 +171,55 @@ class ProjectBootstrapService:
         )
         self._feishu.upsert_project_config(request.project, cfg)
         return cfg
+
+    def create_architecture_doc(
+        self, request: BootstrapRequest, *, rendered_architecture_md: str
+    ) -> ProjectConfig:
+        cfg = self._feishu.list_project_configs()[request.project]
+        if last_completed_step(cfg.bootstrap_log) >= int(
+            BootstrapStep.CREATE_ARCHITECTURE_DOC
+        ):
+            _logger.info(
+                "bootstrap: skipping create_architecture_doc (already ok) project=%s",
+                request.project,
+            )
+            return cfg
+
+        try:
+            created = self._feishu.create_architecture_document(request.project)
+            if created is None:
+                raise BootstrapStepError(
+                    step=BootstrapStep.CREATE_ARCHITECTURE_DOC,
+                    message="create_architecture_document returned None (missing folder token)",
+                )
+            self._feishu.write_document_text(
+                created.document_id, rendered_architecture_md
+            )
+        except Exception as exc:
+            failed_log = append_log_entry(
+                cfg.bootstrap_log,
+                step=BootstrapStep.CREATE_ARCHITECTURE_DOC,
+                status="error",
+                error_msg=str(exc),
+            )
+            cfg = replace(cfg, bootstrap_log=failed_log)
+            self._feishu.upsert_project_config(request.project, cfg)
+            if isinstance(exc, BootstrapStepError):
+                raise
+            raise BootstrapStepError(
+                step=BootstrapStep.CREATE_ARCHITECTURE_DOC, message=str(exc)
+            ) from exc
+
+        new_log = append_log_entry(
+            cfg.bootstrap_log,
+            step=BootstrapStep.CREATE_ARCHITECTURE_DOC,
+            status="ok",
+        )
+        cfg = replace(
+            cfg,
+            architecture_doc_id=created.document_id,
+            architecture_doc_url=created.document_url,
+            bootstrap_log=new_log,
+        )
+        self._feishu.upsert_project_config(request.project, cfg)
+        return cfg

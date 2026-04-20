@@ -232,6 +232,78 @@ def test_create_repo_skips_when_already_present_in_log():
     repo_tools.bootstrap_project_repo.assert_not_called()
 
 
+def test_create_architecture_doc_writes_rendered_text_to_feishu():
+    from requirement_workflow_v12.project_bootstrap.types import BootstrapStep
+    from requirement_workflow_v12.project_config import ProjectConfig
+
+    existing = ProjectConfig(
+        category="saas-ai-automation",
+        template_version="saas-ai-automation.v1",
+        architecture_doc_id="",
+        architecture_doc_url="",
+        bootstrap_status="BOOTSTRAPPING",
+        github_repo_url="https://github.com/Snowziio/test3",
+        bootstrap_log=[
+            {"step": int(s), "step_name": s.name, "ts": "t", "status": "ok"}
+            for s in (
+                BootstrapStep.UPSERT_CONFIG,
+                BootstrapStep.CREATE_REPO,
+                BootstrapStep.POPULATE_MAIN,
+            )
+        ],
+    )
+    svc, _, feishu_gw, _ = _make_service(existing_projects={"test3": existing})
+    feishu_gw.create_architecture_document.return_value = MagicMock(
+        document_id="doc_arch", document_url="https://feishu.example/doc_arch"
+    )
+    feishu_gw.write_document_text.return_value = None
+
+    req = BootstrapRequest(
+        project="test3",
+        category="saas-ai-automation",
+        owner_user_id="ou_1",
+        creator_chat_id="c1",
+    )
+    cfg = svc.create_architecture_doc(req, rendered_architecture_md="# arch doc content")
+
+    assert cfg.architecture_doc_id == "doc_arch"
+    assert cfg.architecture_doc_url == "https://feishu.example/doc_arch"
+    feishu_gw.create_architecture_document.assert_called_once_with("test3")
+    feishu_gw.write_document_text.assert_called_once_with("doc_arch", "# arch doc content")
+
+
+def test_create_architecture_doc_skips_when_already_set():
+    from requirement_workflow_v12.project_bootstrap.types import BootstrapStep
+    from requirement_workflow_v12.project_config import ProjectConfig
+
+    existing = ProjectConfig(
+        category="saas-ai-automation",
+        template_version="saas-ai-automation.v1",
+        architecture_doc_id="doc_existing",
+        architecture_doc_url="https://feishu.example/doc_existing",
+        bootstrap_status="BOOTSTRAPPING",
+        bootstrap_log=[
+            {"step": int(s), "step_name": s.name, "ts": "t", "status": "ok"}
+            for s in (
+                BootstrapStep.UPSERT_CONFIG,
+                BootstrapStep.CREATE_REPO,
+                BootstrapStep.POPULATE_MAIN,
+                BootstrapStep.CREATE_ARCHITECTURE_DOC,
+            )
+        ],
+    )
+    svc, _, feishu_gw, _ = _make_service(existing_projects={"test3": existing})
+    req = BootstrapRequest(
+        project="test3",
+        category="saas-ai-automation",
+        owner_user_id="ou_1",
+        creator_chat_id="c1",
+        resume=True,
+    )
+    svc.create_architecture_doc(req, rendered_architecture_md="# arch")
+    feishu_gw.create_architecture_document.assert_not_called()
+
+
 def test_upsert_config_preserves_existing_fields_on_resume():
     from requirement_workflow_v12.project_config import ProjectConfig
 
