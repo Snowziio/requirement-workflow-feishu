@@ -74,19 +74,25 @@ _CREATE_PROJECT_RE = re.compile(
     r"(?P<resume>\s+--resume)?\s*$"
 )
 
+# Categories supported by Bootstrap. Keep in sync with
+# project_bootstrap.static_content._SECRETS_CATEGORY_HINTS.
+KNOWN_PROJECT_CATEGORIES: tuple[str, ...] = (
+    "enterprise-app",
+    "enterprise-bot",
+    "miniprogram",
+    "public-web-site",
+    "saas-ai-automation",
+)
+
 
 def parse_create_project_command(text: str) -> CreateProjectCommand | None:
     m = _CREATE_PROJECT_RE.match(text.strip())
     if not m:
         return None
-    category = m.group("category") or ""
-    owner = m.group("owner") or ""
-    if not category or not owner:
-        return None
     return CreateProjectCommand(
         project=m.group("name"),
-        category=category,
-        owner_user_id=owner,
+        category=m.group("category") or "",
+        owner_user_id=m.group("owner") or "",
         resume=bool(m.group("resume")),
     )
 
@@ -435,12 +441,32 @@ class CoordinatorRuntimeApp:
                 receive_id=context.chat_id,
                 text="Bootstrap 服务未启用；请联系运维检查 settings.github_token 配置",
             )]
+        category = cmd.category
+        if not category:
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text=(
+                    "缺少 --category。可选项：\n"
+                    + "\n".join(f"  - {c}" for c in KNOWN_PROJECT_CATEGORIES)
+                    + f"\n示例：`/create project {cmd.project} "
+                    f"--category {KNOWN_PROJECT_CATEGORIES[-1]}`"
+                ),
+            )]
+        if category not in KNOWN_PROJECT_CATEGORIES:
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text=(
+                    f"category {category!r} 不在已知列表内。可选项：\n"
+                    + "\n".join(f"  - {c}" for c in KNOWN_PROJECT_CATEGORIES)
+                ),
+            )]
+        owner = cmd.owner_user_id or context.user_id
         from .project_bootstrap.types import BootstrapRequest, BootstrapStepError
         from .project_bootstrap.service import ValidationError
         req = BootstrapRequest(
             project=cmd.project,
-            category=cmd.category,
-            owner_user_id=cmd.owner_user_id,
+            category=category,
+            owner_user_id=owner,
             creator_chat_id=context.chat_id,
             resume=cmd.resume,
         )
@@ -456,8 +482,8 @@ class CoordinatorRuntimeApp:
                 receive_id=context.chat_id,
                 text=(
                     f"Bootstrap 中断于 Step {int(exc.step)} ({exc.step.name})：{exc.message}\n"
-                    f"可使用 `/create project {cmd.project} --category {cmd.category} "
-                    f"--owner {cmd.owner_user_id} --resume` 续跑"
+                    f"可使用 `/create project {cmd.project} --category {category} "
+                    f"--owner {owner} --resume` 续跑"
                 ),
             )]
         self._save_state()
