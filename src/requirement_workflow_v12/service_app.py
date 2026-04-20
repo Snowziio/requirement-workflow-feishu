@@ -1605,6 +1605,20 @@ class CoordinatorRuntimeApp:
             self._dispatch_transition_notifications(requirement, trigger="plan_ready")
             return 200, {"toast": {"type": "success", "content": "Plan 已通过并提交至 GitHub。"}}
 
+        if action_name == "reject_plan_submit":
+            req_id = value.get("req_id", "")
+            if not req_id:
+                return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            requirement = self.service.get_requirement(req_id)
+            if requirement is None:
+                return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
+            if not requirement.pending_plan_review:
+                return 200, {"toast": {"type": "error", "content": "无可驳回的 Plan 草稿。"}}
+            requirement.pending_plan_review = None
+            requirement.plan_phase = PlanPhase.DECISIONS_IN_PROGRESS
+            self._save_state()
+            return 200, {"toast": {"type": "success", "content": "已驳回 Plan 草稿；请重新私聊 Plan Author 修改。"}}
+
         if action_name == "send_spec_author_start":
             req_id = value.get("req_id", "")
             if not req_id:

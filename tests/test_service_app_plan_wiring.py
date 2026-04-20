@@ -233,3 +233,30 @@ def test_approve_plan_submit_retains_pending_on_service_error(app):
     assert status == 200
     assert resp.get("toast", {}).get("type") == "error"
     assert r.pending_plan_review is not None  # user can retry
+
+
+def test_reject_plan_submit_clears_pending_and_resets_phase(app):
+    r = _seed_pending_review(app, _approved_req(app))
+    assert r.plan_phase == PlanPhase.FINAL_REVIEW_PENDING
+
+    status, resp = app._handle_card_action_payload(
+        _card_payload("reject_plan_submit", r.req_id)
+    )
+
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "success"
+    assert r.pending_plan_review is None
+    assert r.plan_phase == PlanPhase.DECISIONS_IN_PROGRESS
+    assert r.plan_status == PlanStatus.DRAFTING  # unchanged
+
+
+def test_reject_plan_submit_rejects_if_no_pending(app):
+    r = _approved_req(app)
+    app.service.plan_start(r.req_id)
+
+    status, resp = app._handle_card_action_payload(
+        _card_payload("reject_plan_submit", r.req_id)
+    )
+
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "error"
