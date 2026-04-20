@@ -12,7 +12,14 @@ from typing import Protocol, runtime_checkable
 
 from ..github_gateway import FileChange, GitHubGateway, GitHubGatewayError
 from .architecture_apply import ArchitectureApplyError, apply_architecture_changes
-from .types import PlanArtifacts, PlanCommitResult, PrRef, ProjectContext, SpecArtifacts
+from .types import (
+    BootstrapRepoResult,
+    PlanArtifacts,
+    PlanCommitResult,
+    PrRef,
+    ProjectContext,
+    SpecArtifacts,
+)
 
 
 _logger = logging.getLogger(__name__)
@@ -45,6 +52,18 @@ class ProjectRepoTools(Protocol):
     ) -> PlanCommitResult: ...
 
     def cleanup_failed_branch(self, project_repo: str, branch: str) -> None: ...
+
+    def bootstrap_project_repo(
+        self,
+        *,
+        template_owner: str,
+        template_repo: str,
+        new_owner: str,
+        new_name: str,
+        populate_files: dict[str, str],
+        populate_commit_message: str,
+        collaborator_username: str | None,
+    ) -> BootstrapRepoResult: ...
 
 
 class GitHubProjectRepoTools:
@@ -162,4 +181,60 @@ class GitHubProjectRepoTools:
             commit_sha=sha, branch="main",
             plan_md_path=plan_path,
             architecture_updated=architecture_updated,
+        )
+
+    def bootstrap_project_repo(
+        self,
+        *,
+        template_owner: str,
+        template_repo: str,
+        new_owner: str,
+        new_name: str,
+        populate_files: dict[str, str],
+        populate_commit_message: str,
+        collaborator_username: str | None,
+    ) -> BootstrapRepoResult:
+        try:
+            existing = self._gw.get_repo(owner=new_owner, name=new_name)
+            if existing is None:
+                html_url = self._gw.create_repo_from_template(
+                    template_owner=template_owner,
+                    template_repo=template_repo,
+                    owner=new_owner,
+                    name=new_name,
+                    private=True,
+                    description=f"Bootstrapped project {new_name}",
+                )
+                default_branch = "main"
+            else:
+                html_url = str(existing["html_url"])
+                default_branch = str(existing.get("default_branch", "main"))
+
+            file_changes = [
+                FileChange(path=p, content=c) for p, c in populate_files.items()
+            ]
+            populate_sha = self._gw.commit_files(
+                owner=new_owner,
+                repo=new_name,
+                branch=default_branch,
+                files=file_changes,
+                message=populate_commit_message,
+            )
+
+            if collaborator_username:
+                self._gw.add_collaborator(
+                    owner=new_owner,
+                    name=new_name,
+                    username=collaborator_username,
+                    permission="push",
+                )
+        except GitHubGatewayError as exc:
+            raise ProjectRepoError(
+                f"bootstrap_project_repo failed for {new_owner}/{new_name}: {exc}",
+                recoverable=False,
+            ) from exc
+        return BootstrapRepoResult(
+            html_url=html_url,
+            default_branch=default_branch,
+            initial_populate_commit_sha=populate_sha,
         )

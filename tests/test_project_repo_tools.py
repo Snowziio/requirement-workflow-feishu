@@ -56,6 +56,17 @@ def test_project_repo_tools_is_protocol():
         def commit_spec_artifacts(self, req_id, artifacts): ...
         def commit_plan_artifacts(self, artifacts): ...
         def cleanup_failed_branch(self, project_repo, branch): ...
+        def bootstrap_project_repo(
+            self,
+            *,
+            template_owner,
+            template_repo,
+            new_owner,
+            new_name,
+            populate_files,
+            populate_commit_message,
+            collaborator_username,
+        ): ...
 
     assert isinstance(Dummy(), ProjectRepoTools)
 
