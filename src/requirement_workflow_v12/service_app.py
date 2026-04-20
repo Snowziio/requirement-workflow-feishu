@@ -180,6 +180,7 @@ class CoordinatorRuntimeApp:
         self.service = service or CoordinatorService()
         self.gateway = gateway or FeishuGateway(settings)
         self._project_bootstrap_service = project_bootstrap_service
+        self._github_gateway: object | None = None
         requirements, active_req_by_user, project_groups, _legacy_project_configs = self.store.load_snapshot()
         project_configs: dict = {}
         list_fn = getattr(self.gateway, "list_project_configs", None)
@@ -207,6 +208,7 @@ class CoordinatorRuntimeApp:
             from .github_gateway import GitHubGateway
             from .project_repo import GitHubProjectRepoTools
             github_gateway = GitHubGateway(settings)
+            self._github_gateway = github_gateway
             tools = GitHubProjectRepoTools(github_gateway)
             trace_dir = Path(settings.spec_trace_dir)
             trace_dir.mkdir(parents=True, exist_ok=True)
@@ -568,6 +570,23 @@ class CoordinatorRuntimeApp:
                 self.gateway.update_requirement_record(requirement)
             except Exception as exc:
                 LOGGER.warning("Failed to refresh bitable record for %s: %s", requirement.req_id, exc)
+
+        existing_cfg = self.service.project_configs.get(request.project)
+        if existing_cfg and existing_cfg.github_repo_url and self._github_gateway is not None:
+            from datetime import datetime, timezone
+            from .req_registry import append_req_to_registry
+            owner_name = existing_cfg.github_repo_url.rstrip("/").rsplit("/", 2)[-2:]
+            if len(owner_name) == 2:
+                project_repo = "/".join(owner_name)
+                append_req_to_registry(
+                    github_gateway=self._github_gateway,
+                    project_repo=project_repo,
+                    req_id=req_id,
+                    title=requirement.name if requirement else req_id,
+                    status="DRAFTING",
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                    swallow_errors=True,
+                )
 
         LOGGER.info(
             "Provisioned requirement from form req_id=%s status=%s project_group_id=%s bitable_record_id=%s document_url=%s",
