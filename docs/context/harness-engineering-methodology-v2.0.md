@@ -1,5 +1,7 @@
 # Harness Engineering 全自动开发工作流：方法论
-## v2.0 | 2026-04-14（v2.1 补丁 · 2026-04-19：PLANNING 层）
+## v2.5 | 2026-04-14（v2.1 补丁 · 2026-04-19：PLANNING 层｜v2.5 补丁 · 2026-04-20：Project 层）
+
+> **v2.5 补丁摘要（2026-04-20）**：在需求层之前新增 **Project 层（§5.0）**，承接项目生命周期管理（Bootstrap 7 步、状态机、项目级 artifact）。REQ 创建硬切到 `/create project` + `/create req` 固化命令；plan-author 的 `architecture_change` 信封泛化为统一的 `project_context_change`（支持多 artifact）。
 
 > **v2.1 补丁摘要（2026-04-19）**：在需求层与规格层之间新增**规划层**（§5.2），承接需求层决策性产出的汇总与架构演化权限闸门；规格层（§5.3）收敛为工程化细化，不再涉及设计/架构变更；原 §5.2–§5.7 相应顺延为 §5.3–§5.8。ARCHITECTURE 演化主通道由规格层回迁到规划层的授权钩子。
 
@@ -320,6 +322,30 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：
 >
 > 每层头部标注：`[实现状态]` + `细节文件`。
 > 迭代规则：**当某层的设计开始产生可实现的细节时，对应细节文件同步更新**；若多层合并在一个文件中，当任一层成熟到需要独立详细规格时，从共享文件拆出。
+
+### 5.0 Project 层（Bootstrap）
+
+> **实现状态**：✅ 已上线（2026-04-20 Phase 1 完成）｜**细节文件**：[specs/2026-04-20-project-layer-design.md](../superpowers/specs/2026-04-20-project-layer-design.md)
+
+**定位**：Project 层是 harness 方法论的**项目生命周期层**，位于 Requirement / Planning / Spec 之前。所有 REQ 必须挂靠在一个状态为 `PROVISIONED` 的 Project 上；项目创建通过 `/create project` 固化命令触发 Bootstrap 流程。
+
+**状态机**：`UNBOOTSTRAPPED → BOOTSTRAPPING → PROVISIONED → ARCHIVED → DECOMMISSIONED`。MVP 只实现前三态；archive / decommission Phase 2。
+
+**Bootstrap 7 步**：
+
+1. VALIDATE 校验输入
+2. UPSERT_CONFIG 写 `project_configs`
+3. CREATE_REPO 从 Template 仓库生成
+4. POPULATE_MAIN 写入 per-project 文件
+5. CREATE_ARCHITECTURE_DOC 建 Feishu doc
+6. CREATE_FEISHU_GROUP 建群
+7. FINALIZE 标记 `PROVISIONED`
+
+每步幂等，`--resume` 可从任意断点续跑。
+
+**项目级上下文演化**：Project 级 artifact（ARCHITECTURE / environments / skill_md）的后续变更由 REQ 驱动：plan-author 在 Planning 阶段通过统一的 `project_context_change` 信封提交变更，走授权闸门后落盘。
+
+---
 
 ### 5.1 需求层
 
