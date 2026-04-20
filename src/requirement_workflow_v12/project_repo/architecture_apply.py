@@ -1,6 +1,7 @@
 """Pure text transformer for ARCHITECTURE.md section-level updates.
 
-Drives the ``architecture_change`` apply stage of ``commit_plan_artifacts``.
+Drives the ``architecture`` artifact branch of ``project_context_change``
+apply inside ``commit_plan_artifacts``.
 Side-effect free: given the current file text + a list of change specs,
 return the new text or raise ``ArchitectureApplyError`` with
 ``recoverable=True`` on any before-mismatch (the caller maps this to
