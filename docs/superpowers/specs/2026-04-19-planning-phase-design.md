@@ -1,5 +1,7 @@
 # PLANNING 阶段 + plan-author Agent 设计规格
 
+> **2026-04-21 update**: 卡片流程接线已落地，详见 [2026-04-21-plan-wiring-design.md](./2026-04-21-plan-wiring-design.md)。要点：`plan_start()` 守卫放宽（不再耦合 needs_ui/design_status）；plan-callback 的 `plan_submit` 分支改为把草稿缓存进 `pending_plan_review` 并发 `plan_submitted_pending_review` 卡，仅在人工通过后才落 GitHub PR 并切换 `PlanStatus.READY`。MVP 仅支持 `architecture_change=None`；不实现 `AUTH_PENDING`；驳回为纯状态重置。
+>
 > 本规格定义 `APPROVED → SPEC_DRAFTING` 之间的 **DESIGNING + PLANNING** 两个新阶段，引入独立的 `design-author` / `plan-author` agent，把"怎么做"的决策从 Spec 阶段剥离出来。
 >
 > 关联文档：

@@ -389,7 +389,9 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 
 ### 5.2 规划层
 
-> **实现状态**：⚙️ 设计完成，待实现（Phase 2a，2026-04-19 引入）｜**细节文件**：[layers/planning-harness-layer.md](layers/planning-harness-layer.md) ｜ **设计规格**：[docs/superpowers/specs/2026-04-19-planning-phase-design.md](../superpowers/specs/2026-04-19-planning-phase-design.md)
+> **实现状态**：⚙️ 设计完成，卡片流程已接线（2026-04-21）｜**细节文件**：[layers/planning-harness-layer.md](layers/planning-harness-layer.md) ｜ **设计规格**：[docs/superpowers/specs/2026-04-19-planning-phase-design.md](../superpowers/specs/2026-04-19-planning-phase-design.md) ｜ **卡片接线**：[docs/superpowers/specs/2026-04-21-plan-wiring-design.md](../superpowers/specs/2026-04-21-plan-wiring-design.md)
+>
+> **卡片流程落地（2026-04-21）**：APPROVED → `final_review_passed` 卡（「开始 Plan 撰写」）→ plan-author IM 多轮 → plan-callback `plan_submit` 缓存草稿 → `plan_submitted_pending_review` 卡「通过 / 需要修改」→ `PlanStatus.READY` + GitHub PR → `plan_ready` 卡「开始 Spec 撰写」。MVP 仅支持 `architecture_change=None`；不实现 `AUTH_PENDING`；驳回为纯状态重置（phase 回退到 `DECISIONS_IN_PROGRESS`，不自动重发 DM）。
 
 **驱动者**：Coordinator Service（Workflow Service 层）+ OpenClaw `design-author` / `plan-author`（能力层，两个新 Agent）。
 
