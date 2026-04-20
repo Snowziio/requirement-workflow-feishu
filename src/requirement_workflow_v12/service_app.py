@@ -1579,6 +1579,32 @@ class CoordinatorRuntimeApp:
                 return 200, {"toast": {"type": "error", "content": "私发失败，请手动私聊 Plan 撰写助手。"}}
             return 200, {"toast": {"type": "success", "content": "已将 Plan 撰写启动指令私发给你。"}}
 
+        if action_name == "approve_plan_submit":
+            req_id = value.get("req_id", "")
+            if not req_id:
+                return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            requirement = self.service.get_requirement(req_id)
+            if requirement is None:
+                return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
+            pending = requirement.pending_plan_review
+            if not pending:
+                return 200, {"toast": {"type": "error", "content": "Plan 草稿不存在，请让 Plan Author 重新提交。"}}
+            if pending.get("project_context_change"):
+                return 200, {"toast": {"type": "error", "content": "MVP 暂不支持 architecture_change 的 Plan 提交，请联系维护者。"}}
+            try:
+                self.service.plan_submit(
+                    req_id,
+                    plan_md_content=pending.get("plan_md_content", ""),
+                    project_context_change=None,
+                )
+            except Exception as exc:
+                LOGGER.exception("approve_plan_submit failed req_id=%s", req_id)
+                return 200, {"toast": {"type": "error", "content": f"Plan 提交失败：{exc}；可再次点击重试。"}}
+            requirement.pending_plan_review = None
+            self._save_state()
+            self._dispatch_transition_notifications(requirement, trigger="plan_ready")
+            return 200, {"toast": {"type": "success", "content": "Plan 已通过并提交至 GitHub。"}}
+
         if action_name == "send_spec_author_start":
             req_id = value.get("req_id", "")
             if not req_id:

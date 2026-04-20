@@ -152,3 +152,84 @@ def test_plan_submitted_pending_review_content_and_actions(app):
     actions = app._build_transition_notification_actions(r, trigger="plan_submitted_pending_review")
     action_names = {a["value"]["action"] for a in actions}
     assert action_names == {"approve_plan_submit", "reject_plan_submit"}
+
+
+def _seed_pending_review(app, r, *, with_acc=False):
+    """Drive a requirement to plan_status=DRAFTING + pending_plan_review set."""
+    app.service.plan_start(r.req_id)
+    r.plan_phase = PlanPhase.FINAL_REVIEW_PENDING
+    r.pending_plan_review = {
+        "plan_md_content": "# plan\n...",
+        "project_context_change": {"foo": "bar"} if with_acc else None,
+        "submitted_at": "2026-04-21T00:00:00+00:00",
+    }
+    return r
+
+
+def test_approve_plan_submit_transitions_to_ready_and_clears_pending(app):
+    r = _seed_pending_review(app, _approved_req(app))
+
+    # Stub the hook's tool to prevent real GitHub calls; see configure_plan_hooks.
+    class _StubTools:
+        def commit_plan_artifacts(self, artifacts):
+            from requirement_workflow_v12.project_repo import PlanCommitResult
+            return PlanCommitResult(
+                commit_sha="https://github.com/o/r/pull/1",
+                branch="main",
+                plan_md_path="docs/specs/REQ-PW-1/plan.md",
+                architecture_updated=False,
+            )
+    app.service.configure_plan_hooks(tools=_StubTools())
+
+    status, resp = app._handle_card_action_payload(
+        _card_payload("approve_plan_submit", r.req_id)
+    )
+
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "success"
+    assert r.plan_status == PlanStatus.READY
+    assert r.pending_plan_review is None
+    assert r.plan_pr_url == "https://github.com/o/r/pull/1"
+
+
+def test_approve_plan_submit_rejects_if_no_pending(app):
+    r = _approved_req(app)
+    app.service.plan_start(r.req_id)  # plan_phase=OUTLINE_PENDING, no pending review
+
+    status, resp = app._handle_card_action_payload(
+        _card_payload("approve_plan_submit", r.req_id)
+    )
+
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "error"
+    assert r.plan_status == PlanStatus.DRAFTING
+
+
+def test_approve_plan_submit_rejects_architecture_change(app):
+    r = _seed_pending_review(app, _approved_req(app), with_acc=True)
+
+    status, resp = app._handle_card_action_payload(
+        _card_payload("approve_plan_submit", r.req_id)
+    )
+
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "error"
+    assert r.plan_status == PlanStatus.DRAFTING
+    assert r.pending_plan_review is not None  # retained
+
+
+def test_approve_plan_submit_retains_pending_on_service_error(app):
+    r = _seed_pending_review(app, _approved_req(app))
+
+    class _FailingTools:
+        def commit_plan_artifacts(self, artifacts):
+            raise RuntimeError("github down")
+    app.service.configure_plan_hooks(tools=_FailingTools())
+
+    status, resp = app._handle_card_action_payload(
+        _card_payload("approve_plan_submit", r.req_id)
+    )
+
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "error"
+    assert r.pending_plan_review is not None  # user can retry
