@@ -37,6 +37,7 @@ class Settings:
     github_default_branch: str = os.environ.get("GITHUB_DEFAULT_BRANCH", "main")
     spec_trace_dir: str = os.environ.get("SPEC_TRACE_DIR", "state/spec_traces")
     openclaw_spec_agent_name: str = os.environ.get("OPENCLAW_SPEC_AGENT_NAME", "Spec 撰写助手")
+    openclaw_plan_author_agent_name: str = os.environ.get("OPENCLAW_PLAN_AUTHOR_AGENT_NAME", "Plan Author")
     openclaw_spec_transformer_agent_name: str = os.environ.get(
         "OPENCLAW_SPEC_TRANSFORMER_AGENT_NAME", "Spec 转化助手",
     )

@@ -2264,6 +2264,15 @@ class CoordinatorRuntimeApp:
             "要求：如果需求文档链接已存在，必须直接在该文档上继续撰写，不要重新创建第二份文档。"
         )
 
+    def _build_plan_author_handoff_text(self, requirement: Requirement) -> str:
+        agent_name = self.settings.openclaw_plan_author_agent_name
+        return (
+            f"请私聊 {agent_name}，并发送以下完整上下文：\n\n"
+            f"请开始 Plan 撰写 {requirement.req_id}\n"
+            f"需求名称：{requirement.name}\n"
+            f"需求文档：{requirement.document_url or '（待同步）'}"
+        )
+
     def _build_spec_author_handoff_text(self, requirement: Requirement) -> str:
         spec_agent_name = self.settings.openclaw_spec_agent_name
         return (
