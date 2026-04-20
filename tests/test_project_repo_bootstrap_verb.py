@@ -21,6 +21,7 @@ def _fake_gateway_happy():
     gw.create_repo_from_template.return_value = "https://github.com/Snowziio/test3"
     gw.commit_files.return_value = "commit_sha_1"
     gw.add_collaborator.return_value = None
+    gw.wait_for_branch_ready.return_value = "generate_head_sha"
     return gw
 
 
@@ -52,10 +53,34 @@ def test_bootstrap_project_repo_generates_and_populates_main():
     assert result.initial_populate_commit_sha == "commit_sha_1"
     assert result.default_branch == "main"
     gw.create_repo_from_template.assert_called_once()
+    gw.wait_for_branch_ready.assert_called_once_with("Snowziio", "test3", "main")
+    # Order matters: must wait for main to be ready before commit_files.
+    call_names = [c[0] for c in gw.method_calls]
+    assert call_names.index("wait_for_branch_ready") < call_names.index("commit_files")
     gw.commit_files.assert_called_once()
     gw.add_collaborator.assert_called_once_with(
         owner="Snowziio", name="test3", username="alice", permission="push"
     )
+
+
+def test_bootstrap_project_repo_does_not_wait_for_existing_repo():
+    gw = MagicMock()
+    gw.get_repo.return_value = {
+        "html_url": "https://github.com/Snowziio/test3",
+        "default_branch": "main",
+    }
+    gw.commit_files.return_value = "commit_sha_2"
+    tools = GitHubProjectRepoTools(gw)
+    tools.bootstrap_project_repo(
+        template_owner="Snowziio",
+        template_repo="Template-repository",
+        new_owner="Snowziio",
+        new_name="test3",
+        populate_files={"CLAUDE.md": "x"},
+        populate_commit_message="populate",
+        collaborator_username=None,
+    )
+    gw.wait_for_branch_ready.assert_not_called()
 
 
 def test_bootstrap_project_repo_skips_repo_creation_when_already_exists():

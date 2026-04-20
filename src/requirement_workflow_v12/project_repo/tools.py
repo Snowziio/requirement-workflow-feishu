@@ -214,6 +214,9 @@ class GitHubProjectRepoTools:
                     description=f"Bootstrapped project {new_name}",
                 )
                 default_branch = "main"
+                # /generate returns 201 before the initial commit is visible;
+                # subsequent git-data calls see 409 "Git Repository is empty".
+                self._gw.wait_for_branch_ready(new_owner, new_name, default_branch)
             else:
                 html_url = str(existing["html_url"])
                 default_branch = str(existing.get("default_branch", "main"))

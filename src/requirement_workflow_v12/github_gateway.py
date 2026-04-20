@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import time
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -281,6 +282,41 @@ class GitHubGateway:
             self.client.get(f"/repos/{owner}/{repo}/git/refs/heads/{branch}")
         )
         return str(data["object"]["sha"])
+
+    def wait_for_branch_ready(
+        self,
+        owner: str,
+        repo: str,
+        branch: str,
+        *,
+        timeout_s: float = 30.0,
+        interval_s: float = 2.0,
+        sleep=time.sleep,
+        clock=time.monotonic,
+    ) -> str:
+        """Poll `/git/refs/heads/{branch}` until it resolves to a commit SHA.
+
+        Needed after `/repos/{owner}/{repo}/generate`: GitHub returns 201 on
+        the template-generate call but takes a few seconds to propagate the
+        initial commit, during which `refs/heads/main` returns 409 "Git
+        Repository is empty" or 404.
+
+        Swallows those two transient statuses; any other error propagates.
+        Returns the resolved head SHA.
+        """
+        deadline = clock() + timeout_s
+        last_error: GitHubGatewayError | None = None
+        while True:
+            try:
+                return self._get_branch_head_sha(owner, repo, branch)
+            except GitHubGatewayError as exc:
+                if exc.status not in (404, 409):
+                    raise
+                last_error = exc
+            if clock() >= deadline:
+                assert last_error is not None
+                raise last_error
+            sleep(interval_s)
 
     @staticmethod
     def _unwrap(resp: "httpx.Response") -> dict:

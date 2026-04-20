@@ -311,3 +311,76 @@ def test_add_collaborator_raises_on_unexpected_status():
     with pytest.raises(GitHubGatewayError):
         gw.add_collaborator(owner="Snowziio", name="test3", username="alice")
     gw.close()
+
+
+def test_wait_for_branch_ready_retries_past_409_then_returns_sha():
+    call_count = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/repos/Snowziio/test3/git/refs/heads/main"
+        call_count["n"] += 1
+        if call_count["n"] < 3:
+            return httpx.Response(409, json={"message": "Git Repository is empty."})
+        return httpx.Response(200, json={"object": {"sha": "abc123"}})
+
+    gw = _gateway_with(handler)
+    sleeps: list[float] = []
+    sha = gw.wait_for_branch_ready(
+        "Snowziio", "test3", "main",
+        timeout_s=10.0, interval_s=0.01,
+        sleep=sleeps.append, clock=lambda: 0.0,
+    )
+    assert sha == "abc123"
+    assert call_count["n"] == 3
+    assert sleeps == [0.01, 0.01]
+    gw.close()
+
+
+def test_wait_for_branch_ready_also_tolerates_404():
+    call_count = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return httpx.Response(404, json={"message": "Not Found"})
+        return httpx.Response(200, json={"object": {"sha": "ref_sha"}})
+
+    gw = _gateway_with(handler)
+    sha = gw.wait_for_branch_ready(
+        "Snowziio", "test3", "main",
+        interval_s=0.01, sleep=lambda _s: None, clock=lambda: 0.0,
+    )
+    assert sha == "ref_sha"
+    gw.close()
+
+
+def test_wait_for_branch_ready_raises_on_unexpected_status():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"message": "boom"})
+
+    gw = _gateway_with(handler)
+    with pytest.raises(GitHubGatewayError) as excinfo:
+        gw.wait_for_branch_ready(
+            "Snowziio", "test3", "main",
+            sleep=lambda _s: None, clock=lambda: 0.0,
+        )
+    assert excinfo.value.status == 500
+    gw.close()
+
+
+def test_wait_for_branch_ready_times_out_raising_last_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(409, json={"message": "Git Repository is empty."})
+
+    clock_values = iter([0.0, 5.0, 15.0, 35.0])
+
+    gw = _gateway_with(handler)
+    with pytest.raises(GitHubGatewayError) as excinfo:
+        gw.wait_for_branch_ready(
+            "Snowziio", "test3", "main",
+            timeout_s=30.0, interval_s=0.01,
+            sleep=lambda _s: None,
+            clock=lambda: next(clock_values),
+        )
+    assert excinfo.value.status == 409
+    gw.close()
