@@ -84,6 +84,31 @@ def test_req_card_project_is_select_static_with_provisioned_options(tmp_path):
     assert option_values == {"test3", "test4"}
 
 
+def test_req_card_select_static_has_no_label_property(tmp_path):
+    """Feishu v2 `select_static` rejects the `label` property (error 200621)."""
+    app = _make_app(tmp_path, {"test3": _provisioned()})
+    ctx = MessageContext(
+        message_id="m1", chat_id="oc_x", chat_type="p2p",
+        user_id="ou_alice", sender_name="Alice", text="/create req",
+    )
+    card = app._build_requirement_creation_card(ctx)
+    form = card["body"]["elements"][0]
+
+    def _walk(node):
+        if isinstance(node, dict):
+            if node.get("tag") == "select_static":
+                assert "label" not in node, (
+                    f"select_static {node.get('name')!r} must not carry `label`"
+                )
+            for v in node.values():
+                _walk(v)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(form)
+
+
 def test_req_card_omits_category_field(tmp_path):
     app = _make_app(tmp_path, {"test3": _provisioned()})
     ctx = MessageContext(

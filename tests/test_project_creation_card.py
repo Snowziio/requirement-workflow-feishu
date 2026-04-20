@@ -72,6 +72,26 @@ def test_project_card_category_dropdown_has_all_known_categories(tmp_path):
     assert option_values == set(KNOWN_PROJECT_CATEGORIES)
 
 
+def test_project_card_select_static_has_no_label_property(tmp_path):
+    """Feishu v2 `select_static` rejects the `label` property (error 200621).
+
+    Labels must be rendered as a preceding `div` element, not as a
+    property on the select_static itself.
+    """
+    app = _make_app(tmp_path)
+    ctx = MessageContext(
+        message_id="m1", chat_id="oc_chat", chat_type="p2p",
+        user_id="ou_alice", sender_name="Alice", text="/create project",
+    )
+    card = app._build_project_creation_card(ctx)
+    form = card["body"]["elements"][0]
+    for element in form["elements"]:
+        if isinstance(element, dict) and element.get("tag") == "select_static":
+            assert "label" not in element, (
+                f"select_static {element.get('name')!r} must not carry `label`"
+            )
+
+
 def test_project_card_submit_button_has_correct_action(tmp_path):
     app = _make_app(tmp_path)
     ctx = MessageContext(

@@ -1801,11 +1801,14 @@ class CoordinatorRuntimeApp:
                                 "placeholder": {"tag": "plain_text", "content": "例如 test5 / payment-core"},
                             },
                             {
+                                "tag": "div",
+                                "text": {"tag": "plain_text", "content": "项目类目（必填）"},
+                            },
+                            {
                                 "tag": "select_static",
                                 "name": "category",
                                 "required": True,
                                 "width": "fill",
-                                "label": {"tag": "plain_text", "content": "项目类目（必填）"},
                                 "placeholder": {"tag": "plain_text", "content": "选择项目类目"},
                                 "options": category_options,
                             },
@@ -1891,11 +1894,14 @@ class CoordinatorRuntimeApp:
                         "name": "requirement_create_form",
                         "elements": [
                             {
+                                "tag": "div",
+                                "text": {"tag": "plain_text", "content": "项目（必填）"},
+                            },
+                            {
                                 "tag": "select_static",
                                 "name": "project",
                                 "required": True,
                                 "width": "fill",
-                                "label": {"tag": "plain_text", "content": "项目（必填）"},
                                 "placeholder": {"tag": "plain_text", "content": "选择已就绪的项目"},
                                 "options": project_options,
                             },
