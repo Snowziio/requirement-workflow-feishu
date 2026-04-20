@@ -253,8 +253,13 @@ class CoordinatorRuntimeApp:
 
         class HealthHandler(BaseHTTPRequestHandler):
             def do_GET(self):
-                body = json.dumps({"status": "ok", "service": service_name}).encode()
-                self.send_response(200)
+                if self.path.startswith("/queries/openclaw/plan-context/"):
+                    req_id = self.path.rsplit("/", 1)[-1]
+                    status, payload = app.handle_openclaw_plan_context_query(req_id)
+                else:
+                    status, payload = 200, {"status": "ok", "service": service_name}
+                body = json.dumps(payload, ensure_ascii=False).encode()
+                self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(body)
