@@ -9,7 +9,7 @@ import re
 import shlex
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
@@ -57,6 +57,15 @@ REVIEW_CALLBACK_EVENT_ALIASES = {
 SPEC_RESTART_RE = re.compile(r"^/spec\s+restart\s+(REQ-\S+)\s*$")
 PLAN_RESTART_RE = re.compile(r"^/plan\s+restart\s+(REQ-\S+)\s*$")
 DESIGN_RESTART_RE = re.compile(r"^/design\s+restart\s+(REQ-\S+)\s*$")
+
+# Feishu prepends '@_user_<key> ' (one per @ in the message) before the
+# actual text when the bot is mentioned. Strip leading occurrences so
+# slash-command parsers see plain '/...'.
+_MENTION_PREFIX_RE = re.compile(r"^(?:@_user_\w+\s+)+")
+
+
+def _strip_mention_prefix(text: str) -> str:
+    return _MENTION_PREFIX_RE.sub("", text, count=1)
 
 
 @dataclass(frozen=True)
@@ -348,9 +357,13 @@ class CoordinatorRuntimeApp:
         return P2CardActionTriggerResponse(response_payload)
 
     def handle_text_message(self, context: MessageContext) -> list[OutboundMessage | OutboundCard]:
-        text = context.text.strip()
+        text = _strip_mention_prefix(context.text.strip())
         if not text:
             return []
+        # Keep the stripped text on the context so downstream handlers
+        # (slash parsers, free-text matchers) see it consistently.
+        if text != context.text:
+            context = replace(context, text=text)
 
         m = SPEC_RESTART_RE.match(text)
         if m:
@@ -359,6 +372,14 @@ class CoordinatorRuntimeApp:
         reply = self.handle_slash_command(text)
         if reply is not None:
             return [OutboundMessage(receive_id=context.chat_id, text=reply)]
+
+        # /create project and /create req work from any chat (DM, group, creation group).
+        project_cmd = parse_create_project_command(text)
+        if project_cmd is not None:
+            return self._handle_create_project_command(project_cmd, context)
+        req_cmd = parse_create_req_command(text)
+        if req_cmd is not None:
+            return self._handle_create_req_command(req_cmd, context)
 
         if self._is_creation_group_message(context):
             return self._handle_creation_group_message(context)
@@ -369,13 +390,6 @@ class CoordinatorRuntimeApp:
         return []
 
     def _handle_creation_group_message(self, context: MessageContext) -> list[OutboundMessage | OutboundCard]:
-        text = context.text.strip()
-        project_cmd = parse_create_project_command(text)
-        if project_cmd is not None:
-            return self._handle_create_project_command(project_cmd, context)
-        req_cmd = parse_create_req_command(text)
-        if req_cmd is not None:
-            return self._handle_create_req_command(req_cmd, context)
         if "创建需求" in context.text or "新建需求" in context.text:
             self._observed_creation_group_chat_id = context.chat_id
             return [OutboundMessage(

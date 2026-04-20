@@ -190,6 +190,65 @@ def test_handle_create_project_missing_category_lists_choices(tmp_path):
     assert "category" in text.lower() or "类目" in text or "可选" in text
 
 
+def test_handle_create_project_works_in_p2p_dm(tmp_path):
+    """In a DM (p2p), /create project should still route into Bootstrap."""
+    from requirement_workflow_v12.service_app import MessageContext
+
+    app, bootstrap_svc = _make_app(tmp_path)
+    ctx = MessageContext(
+        message_id="m1", chat_id="p2p_chat_alice", chat_type="p2p",
+        user_id="ou_alice", sender_name="Alice",
+        text="/create project test4 --category saas-ai-automation",
+    )
+    msgs = app.handle_text_message(ctx)
+    bootstrap_svc.run.assert_called_once()
+    text = "\n".join(getattr(m, "text", "") for m in msgs)
+    assert "test4" in text or "test3" in text  # mock returns test3
+    assert "当前没有激活的需求" not in text
+
+
+def test_handle_create_project_works_in_arbitrary_group(tmp_path):
+    """A non-creation group should also accept /create project."""
+    from requirement_workflow_v12.service_app import MessageContext
+
+    app, bootstrap_svc = _make_app(tmp_path)
+    ctx = MessageContext(
+        message_id="m1", chat_id="oc_some_other_group", chat_type="group",
+        user_id="ou_alice", sender_name="Alice",
+        text="/create project test4 --category saas-ai-automation",
+    )
+    app.handle_text_message(ctx)
+    bootstrap_svc.run.assert_called_once()
+
+
+def test_handle_create_project_strips_at_mention_prefix(tmp_path):
+    """When user @-mentions the bot, Feishu prepends '@_user_<id> '; we must strip it."""
+    from requirement_workflow_v12.service_app import MessageContext
+
+    app, bootstrap_svc = _make_app(tmp_path)
+    ctx = MessageContext(
+        message_id="m1", chat_id="oc_some_group", chat_type="group",
+        user_id="ou_alice", sender_name="Alice",
+        text="@_user_1 /create project test4 --category saas-ai-automation",
+    )
+    app.handle_text_message(ctx)
+    bootstrap_svc.run.assert_called_once()
+
+
+def test_handle_create_project_strips_multiple_at_mention_prefixes(tmp_path):
+    """Multiple stacked mentions should all be stripped."""
+    from requirement_workflow_v12.service_app import MessageContext
+
+    app, bootstrap_svc = _make_app(tmp_path)
+    ctx = MessageContext(
+        message_id="m1", chat_id="oc_some_group", chat_type="group",
+        user_id="ou_alice", sender_name="Alice",
+        text="@_user_1 @_user_2 /create project test4 --category saas-ai-automation",
+    )
+    app.handle_text_message(ctx)
+    bootstrap_svc.run.assert_called_once()
+
+
 def test_handle_create_project_invalid_category_lists_choices(tmp_path):
     """Unknown --category value is rejected with the available list."""
     from requirement_workflow_v12.service_app import MessageContext
