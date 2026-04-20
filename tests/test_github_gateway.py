@@ -254,3 +254,60 @@ def test_commit_spec_pr_files_delegates_to_commit_files(monkeypatch):
     assert files[0].path == "a.md"
     assert files[0].content == "1"
     gw.close()
+
+
+def test_get_repo_returns_metadata_on_200():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/repos/Snowziio/test3"
+        return httpx.Response(
+            200,
+            json={
+                "full_name": "Snowziio/test3",
+                "html_url": "https://github.com/Snowziio/test3",
+                "default_branch": "main",
+                "is_template": False,
+            },
+        )
+
+    gw = _gateway_with(handler)
+    meta = gw.get_repo(owner="Snowziio", name="test3")
+    assert meta is not None
+    assert meta["full_name"] == "Snowziio/test3"
+    assert meta["default_branch"] == "main"
+    gw.close()
+
+
+def test_get_repo_returns_none_on_404():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"message": "Not Found"})
+
+    gw = _gateway_with(handler)
+    assert gw.get_repo(owner="Snowziio", name="missing") is None
+    gw.close()
+
+
+def test_add_collaborator_posts_to_correct_endpoint():
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["method"] = request.method
+        seen["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(204)
+
+    gw = _gateway_with(handler)
+    gw.add_collaborator(owner="Snowziio", name="test3", username="alice", permission="push")
+    assert seen["method"] == "PUT"
+    assert seen["path"] == "/repos/Snowziio/test3/collaborators/alice"
+    assert seen["body"] == {"permission": "push"}
+    gw.close()
+
+
+def test_add_collaborator_raises_on_unexpected_status():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"message": "forbidden"})
+
+    gw = _gateway_with(handler)
+    with pytest.raises(GitHubGatewayError):
+        gw.add_collaborator(owner="Snowziio", name="test3", username="alice")
+    gw.close()
