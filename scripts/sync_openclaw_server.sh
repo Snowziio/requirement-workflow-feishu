@@ -26,7 +26,7 @@ fi
 REMOTE="${OPENCLAW_REMOTE:-admin@47.251.81.45}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="${REPO_ROOT}/deploy/openclaw"
-AGENTS=(ai-founder-brief ai-meeting-closeout spec-author spec-reviewer spec-transformer spec-transformer-reviewer)
+AGENTS=(ai-founder-brief ai-meeting-closeout plan-author spec-author spec-reviewer spec-transformer spec-transformer-reviewer)
 
 # Agent id → skill name (see reference_openclaw_skill_dual_sync.md).
 # Using a case fallback rather than declare -A to stay compatible with bash 3.2
@@ -35,6 +35,7 @@ skill_for_agent() {
   case "$1" in
     ai-founder-brief) echo requirement-author ;;
     ai-meeting-closeout) echo requirement-reviewer ;;
+    plan-author) echo plan-author ;;
     spec-author) echo spec-author ;;
     spec-reviewer) echo spec-reviewer ;;
     spec-transformer) echo spec-transformer ;;

@@ -103,6 +103,27 @@ class GitHubGateway:
         data = self._unwrap(resp)
         return str(data["html_url"])
 
+    def get_repo(self, *, owner: str, name: str) -> dict | None:
+        """GET /repos/{owner}/{name}. Returns metadata dict, or None on 404."""
+        resp = self.client.get(f"/repos/{owner}/{name}")
+        if resp.status_code == 404:
+            return None
+        data = self._unwrap(resp)
+        return dict(data)
+
+    def add_collaborator(
+        self, *, owner: str, name: str, username: str, permission: str = "push"
+    ) -> None:
+        """PUT /repos/{owner}/{name}/collaborators/{username}. 201/204 indicate success."""
+        resp = self.client.put(
+            f"/repos/{owner}/{name}/collaborators/{username}",
+            json={"permission": permission},
+        )
+        if resp.status_code not in (201, 204):
+            raise GitHubGatewayError(
+                resp.status_code, f"add_collaborator failed: {resp.text}"
+            )
+
     def create_branch(
         self, *, owner: str, repo: str, branch: str, from_branch: str | None = None
     ) -> str:

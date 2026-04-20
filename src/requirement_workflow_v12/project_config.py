@@ -14,6 +14,11 @@ class ProjectConfig:
     github_repo_url: str = ""
     github_owner_username: str = ""
     bitable_record_id: str = ""
+    bootstrap_status: str = "UNBOOTSTRAPPED"
+    bootstrap_log: list[dict] = field(default_factory=list)
+    bootstrap_completed_at: str | None = None
+    project_status: str = "UNBOOTSTRAPPED"
+    feishu_chat_id: str = ""
 
     @classmethod
     def from_dict(cls, data: dict) -> "ProjectConfig":
@@ -27,4 +32,9 @@ class ProjectConfig:
             github_repo_url=data.get("github_repo_url", ""),
             github_owner_username=data.get("github_owner_username", ""),
             bitable_record_id=data.get("bitable_record_id", ""),
+            bootstrap_status=data.get("bootstrap_status", "UNBOOTSTRAPPED"),
+            bootstrap_log=data.get("bootstrap_log", []),
+            bootstrap_completed_at=data.get("bootstrap_completed_at"),
+            project_status=data.get("project_status", "UNBOOTSTRAPPED"),
+            feishu_chat_id=data.get("feishu_chat_id", ""),
         )

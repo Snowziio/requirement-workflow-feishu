@@ -516,3 +516,17 @@ spec-author 的 SKILL.md 增加消费规则（**不改 9 节模板**）：
 ## 附录 A：与 Tool 层重构的衔接
 
 本规格依赖 2026-04-19 已落地的 Tool 层重构（`ProjectRepoTools` facade + `StateTransitionHooks`）。新增的 `commit_plan_artifacts` 方法加在 `GitHubProjectRepoTools` 上，遵循相同的 `ProjectRepoError` 错误模型和原子事务约定。`on_enter(PlanStatus.READY)` 钩子通过 `CoordinatorService._hooks` 注册，复用现有基础设施。
+
+---
+
+## Addendum: 2026-04-20 schema 升级
+
+`architecture_change` payload 字段已重命名为 `project_context_change`，信封内
+`changes[]` 新增 `artifact` 字段（值域 `architecture` / `environments` / `skill_md`）。
+MVP 只实现 `architecture` 执行器；其他 artifact 是 stub。
+
+向后兼容：无存量数据（test2 硬废弃），无兼容负担。新 plan-author 产物直接用
+`project_context_change`；读取端对在途回调保留临时 shim
+（`payload.get("project_context_change") or payload.get("architecture_change")`）。
+
+详见：[docs/superpowers/specs/2026-04-20-project-layer-design.md](2026-04-20-project-layer-design.md)

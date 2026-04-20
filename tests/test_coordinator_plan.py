@@ -63,22 +63,22 @@ def test_plan_start_rejected_when_already_drafting():
 from unittest.mock import MagicMock
 
 
-def test_plan_submit_without_architecture_change_goes_ready():
+def test_plan_submit_without_project_context_change_goes_ready():
     svc = CoordinatorService()
     r = _approved_req(svc)
     svc.plan_start(r.req_id)
     svc._hooks.on_enter(PlanStatus.READY, lambda _r: None)
 
     plan_md = "---\nreq_id: REQ-P-1\n---\n"
-    svc.plan_submit(r.req_id, plan_md_content=plan_md, architecture_change=None)
+    svc.plan_submit(r.req_id, plan_md_content=plan_md, project_context_change=None)
 
     assert r.plan_status is PlanStatus.READY
     assert r.pending_plan_draft is not None
     assert r.pending_plan_draft["plan_md_content"] == plan_md
-    assert r.pending_plan_draft["architecture_change"] is None
+    assert r.pending_plan_draft["project_context_change"] is None
 
 
-def test_plan_submit_with_architecture_change_goes_auth_pending():
+def test_plan_submit_with_project_context_change_goes_auth_pending():
     svc = CoordinatorService()
     r = _approved_req(svc)
     svc.plan_start(r.req_id)
@@ -86,10 +86,10 @@ def test_plan_submit_with_architecture_change_goes_auth_pending():
 
     arch = {"summary": "x", "changes": [], "authorized": False}
     svc.plan_submit(
-        r.req_id, plan_md_content="---\n---\n", architecture_change=arch,
+        r.req_id, plan_md_content="---\n---\n", project_context_change=arch,
     )
     assert r.plan_status is PlanStatus.AUTH_PENDING
-    assert r.pending_plan_draft["architecture_change"] == arch
+    assert r.pending_plan_draft["project_context_change"] == arch
 
 
 def test_plan_submit_rejected_when_not_drafting():
@@ -97,7 +97,7 @@ def test_plan_submit_rejected_when_not_drafting():
     r = _approved_req(svc)
     with pytest.raises(ValueError):
         svc.plan_submit(
-            r.req_id, plan_md_content="---\n---\n", architecture_change=None,
+            r.req_id, plan_md_content="---\n---\n", project_context_change=None,
         )
 
 
@@ -109,14 +109,14 @@ def test_plan_authorize_from_auth_pending_goes_ready_and_marks_authorized():
     svc._hooks.on_enter(PlanStatus.READY, lambda _r: None)
     svc.plan_submit(
         r.req_id, plan_md_content="---\n---\n",
-        architecture_change={"summary": "x", "changes": [], "authorized": False},
+        project_context_change={"summary": "x", "changes": [], "authorized": False},
     )
     assert r.plan_status is PlanStatus.AUTH_PENDING
 
     svc.plan_authorize(r.req_id, authorized_by="ou-123")
 
     assert r.plan_status is PlanStatus.READY
-    arch = r.pending_plan_draft["architecture_change"]
+    arch = r.pending_plan_draft["project_context_change"]
     assert arch["authorized"] is True
     assert arch["authorized_by"] == "ou-123"
     assert arch["authorized_at"]
@@ -129,7 +129,7 @@ def test_plan_authorization_reject_returns_to_drafting():
     svc._hooks.on_enter(PlanStatus.AUTH_PENDING, lambda _r: None)
     svc.plan_submit(
         r.req_id, plan_md_content="---\n---\n",
-        architecture_change={"summary": "x", "changes": []},
+        project_context_change={"summary": "x", "changes": []},
     )
 
     svc.plan_authorization_reject(r.req_id, reason="need more context")
@@ -180,7 +180,7 @@ def test_on_enter_ready_commits_plan_and_clears_draft():
     svc.plan_start(r.req_id)
     svc.plan_submit(
         r.req_id, plan_md_content="---\nreq_id: REQ-P-1\n---\n",
-        architecture_change=None,
+        project_context_change=None,
     )
 
     assert r.plan_status is PlanStatus.READY
@@ -211,6 +211,6 @@ def test_on_enter_ready_hook_propagates_recoverable_error():
     svc.plan_start(r.req_id)
     with pytest.raises(ProjectRepoError) as exc_info:
         svc.plan_submit(
-            r.req_id, plan_md_content="---\n---\n", architecture_change=None,
+            r.req_id, plan_md_content="---\n---\n", project_context_change=None,
         )
     assert exc_info.value.recoverable is True

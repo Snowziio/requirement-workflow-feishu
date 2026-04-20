@@ -258,3 +258,81 @@ def test_set_design_system_doc_triggers_persister():
     svc.set_design_system_doc("P", "ds_doc_1")
     assert calls == ["P"]
     assert svc.project_configs["P"].design_system_doc_id == "ds_doc_1"
+
+
+def test_project_config_to_fields_includes_bootstrap_columns():
+    gateway = _make_gateway()
+    cfg = ProjectConfig(
+        category="saas-ai-automation",
+        template_version="saas-ai-automation.v1",
+        architecture_doc_id="doc_x",
+        architecture_doc_url="https://example/doc_x",
+        bootstrap_status="PROVISIONED",
+        bootstrap_log=[{"step": 1, "ts": "t1", "status": "ok"}],
+        bootstrap_completed_at="t-done",
+        project_status="PROVISIONED",
+        feishu_chat_id="oc_abc",
+    )
+    fields = gateway._project_config_to_fields(cfg, "myproj")
+    assert fields["引导状态"] == "PROVISIONED"
+    assert json.loads(fields["引导日志JSON"]) == [{"step": 1, "ts": "t1", "status": "ok"}]
+    assert fields["引导完成时间"] == "t-done"
+    assert fields["项目状态"] == "PROVISIONED"
+    assert fields["飞书群chat_id"] == "oc_abc"
+
+
+def test_list_project_configs_loads_bootstrap_fields_from_bitable():
+    gateway = _make_gateway()
+    record = _FakeRecord(
+        fields={
+            "项目名": "proj2",
+            "类别": "saas-ai-automation",
+            "模板版本": "saas-ai-automation.v1",
+            "架构文档ID": "doc_a",
+            "架构文档URL": "https://example/doc_a",
+            "技术栈JSON": "",
+            "设计系统文档ID": "",
+            "GitHub仓库URL": "",
+            "GitHub负责人用户名": "",
+            "引导状态": "PROVISIONED",
+            "引导日志JSON": json.dumps([{"step": 7, "status": "ok"}]),
+            "引导完成时间": "t-done",
+            "项目状态": "PROVISIONED",
+            "飞书群chat_id": "oc_xyz",
+        },
+        record_id="rec_2",
+    )
+    gateway.client.bitable.v1.app_table_record.list.return_value = _FakeResponse(
+        data=_FakeListData(items=[record])
+    )
+    configs = gateway.list_project_configs()
+    cfg = configs["proj2"]
+    assert cfg.bootstrap_status == "PROVISIONED"
+    assert cfg.bootstrap_log == [{"step": 7, "status": "ok"}]
+    assert cfg.bootstrap_completed_at == "t-done"
+    assert cfg.project_status == "PROVISIONED"
+    assert cfg.feishu_chat_id == "oc_xyz"
+
+
+def test_list_project_configs_tolerates_malformed_bootstrap_log_json():
+    gateway = _make_gateway()
+    record = _FakeRecord(
+        fields={
+            "项目名": "proj3",
+            "类别": "x",
+            "模板版本": "v",
+            "架构文档ID": "d",
+            "架构文档URL": "u",
+            "技术栈JSON": "",
+            "设计系统文档ID": "",
+            "GitHub仓库URL": "",
+            "GitHub负责人用户名": "",
+            "引导日志JSON": "{not-json",
+        },
+        record_id="rec_3",
+    )
+    gateway.client.bitable.v1.app_table_record.list.return_value = _FakeResponse(
+        data=_FakeListData(items=[record])
+    )
+    configs = gateway.list_project_configs()
+    assert configs["proj3"].bootstrap_log == []

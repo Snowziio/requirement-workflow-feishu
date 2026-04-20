@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import re
+import shlex
 import threading
 import time
 from dataclasses import dataclass
@@ -58,6 +59,85 @@ PLAN_RESTART_RE = re.compile(r"^/plan\s+restart\s+(REQ-\S+)\s*$")
 DESIGN_RESTART_RE = re.compile(r"^/design\s+restart\s+(REQ-\S+)\s*$")
 
 
+@dataclass(frozen=True)
+class CreateProjectCommand:
+    project: str
+    category: str
+    owner_user_id: str
+    resume: bool = False
+
+
+_CREATE_PROJECT_RE = re.compile(
+    r"^/create\s+project\s+(?P<name>\S+)"
+    r"(?:\s+--category\s+(?P<category>\S+))?"
+    r"(?:\s+--owner\s+(?P<owner>\S+))?"
+    r"(?P<resume>\s+--resume)?\s*$"
+)
+
+
+def parse_create_project_command(text: str) -> CreateProjectCommand | None:
+    m = _CREATE_PROJECT_RE.match(text.strip())
+    if not m:
+        return None
+    category = m.group("category") or ""
+    owner = m.group("owner") or ""
+    if not category or not owner:
+        return None
+    return CreateProjectCommand(
+        project=m.group("name"),
+        category=category,
+        owner_user_id=owner,
+        resume=bool(m.group("resume")),
+    )
+
+
+@dataclass(frozen=True)
+class CreateReqCommand:
+    project: str
+    name: str
+    summary: str = ""
+    category: str = ""
+
+
+def parse_create_req_command(text: str) -> CreateReqCommand | None:
+    stripped = text.strip()
+    if not stripped.startswith("/create req "):
+        return None
+    try:
+        tokens = shlex.split(stripped)
+    except ValueError:
+        return None
+    if len(tokens) < 4 or tokens[:2] != ["/create", "req"]:
+        return None
+    project = tokens[2]
+
+    positional: list[str] = []
+    summary = ""
+    category = ""
+    i = 3
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--summary" and i + 1 < len(tokens):
+            summary = tokens[i + 1]
+            i += 2
+            continue
+        if tok == "--category" and i + 1 < len(tokens):
+            category = tokens[i + 1]
+            i += 2
+            continue
+        positional.append(tok)
+        i += 1
+
+    if not positional:
+        return None
+    return CreateReqCommand(
+        project=project,
+        name=" ".join(positional),
+        summary=summary,
+        category=category,
+    )
+
+
 @dataclass
 class MessageContext:
     chat_id: str
@@ -92,12 +172,15 @@ class CoordinatorRuntimeApp:
         store: JsonStateStore | None = None,
         service: CoordinatorService | None = None,
         gateway: FeishuGateway | None = None,
+        project_bootstrap_service: object | None = None,
     ) -> None:
         self.settings = settings
         self.settings.validate_runtime()
         self.store = store or JsonStateStore(settings.state_store_path)
         self.service = service or CoordinatorService()
         self.gateway = gateway or FeishuGateway(settings)
+        self._project_bootstrap_service = project_bootstrap_service
+        self._github_gateway: object | None = None
         requirements, active_req_by_user, project_groups, _legacy_project_configs = self.store.load_snapshot()
         project_configs: dict = {}
         list_fn = getattr(self.gateway, "list_project_configs", None)
@@ -125,6 +208,7 @@ class CoordinatorRuntimeApp:
             from .github_gateway import GitHubGateway
             from .project_repo import GitHubProjectRepoTools
             github_gateway = GitHubGateway(settings)
+            self._github_gateway = github_gateway
             tools = GitHubProjectRepoTools(github_gateway)
             trace_dir = Path(settings.spec_trace_dir)
             trace_dir.mkdir(parents=True, exist_ok=True)
@@ -133,6 +217,16 @@ class CoordinatorRuntimeApp:
                 trace_dir=trace_dir,
                 feishu=self.gateway,
             )
+            if self._project_bootstrap_service is None:
+                from .project_bootstrap.service import ProjectBootstrapService
+                self._project_bootstrap_service = ProjectBootstrapService(
+                    repo_tools=tools,
+                    feishu_gateway=self.gateway,
+                    github_gateway=github_gateway,
+                    template_owner=settings.github_template_owner,
+                    template_repo=settings.github_template_repo,
+                    new_owner=settings.github_org_owner,
+                )
 
         from .spec_context import SpecContextBuilder
 
@@ -269,11 +363,114 @@ class CoordinatorRuntimeApp:
         return []
 
     def _handle_creation_group_message(self, context: MessageContext) -> list[OutboundMessage | OutboundCard]:
-        if "创建需求" not in context.text and "新建需求" not in context.text:
-            return []
+        text = context.text.strip()
+        project_cmd = parse_create_project_command(text)
+        if project_cmd is not None:
+            return self._handle_create_project_command(project_cmd, context)
+        req_cmd = parse_create_req_command(text)
+        if req_cmd is not None:
+            return self._handle_create_req_command(req_cmd, context)
+        if "创建需求" in context.text or "新建需求" in context.text:
+            self._observed_creation_group_chat_id = context.chat_id
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text=(
+                    "REQ 创建已改用固化命令：\n"
+                    "`/create req <project> <name>` （可选 --summary / --category）\n"
+                    "示例：`/create req test3 会话鉴权改造 --summary \"支持JWT\"`"
+                ),
+            )]
+        return []
 
-        self._observed_creation_group_chat_id = context.chat_id
-        return [OutboundCard(receive_id=context.chat_id, card=self._build_requirement_creation_card(context))]
+    def _handle_create_req_command(
+        self, cmd: "CreateReqCommand", context: MessageContext,
+    ) -> list[OutboundMessage | OutboundCard]:
+        existing = self.service.project_configs.get(cmd.project)
+        if existing is None:
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text=(
+                    f"项目 {cmd.project} 不存在。请先 "
+                    "`/create project <name> --category <c> --owner <uid>`。"
+                ),
+            )]
+        if existing.bootstrap_status != "PROVISIONED":
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text=(
+                    f"项目 {cmd.project} 当前状态 {existing.bootstrap_status}，"
+                    "未完成 Bootstrap，无法创建 REQ。"
+                ),
+            )]
+        if cmd.category and cmd.category != existing.category:
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text=(
+                    f"category 不一致：命令中 {cmd.category!r} 与项目 {cmd.project} "
+                    f"实际 {existing.category!r} 冲突，拒绝创建"
+                ),
+            )]
+        payload = CreationFormPayload(
+            project=cmd.project,
+            name=cmd.name,
+            summary=cmd.summary or cmd.name,
+            creator=context.sender_name or context.user_id,
+            creator_user_id=context.user_id,
+            creation_chat_id=context.chat_id,
+            needs_ui=False,
+            category=existing.category,
+        )
+        request, _, req_id = self._create_requirement_from_form(payload)
+        self._provision_requirement_after_creation(request, req_id)
+        return [OutboundMessage(
+            receive_id=context.chat_id,
+            text=f"{req_id} 已创建（project={cmd.project}, name={cmd.name}）。",
+        )]
+
+    def _handle_create_project_command(
+        self, cmd: "CreateProjectCommand", context: MessageContext,
+    ) -> list[OutboundMessage | OutboundCard]:
+        if self._project_bootstrap_service is None:
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text="Bootstrap 服务未启用；请联系运维检查 settings.github_token 配置",
+            )]
+        from .project_bootstrap.types import BootstrapRequest, BootstrapStepError
+        from .project_bootstrap.service import ValidationError
+        req = BootstrapRequest(
+            project=cmd.project,
+            category=cmd.category,
+            owner_user_id=cmd.owner_user_id,
+            creator_chat_id=context.chat_id,
+            resume=cmd.resume,
+        )
+        try:
+            result = self._project_bootstrap_service.run(req)
+        except ValidationError as exc:
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text=f"Bootstrap 校验失败：{exc}",
+            )]
+        except BootstrapStepError as exc:
+            return [OutboundMessage(
+                receive_id=context.chat_id,
+                text=(
+                    f"Bootstrap 中断于 Step {int(exc.step)} ({exc.step.name})：{exc.message}\n"
+                    f"可使用 `/create project {cmd.project} --category {cmd.category} "
+                    f"--owner {cmd.owner_user_id} --resume` 续跑"
+                ),
+            )]
+        self._save_state()
+        return [OutboundMessage(
+            receive_id=context.chat_id,
+            text=(
+                f"项目 {result.project} 已就绪：\n"
+                f"- Repo: {result.github_repo_url}\n"
+                f"- ARCHITECTURE: {result.architecture_doc_url}\n"
+                f"- 群 chat_id: {result.feishu_chat_id}\n"
+                f"可开始用 `/create req {result.project} <name>` 创建需求。"
+            ),
+        )]
 
     def _handle_spec_restart_command(self, *, req_id: str, context: MessageContext) -> list[OutboundMessage]:
         try:
@@ -316,42 +513,17 @@ class CoordinatorRuntimeApp:
             )
         return request, requirement, response.req_id
 
-    def _initialize_project_for_first_req(self, payload: CreationFormPayload) -> None:
-        from .architecture_templates import UnknownCategory, render_template
-
-        if not payload.category:
-            raise ValueError(
-                "category is required when creating the first requirement for a project"
-            )
-        try:
-            template_version, rendered = render_template(
-                payload.category, project=payload.project
-            )
-        except UnknownCategory as exc:
-            raise ValueError(f"未知类目：{payload.category}") from exc
-
-        created = self.gateway.create_architecture_document(payload.project)
-        if created is None:
-            raise RuntimeError("failed to create ARCHITECTURE feishu document (missing folder token)")
-        self.gateway.write_document_text(created.document_id, rendered)
-
-        self.service.initialize_project(
-            project=payload.project,
-            category=payload.category,
-            template_version=template_version,
-            architecture_doc_id=created.document_id,
-            architecture_doc_url=created.document_url,
-            tech_stack={},
-        )
-
     def _provision_requirement_after_creation(self, request: CreationRequest, req_id: str) -> None:
         form_payload = self._pending_form_payloads.pop(req_id, None)
         if form_payload is not None:
-            if form_payload.project not in self.service.project_configs:
-                self._initialize_project_for_first_req(form_payload)
-                self._save_state()
+            existing = self.service.project_configs.get(form_payload.project)
+            if existing is None:
+                LOGGER.warning(
+                    "REQ %s created but project %s missing from project_configs — "
+                    "Bootstrap should have populated it; skipping project-init",
+                    req_id, form_payload.project,
+                )
             else:
-                existing = self.service.project_configs[form_payload.project]
                 if form_payload.category and form_payload.category != existing.category:
                     LOGGER.warning(
                         "Form supplied mismatched category for existing project %s: got %s, have %s",
@@ -398,6 +570,23 @@ class CoordinatorRuntimeApp:
                 self.gateway.update_requirement_record(requirement)
             except Exception as exc:
                 LOGGER.warning("Failed to refresh bitable record for %s: %s", requirement.req_id, exc)
+
+        existing_cfg = self.service.project_configs.get(request.project)
+        if existing_cfg and existing_cfg.github_repo_url and self._github_gateway is not None:
+            from datetime import datetime, timezone
+            from .req_registry import append_req_to_registry
+            owner_name = existing_cfg.github_repo_url.rstrip("/").rsplit("/", 2)[-2:]
+            if len(owner_name) == 2:
+                project_repo = "/".join(owner_name)
+                append_req_to_registry(
+                    github_gateway=self._github_gateway,
+                    project_repo=project_repo,
+                    req_id=req_id,
+                    title=requirement.name if requirement else req_id,
+                    status="DRAFTING",
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                    swallow_errors=True,
+                )
 
         LOGGER.info(
             "Provisioned requirement from form req_id=%s status=%s project_group_id=%s bitable_record_id=%s document_url=%s",
@@ -992,7 +1181,10 @@ class CoordinatorRuntimeApp:
                 self.service.plan_submit(
                     req_id,
                     plan_md_content=payload.get("plan_md_content", ""),
-                    architecture_change=payload.get("architecture_change"),
+                    project_context_change=(
+                        payload.get("project_context_change")
+                        or payload.get("architecture_change")
+                    ),
                 )
                 self._save_state()
                 return 200, {

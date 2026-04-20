@@ -821,11 +821,11 @@ class CoordinatorService:
             raise ValueError(decision.message)
 
         draft = r.pending_plan_draft or {}
-        arch = draft.get("architecture_change") or {}
-        arch["authorized"] = True
-        arch["authorized_by"] = authorized_by
-        arch["authorized_at"] = datetime.now(timezone.utc).isoformat()
-        draft["architecture_change"] = arch
+        pcc = draft.get("project_context_change") or {}
+        pcc["authorized"] = True
+        pcc["authorized_by"] = authorized_by
+        pcc["authorized_at"] = datetime.now(timezone.utc).isoformat()
+        draft["project_context_change"] = pcc
         r.pending_plan_draft = draft
 
         prev = r.plan_status
@@ -867,19 +867,19 @@ class CoordinatorService:
         req_id: str,
         *,
         plan_md_content: str,
-        architecture_change: dict | None,
+        project_context_change: dict | None,
     ) -> Requirement:
         r = self.requirements[req_id]
         decision = apply_plan_event(
             r.plan_status, PlanEvent.PLAN_SUBMIT,
-            has_architecture_change=architecture_change is not None,
+            has_project_context_change=project_context_change is not None,
         )
         if not decision.allowed:
             raise ValueError(decision.message)
 
         r.pending_plan_draft = {
             "plan_md_content": plan_md_content,
-            "architecture_change": architecture_change,
+            "project_context_change": project_context_change,
         }
         r.plan_phase = PlanPhase.FINAL_REVIEW_PENDING
 
@@ -900,20 +900,20 @@ class CoordinatorService:
         )
 
     def _commit_plan_and_maybe_architecture(self, r: Requirement) -> None:
-        """``on_enter(PlanStatus.READY)`` hook: atomic commit of plan.md (+ARCHITECTURE.md)."""
+        """``on_enter(PlanStatus.READY)`` hook: atomic commit of plan.md (+project context files)."""
         draft = r.pending_plan_draft or {}
         plan_md_content = draft.get("plan_md_content", "")
-        architecture_change = draft.get("architecture_change")
+        project_context_change = draft.get("project_context_change")
         project_repo = self._project_repo_for(r.req_id)
 
         message_parts = [f"plan({r.req_id}): land plan.md"]
-        if architecture_change is not None:
-            message_parts.append("and apply architecture_change")
+        if project_context_change is not None:
+            message_parts.append("and apply project_context_change")
         artifacts = PlanArtifacts(
             project_repo=project_repo,
             req_id=r.req_id,
             plan_md_content=plan_md_content,
-            architecture_change=architecture_change,
+            project_context_change=project_context_change,
             commit_message=" ".join(message_parts),
         )
         result = self._plan_tools.commit_plan_artifacts(artifacts)

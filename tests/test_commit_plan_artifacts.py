@@ -17,7 +17,7 @@ def test_commit_plan_artifacts_without_architecture_commits_plan_md_to_main():
         project_repo="owner/repo",
         req_id="REQ-P-1",
         plan_md_content="---\nreq_id: REQ-P-1\n---\n# Plan\n",
-        architecture_change=None,
+        project_context_change=None,
         commit_message="plan(REQ-P-1): initial plan",
     )
     result = tools.commit_plan_artifacts(artifacts)
@@ -52,6 +52,7 @@ def test_commit_plan_artifacts_with_architecture_commits_both_files_atomically()
     arch_change = {
         "summary": "Add Redis",
         "changes": [{
+            "artifact": "architecture",
             "section_path": "## 会话存储",
             "before": "## 会话存储\n\n旧方案。",
             "after": "## 会话存储\n\n新方案：Redis。",
@@ -65,7 +66,7 @@ def test_commit_plan_artifacts_with_architecture_commits_both_files_atomically()
         project_repo="owner/repo",
         req_id="REQ-P-2",
         plan_md_content="---\nreq_id: REQ-P-2\n---\n",
-        architecture_change=arch_change,
+        project_context_change=arch_change,
         commit_message="plan(REQ-P-2): add Redis",
     )
 
@@ -91,6 +92,7 @@ def test_commit_plan_artifacts_raises_recoverable_on_architecture_conflict():
     tools = GitHubProjectRepoTools(gateway=gw)
     arch_change = {
         "changes": [{
+            "artifact": "architecture",
             "section_path": "## 会话存储",
             "before": "## 会话存储\n\n期望的旧内容。",
             "after": "## 会话存储\n\nRedis。",
@@ -100,7 +102,7 @@ def test_commit_plan_artifacts_raises_recoverable_on_architecture_conflict():
     artifacts = PlanArtifacts(
         project_repo="owner/repo", req_id="REQ-P-3",
         plan_md_content="---\n---\n",
-        architecture_change=arch_change,
+        project_context_change=arch_change,
         commit_message="m",
     )
     import pytest
@@ -118,7 +120,7 @@ def test_commit_plan_artifacts_raises_nonrecoverable_on_commit_failure():
     artifacts = PlanArtifacts(
         project_repo="o/r", req_id="REQ-P-4",
         plan_md_content="---\n---\n",
-        architecture_change=None,
+        project_context_change=None,
         commit_message="m",
     )
     import pytest
@@ -132,12 +134,44 @@ def test_plan_artifacts_is_frozen():
         project_repo="o/r",
         req_id="REQ-P-1",
         plan_md_content="---\nreq_id: REQ-P-1\n---\n",
-        architecture_change=None,
+        project_context_change=None,
         commit_message="plan: REQ-P-1",
     )
     import pytest
     with pytest.raises(Exception):
         a.plan_md_content = "changed"  # type: ignore[misc]
+
+
+def test_commit_plan_artifacts_accepts_project_context_change_envelope():
+    gw = MagicMock()
+    gw.fetch_file_sha.return_value = (
+        "sha_old", "# Architecture\n\n## Storage\n\nTBD\n",
+    )
+    gw.commit_files.return_value = "commit_new"
+    tools = GitHubProjectRepoTools(gateway=gw)
+
+    artifacts = PlanArtifacts(
+        project_repo="Snowziio/test3",
+        req_id="REQ-2026-04-20-001",
+        plan_md_content="# plan",
+        project_context_change={
+            "summary": "Add Redis",
+            "changes": [{
+                "artifact": "architecture",
+                "section_path": "## Storage",
+                "before": "## Storage\n\nTBD\n",
+                "after": "## Storage\n\nRedis 24h TTL\n",
+                "rationale": "D1",
+            }],
+        },
+        commit_message="plan(REQ-1): land plan.md and apply arch",
+    )
+    result = tools.commit_plan_artifacts(artifacts)
+    assert result.architecture_updated is True
+    file_changes = list(gw.commit_files.call_args.kwargs["files"])
+    paths = [fc.path for fc in file_changes]
+    assert "ARCHITECTURE.md" in paths
+    assert "docs/specs/REQ-2026-04-20-001/plan.md" in paths
 
 
 def test_plan_commit_result_fields():

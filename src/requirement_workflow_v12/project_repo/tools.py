@@ -11,8 +11,15 @@ import logging
 from typing import Protocol, runtime_checkable
 
 from ..github_gateway import FileChange, GitHubGateway, GitHubGatewayError
-from .architecture_apply import ArchitectureApplyError, apply_architecture_changes
-from .types import PlanArtifacts, PlanCommitResult, PrRef, ProjectContext, SpecArtifacts
+from .architecture_apply import ArchitectureApplyError
+from .types import (
+    BootstrapRepoResult,
+    PlanArtifacts,
+    PlanCommitResult,
+    PrRef,
+    ProjectContext,
+    SpecArtifacts,
+)
 
 
 _logger = logging.getLogger(__name__)
@@ -45,6 +52,18 @@ class ProjectRepoTools(Protocol):
     ) -> PlanCommitResult: ...
 
     def cleanup_failed_branch(self, project_repo: str, branch: str) -> None: ...
+
+    def bootstrap_project_repo(
+        self,
+        *,
+        template_owner: str,
+        template_repo: str,
+        new_owner: str,
+        new_name: str,
+        populate_files: dict[str, str],
+        populate_commit_message: str,
+        collaborator_username: str | None,
+    ) -> BootstrapRepoResult: ...
 
 
 class GitHubProjectRepoTools:
@@ -117,6 +136,10 @@ class GitHubProjectRepoTools:
     def commit_plan_artifacts(
         self, artifacts: PlanArtifacts,
     ) -> PlanCommitResult:
+        from ..project_context_apply import (
+            ProjectContextApplyError,
+            apply_project_context_change,
+        )
         owner, name = artifacts.project_repo.split("/", 1)
         plan_path = f"docs/specs/{artifacts.req_id}/plan.md"
         files_to_commit = [
@@ -124,7 +147,7 @@ class GitHubProjectRepoTools:
         ]
         architecture_updated = False
 
-        if artifacts.architecture_change is not None:
+        if artifacts.project_context_change is not None:
             try:
                 _arch_sha, arch_text = self._gw.fetch_file_sha(
                     artifacts.project_repo, "main", "ARCHITECTURE.md",
@@ -135,18 +158,22 @@ class GitHubProjectRepoTools:
                     recoverable=False,
                 ) from exc
             try:
-                new_arch = apply_architecture_changes(
-                    arch_text, artifacts.architecture_change.get("changes", []),
+                updated_files = apply_project_context_change(
+                    original_files={"ARCHITECTURE.md": arch_text},
+                    change=artifacts.project_context_change,
                 )
-            except ArchitectureApplyError as exc:
+            except ProjectContextApplyError as exc:
+                recoverable = isinstance(exc.__cause__, ArchitectureApplyError) and exc.__cause__.recoverable
                 raise ProjectRepoError(
-                    f"commit_plan_artifacts: architecture apply failed: {exc}",
-                    recoverable=exc.recoverable,
+                    f"commit_plan_artifacts: project_context_change apply failed: {exc}",
+                    recoverable=recoverable,
                 ) from exc
-            files_to_commit.append(
-                FileChange(path="ARCHITECTURE.md", content=new_arch),
-            )
-            architecture_updated = True
+            new_arch = updated_files.get("ARCHITECTURE.md")
+            if new_arch is not None and new_arch != arch_text:
+                files_to_commit.append(
+                    FileChange(path="ARCHITECTURE.md", content=new_arch),
+                )
+                architecture_updated = True
 
         try:
             sha = self._gw.commit_files(
@@ -162,4 +189,60 @@ class GitHubProjectRepoTools:
             commit_sha=sha, branch="main",
             plan_md_path=plan_path,
             architecture_updated=architecture_updated,
+        )
+
+    def bootstrap_project_repo(
+        self,
+        *,
+        template_owner: str,
+        template_repo: str,
+        new_owner: str,
+        new_name: str,
+        populate_files: dict[str, str],
+        populate_commit_message: str,
+        collaborator_username: str | None,
+    ) -> BootstrapRepoResult:
+        try:
+            existing = self._gw.get_repo(owner=new_owner, name=new_name)
+            if existing is None:
+                html_url = self._gw.create_repo_from_template(
+                    template_owner=template_owner,
+                    template_repo=template_repo,
+                    owner=new_owner,
+                    name=new_name,
+                    private=True,
+                    description=f"Bootstrapped project {new_name}",
+                )
+                default_branch = "main"
+            else:
+                html_url = str(existing["html_url"])
+                default_branch = str(existing.get("default_branch", "main"))
+
+            file_changes = [
+                FileChange(path=p, content=c) for p, c in populate_files.items()
+            ]
+            populate_sha = self._gw.commit_files(
+                owner=new_owner,
+                repo=new_name,
+                branch=default_branch,
+                files=file_changes,
+                message=populate_commit_message,
+            )
+
+            if collaborator_username:
+                self._gw.add_collaborator(
+                    owner=new_owner,
+                    name=new_name,
+                    username=collaborator_username,
+                    permission="push",
+                )
+        except GitHubGatewayError as exc:
+            raise ProjectRepoError(
+                f"bootstrap_project_repo failed for {new_owner}/{new_name}: {exc}",
+                recoverable=False,
+            ) from exc
+        return BootstrapRepoResult(
+            html_url=html_url,
+            default_branch=default_branch,
+            initial_populate_commit_sha=populate_sha,
         )

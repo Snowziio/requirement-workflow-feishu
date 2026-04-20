@@ -56,10 +56,11 @@ class PrRef:
 
 @dataclass(frozen=True)
 class RepoRef:
-    """Returned by Bootstrap once project-level repo generation lands.
+    """Reference to a GitHub repository.
 
-    Unused in this iteration; reserved for the PLANNING spec so the
-    domain model is stable when Bootstrap verbs are added.
+    ``initial_commit_sha`` is the sha of the first commit after Bootstrap's
+    Populate step (Step 4). Used by callers that want a post-Bootstrap
+    anchor (e.g., e2e fixtures).
     """
     owner: str
     name: str
@@ -69,17 +70,31 @@ class RepoRef:
 
 
 @dataclass(frozen=True)
-class PlanArtifacts:
-    """plan.md content + optional structured architecture diff.
+class BootstrapRepoResult:
+    """Returned by ``ProjectRepoTools.bootstrap_project_repo``.
 
-    ``architecture_change`` is the raw payload (dict) carrying
-    ``summary`` / ``changes[]`` / ``authorized*`` — matches plan-author's
-    callback schema. ``None`` means this plan doesn't touch ARCHITECTURE.md.
+    ``initial_populate_commit_sha`` is the sha of the Populate commit
+    (Bootstrap Step 4); ``html_url`` is the URL of the generated or
+    reused repo.
+    """
+    html_url: str
+    default_branch: str
+    initial_populate_commit_sha: str
+
+
+@dataclass(frozen=True)
+class PlanArtifacts:
+    """plan.md content + optional project_context_change envelope.
+
+    ``project_context_change`` carries the unified payload with
+    ``summary`` / ``changes[]`` (each with artifact/section_path/
+    before/after/rationale). ``None`` means the plan doesn't touch
+    project-level context.
     """
     project_repo: str
     req_id: str
     plan_md_content: str
-    architecture_change: dict | None
+    project_context_change: dict | None
     commit_message: str
 
 

@@ -5,6 +5,15 @@
 >
 > 完整设计论证见 [docs/superpowers/specs/2026-04-19-planning-phase-design.md](../../superpowers/specs/2026-04-19-planning-phase-design.md)。本文是实施者每日参考；设计文档是"为什么"。
 
+> **前置依赖**：本层依赖 **§5.0 Project 层 Bootstrap** 已完成。REQ 只能挂靠在
+> `project_configs.bootstrap_status == PROVISIONED` 的项目上；非 PROVISIONED
+> 状态下 coordinator 会直接拒绝 `/create req` 命令。
+>
+> **schema 变更（2026-04-20）**：`architecture_change` 已泛化为统一的
+> `project_context_change`（支持 `architecture` / `environments` / `skill_md`
+> 三种 artifact）。MVP 只实现 `architecture` 执行器；其他 artifact 为 stub。
+> 详见 [docs/superpowers/specs/2026-04-20-project-layer-design.md](../../superpowers/specs/2026-04-20-project-layer-design.md)。
+
 ---
 
 ## 零、实现状态与变更记录
@@ -23,14 +32,14 @@
 把"**怎么做的决策**"从 SPEC_DRAFTING 中剥离，分两步完成：
 
 1. **DESIGNING**（`needs_ui=true` 时才进入）：`design-author` 与人多轮交互产出 UI/交互设计，落 `docs/specs/REQ-*/design/`
-2. **PLANNING**：`plan-author` 与人多轮交互产出 `plan.md`，内含 N 个结构化 **Decision**；可选 `architecture_change` 块
+2. **PLANNING**：`plan-author` 与人多轮交互产出 `plan.md`，内含 N 个结构化 **Decision**；可选 `project_context_change` 块
 
 下游 `spec-author` 只负责把决策**翻译**成 9 节 Spec 工程契约，不再做决策。
 
 ### 1.2 关键判定（PlanStatus == READY 时必须满足）
 
 1. `plan.md` 已 commit 到 GitHub `main`，路径 `docs/specs/REQ-*/plan.md`
-2. 若 `architecture_change != None`：`ARCHITECTURE.md` 已按 `changes[]` **原子更新**，commit message 引用本 plan；`architecture_change.authorized == true` 含授权人与时间
+2. 若 `project_context_change != None`：`ARCHITECTURE.md`（或对应 artifact）已按 `changes[]` **原子更新**，commit message 引用本 plan；`project_context_change.authorized == true` 含授权人与时间
 3. 所有 Decision 的 `chosen` 字段非空；每条 alternative 至少一条 pro / con
 4. 若 `needs_ui=true`，`DesignStatus == READY` 是 PlanStatus 进入 DRAFTING 的前置条件
 
@@ -56,7 +65,7 @@
 | 需求文档 8 字段 | 飞书 docx | 只读 | 决策输入 |
 | `needs_ui` | Bitable | 只读 | 是否跳过 DESIGNING |
 | design 产物（若 needs_ui=true） | `docs/specs/REQ-*/design/` | 只读 | 决策输入（UI 决定技术选择） |
-| 当前 `ARCHITECTURE.md` | GitHub 项目仓库 | 只读 | 架构约束；判断是否需 `architecture_change` |
+| 当前 `ARCHITECTURE.md` | GitHub 项目仓库 | 只读 | 架构约束；判断是否需 `project_context_change` |
 | acm-registry 切片 | Coordinator 按技术范围过滤 | 只读 | 边界锚（supersedes 线索） |
 | tech_stack / category | project_config | 只读 | 技术栈锚 |
 
@@ -105,10 +114,11 @@ decisions:
     title: "..."
     # ... 同上结构
 
-architecture_change:  # Optional - 为 null 表示本 REQ 不动架构
+project_context_change:  # Optional - 为 null 表示本 REQ 不动项目级制品
   summary: "新增 Redis 会话存储组件"
   changes:
-    - section_path: "## 会话存储"
+    - artifact: "architecture"   # architecture | environments | skill_md (MVP 只执行 architecture)
+      section_path: "## 会话存储"
       before: "（原内容，null 表示新增节）"
       after: "（新章节内容）"
       rationale: "支撑 D1 选型"
@@ -133,8 +143,9 @@ open_questions:
 
 **字段语义**：
 - `decisions[].id`：REQ 内全局唯一；spec-author 在 design.md 引用 `决策来源: plan.md#D1`
-- `architecture_change == None` 表示本 plan 纯需求性决策，不改 ARCHITECTURE。在此情况下 PlanStatus 跳过 AUTH_PENDING 直达 READY
-- `architecture_change.changes[].before == null` 表示新增节；`after == null` 表示删除节；两者都有表示替换
+- `project_context_change == None` 表示本 plan 纯需求性决策，不改项目级制品。在此情况下 PlanStatus 跳过 AUTH_PENDING 直达 READY
+- `project_context_change.changes[].before == null` 表示新增节；`after == null` 表示删除节；两者都有表示替换
+- `project_context_change.changes[].artifact` 目前仅 `architecture` 有执行器落盘；`environments` / `skill_md` 是占位 stub（logging only）
 
 ---
 
@@ -169,7 +180,7 @@ class DesignEvent(str, Enum):
 ```python
 class PlanStatus(str, Enum):
     DRAFTING = "DRAFTING"
-    AUTH_PENDING = "AUTH_PENDING"   # 仅当 plan.architecture_change != None
+    AUTH_PENDING = "AUTH_PENDING"   # 仅当 plan.project_context_change != None
     READY = "READY"
 
 class PlanEvent(str, Enum):
@@ -203,17 +214,17 @@ plan-author 分三阶段与人协作；每阶段通过 IM 卡片驱动：
 |---|---|---|---|
 | **骨架（OUTLINE）** | 读需求 + ARCHITECTURE + design，列出本 REQ 需要做的 N 个决策标题 | 卡片按钮确认/调整骨架 | `plan_phase = OUTLINE_PENDING → OUTLINE_CONFIRMED` |
 | **深入（DECISIONS_IN_PROGRESS）** | 逐个 decision 多轮对话：提出 alternatives → 人选 → 追问细节 → 写入 plan.md | 对话 + 拍板 | `plan_phase = DECISIONS_IN_PROGRESS` |
-| **定稿（FINAL）** | 汇总成完整 plan.md；若涉及架构变更，产出 `architecture_change` 块 | 卡片按钮确认 / 打回 | `plan_phase = FINAL_REVIEW_PENDING`；确认后 `PLAN_SUBMIT` |
+| **定稿（FINAL）** | 汇总成完整 plan.md；若涉及项目级制品变更，产出 `project_context_change` 块（含 `artifact` 判别） | 卡片按钮确认 / 打回 | `plan_phase = FINAL_REVIEW_PENDING`；确认后 `PLAN_SUBMIT` |
 
 骨架阶段避免"一来就写细节"的浪费，先对齐决策清单；深入阶段保证每个选择都有 alternatives 可审计。
 
 ---
 
-## 六、架构变更授权闸门
+## 六、项目级上下文变更授权闸门
 
 ### 6.1 AUTH_PENDING 条件
 
-`PLAN_SUBMIT` 时若 `plan.architecture_change != None`：
+`PLAN_SUBMIT` 时若 `plan.project_context_change != None`：
 - 状态机 → `AUTH_PENDING`
 - `on_enter(AUTH_PENDING)` 钩子推送授权卡片到创建群，展示 before/after diff + rationale + changes[] 数量
 - 两个按钮：**授权** / **驳回**
@@ -223,7 +234,7 @@ plan-author 分三阶段与人协作；每阶段通过 IM 卡片驱动：
 `on_enter(PlanStatus.READY)` 钩子（同一事务内）：
 
 1. 读取当前 `ARCHITECTURE.md` + SHA（GitHub）
-2. 按 `architecture_change.changes[]` 依次 apply section patch
+2. 按 `project_context_change.changes[]` 依次 apply section patch（按 `artifact` 分派，MVP 仅 `architecture` 落盘）
 3. 生成新 `ARCHITECTURE.md` 内容
 4. 生成 `plan.md` 内容（内嵌 `authorized_by` / `authorized_at`）
 5. **原子 commit**：两文件一个 commit，message 引用本 REQ + plan
