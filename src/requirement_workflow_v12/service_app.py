@@ -343,11 +343,33 @@ class CoordinatorRuntimeApp:
             context.user_id,
             context.text,
         )
-        for outbound in self.handle_text_message(context):
-            if isinstance(outbound, OutboundCard):
-                self.gateway.send_card(outbound.receive_id, outbound.card, receive_id_type=outbound.receive_id_type)
-            else:
-                self.gateway.send_text(outbound.receive_id, outbound.text, receive_id_type=outbound.receive_id_type)
+        try:
+            outbounds = self.handle_text_message(context)
+        except Exception as exc:
+            LOGGER.exception(
+                "handle_text_message crashed chat_id=%s text=%r",
+                context.chat_id, context.text,
+            )
+            try:
+                self.gateway.send_text(
+                    context.chat_id,
+                    f"内部错误：{type(exc).__name__}: {exc}",
+                    receive_id_type="chat_id",
+                )
+            except Exception:
+                LOGGER.exception("Failed to send error reply to chat_id=%s", context.chat_id)
+            return
+        for outbound in outbounds:
+            try:
+                if isinstance(outbound, OutboundCard):
+                    self.gateway.send_card(outbound.receive_id, outbound.card, receive_id_type=outbound.receive_id_type)
+                else:
+                    self.gateway.send_text(outbound.receive_id, outbound.text, receive_id_type=outbound.receive_id_type)
+            except Exception:
+                LOGGER.exception(
+                    "send failed receive_id=%s receive_id_type=%s",
+                    outbound.receive_id, outbound.receive_id_type,
+                )
 
     def _on_card_action_trigger(self, data: P2CardActionTrigger):
         payload = self._card_event_to_payload(data)
