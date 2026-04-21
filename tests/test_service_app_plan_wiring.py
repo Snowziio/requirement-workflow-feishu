@@ -154,6 +154,55 @@ def test_plan_submitted_pending_review_content_and_actions(app):
     assert action_names == {"approve_plan_submit", "reject_plan_submit"}
 
 
+def _flat_markdown_contents(card: dict) -> str:
+    """Concat every markdown element's 'content' into one string for match tests."""
+    return "\n".join(
+        e.get("content", "") for e in card["elements"]
+        if e.get("tag") == "markdown"
+    )
+
+
+def test_pending_review_card_embeds_feishu_plan_doc_link(app):
+    """Pending-review card must expose Feishu plan docx URL so the reviewer
+    can read plan content before approving/rejecting. Without this, the
+    reviewer only sees body text and has no way to open the actual plan."""
+    r = _approved_req(app)
+    r.plan_doc_id = "docx-abc"
+    r.plan_doc_url = "https://my.feishu.cn/docx/docx-abc"
+
+    card = app._build_transition_notification_card(
+        r, trigger="plan_submitted_pending_review"
+    )
+    md = _flat_markdown_contents(card)
+    assert "https://my.feishu.cn/docx/docx-abc" in md
+    assert "查看 Plan 文档" in md
+
+
+def test_plan_ready_card_embeds_feishu_plan_doc_link(app):
+    """Plan-ready card should also link to the Feishu plan docx (construction-
+    phase SOT) next to the GitHub PR, so the user can jump back if needed."""
+    r = _approved_req(app)
+    r.plan_doc_id = "docx-abc"
+    r.plan_doc_url = "https://my.feishu.cn/docx/docx-abc"
+    r.plan_pr_url = "https://github.com/o/r/pull/7"
+
+    card = app._build_transition_notification_card(r, trigger="plan_ready")
+    md = _flat_markdown_contents(card)
+    assert "https://my.feishu.cn/docx/docx-abc" in md
+    assert "查看 Plan 文档" in md
+
+
+def test_non_plan_triggers_do_not_emit_plan_doc_link(app):
+    """Guardrail: plan_doc_url leak into unrelated triggers (e.g. spec_locked
+    or handoff_to_author) would confuse reviewers on other flows."""
+    r = _approved_req(app)
+    r.plan_doc_url = "https://my.feishu.cn/docx/docx-abc"
+
+    card = app._build_transition_notification_card(r, trigger="handoff_to_author")
+    md = _flat_markdown_contents(card)
+    assert "查看 Plan 文档" not in md
+
+
 def _seed_pending_review(app, r, *, with_acc=False):
     """Drive a requirement to plan_status=DRAFTING + pending_plan_review set."""
     app.service.plan_start(r.req_id)

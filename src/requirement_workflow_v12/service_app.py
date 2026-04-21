@@ -2549,6 +2549,8 @@ class CoordinatorRuntimeApp:
             links.append(f"[查看多维表格]({bitable_url})")
         if hasattr(requirement, "spec_document_url") and requirement.spec_document_url and trigger == "spec_locked":
             links.append(f"[查看 Spec 文档]({requirement.spec_document_url})")
+        if trigger in {"plan_submitted_pending_review", "plan_ready"} and requirement.plan_doc_url:
+            links.append(f"[查看 Plan 文档]({requirement.plan_doc_url})")
         if links:
             elements.append({"tag": "markdown", "content": " | ".join(links)})
 
