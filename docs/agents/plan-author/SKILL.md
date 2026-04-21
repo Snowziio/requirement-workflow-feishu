@@ -114,7 +114,19 @@ curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/plan-ca
 
 **目标**：组装 plan.md + 判断 project_context_change，调 `plan_submit` callback。
 
-1. 组装 plan.md 正文，schema 如下：
+**⛔ 行为合同（违反 = 卡死流程）**
+
+本阶段本轮的**第一个**（也是必做的）tool call 必须是下面 step 4 的 `curl … /openclaw/plan-callback`。在那个 curl 成功返回 **HTTP 200 之前**，你不能：
+
+- 发 IM 卡片说"提交中 / 已提交 / 正在写入 / plan 已完成"——这些都是谎言，因为你还没调 curl
+- 把组装好的 plan.md（YAML + 决策正文）作为"预览"回给用户——用户看到预览会以为 callback 已走，实际根本没走
+- 结束本轮 dispatch
+
+组装 plan.md 是**内部思考**，不是用户可见输出。所有"结果性"文字只能出现在 curl 200 之后的回复里。
+
+如果你正要输出"提交中…"字样但手里没有 200 响应，STOP——先去发 curl。
+
+1. 组装 plan.md 正文（**内部**，不发 IM），schema 如下：
 
 ```yaml
 ---
@@ -162,7 +174,7 @@ decisions:
 
 `artifact` 枚举：`architecture` | `environments` | `skill_md`。MVP 仅 `architecture` 有执行器，其余为占位 stub。
 
-4. 调 callback：
+4. 调 callback（**本轮第一个 tool call 就是它**）：
 
 ```bash
 curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/plan-callback" \
@@ -170,7 +182,11 @@ curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/plan-ca
   -d "{\"req_id\": \"{req_id}\", \"event\": \"plan_submit\", \"payload\": {\"plan_md_content\": ${plan_md_json_escaped}, \"project_context_change\": ${pcc_json_or_null}}}"
 ```
 
-200 响应：
+5. 只有在**收到 200 响应后**才回复用户，报告实际 plan_status：
+   - `"plan_status": "ready"` → 回用户"✅ 已提交，plan 冻结到 GitHub `plans/<req_id>.md`"
+   - `"plan_status": "auth_pending"` → 回用户"✅ 已提交，等你在授权卡上确认项目级变更"
+
+200 响应语义：
 - `"plan_status": "ready"` → 无 project_context_change，Coordinator 已把飞书 plan 文本单向同步到 GitHub `plans/<req_id>.md`，流程推进
 - `"plan_status": "auth_pending"` → 有 project_context_change，等人通过授权卡授权；授权后 Coordinator 才会同步 plan + ARCHITECTURE 到 GitHub
 
@@ -194,5 +210,6 @@ curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/plan-ca
 - ❌ 跳过 plan-context 直接读需求文档
 - ❌ Phase A 没和人对齐就直接发 callback
 - ❌ Phase B 替人拍板（"我已决定选 A"）
+- ❌ Phase C 在 curl 之前 IM 先发 plan.md 预览 + "提交中..." ——**最常见卡死模式**。这句话让用户以为 callback 已触发，实际你根本没调 curl 就结束了会话。修法：curl 先行，拿到 200 再说话。
 - ❌ Phase C callback 失败后伪装成已完成结束会话
 - ❌ 在 outline 已确认后的 Phase B 又改 outline 条数
