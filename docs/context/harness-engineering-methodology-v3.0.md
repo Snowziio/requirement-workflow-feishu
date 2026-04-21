@@ -536,4 +536,496 @@ REQ ID 的穿透使任意工件可以反向追溯到：该工件由哪条 REQ �
 
 ---
 
-<!-- §五 及后续章节由 Task 5–12 填写 -->
+## §五 Project 寿命层
+
+> **层归属**：Project 寿命层——位于需求寿命层之前，承载项目从 0 到 1 的生命周期管理。
+
+---
+
+### §5.1 使命
+
+Project 寿命层是 harness 方法论中**项目生命周期的起点**。其使命：通过一次显式、幂等、可审计的 **Bootstrap**（本方法论独创，定义见附录 A）事件，完成项目的首次创建——建立 GitHub 仓库骨架、飞书 ARCHITECTURE 文档（Architecture Snapshot 的 Construction-phase SOT）、飞书协作群，并写入 Project-level Guides 与 Invariants 的初始骨架。所有后续 REQ（Requirement / Planning / Spec 链路）必须挂靠在一个状态为 `PROVISIONED` 的 Project 上。项目级上下文的后续演化不通过 Bootstrap 重跑，而是由 REQ 驱动——经规划层 Planning Approval Gate 授权后写回。
+
+---
+
+### §5.2 输入
+
+#### A. 上下文输入
+
+无——Project 寿命层是整个方法论的起点，无上游层可继承上下文。
+
+#### B. 人类决策点
+
+| # | 决策点 | 触发载体 | 说明 |
+|---|---|---|---|
+| 1 | **项目创建启动** | `/create project <name> --category <c> --owner <uid>` CLI 命令 | 人类显式触发，无前置 gating；加入 bot 的飞书用户均可执行 |
+| 2 | **项目元数据录入** | CLI 参数 | 名称（`^[a-z][a-z0-9-]{2,30}$`，全局唯一）、技术栈分类（`category`：`enterprise-app` / `enterprise-bot` / `miniprogram` / `public-web-site` / `saas-ai-automation`）、归属人（飞书 `open_id`） |
+
+Bootstrap 过程本身无人工决策点——7 步全自动执行；失败时以固化卡片提示断点，人工执行 `/create project --resume <name>` 续跑。
+
+---
+
+### §5.3 2×3 矩阵增量（Project 寿命层产出）
+
+| | Project-level | REQ-level |
+|---|---|---|
+| **Guides（约束集）** | **create**: Tech Stack Declaration（本方法论独创，定义见附录 A）/ CLAUDE.md 行为规则 / Architecture Snapshot 骨架（飞书 ARCHITECTURE docx）/ External Integration（本方法论独创，定义见附录 A）（IM 平台集成条目写入 ARCHITECTURE docx） | N/A |
+| **Sensors（偏离检测集）** | N/A | N/A |
+| **Invariants（不变量）** | **create**: Known Constraint（KC）初始集（若 category 模板预置；写入 ARCHITECTURE docx `known_constraints` 节） | N/A |
+
+**说明**：
+- Bootstrap 只负责**首次 create**——骨架占位，无需在 0 需求阶段做技术选型
+- Architecture Snapshot 骨架建于飞书 ARCHITECTURE docx（Construction-phase SOT）；首份 GitHub `docs/ARCHITECTURE.md` 副本由首个 plan READY 同步产出，避免空镜像（见 §3.5 时相分段约定）
+- Tech Stack Declaration 以 `ProjectConfig.tech_stack` 字段持久化于 Coordinator Service 存储；category 决定骨架内容
+- Bootstrap 不产出任何 REQ-level 条目，REQ-level 列全为 N/A
+
+---
+
+### §5.4 状态机
+
+#### 状态集
+
+| 状态 | 含义 | 可挂 REQ | MVP 实现 |
+|---|---|---|---|
+| `UNBOOTSTRAPPED` | 逻辑态；`project_configs` 无行即视为此态（不持久化） | ❌ | ✅（隐式） |
+| `BOOTSTRAPPING` | `/create project` 已触发，Bootstrap 7 步进行中 | ❌ | ✅ |
+| `PROVISIONED` | Bootstrap 全部成功，项目可挂 REQ | ✅ | ✅ |
+| `ARCHIVED` | 冻结；`project/req-registry.yaml` 只读；拒收新 REQ | ❌ | ❌（Phase 2） |
+| `DECOMMISSIONED` | 退役终态；repo 物理删除 + 群解散 + Bitable 行软删 | ❌ | ❌（Phase 2） |
+
+> **MVP 实现范围**：前三态（`UNBOOTSTRAPPED` / `BOOTSTRAPPING` / `PROVISIONED`）；`ARCHIVED` 和 `DECOMMISSIONED` 留 Phase 2。
+
+#### 事件集与转移规则
+
+| 当前状态 | 事件 | 目标状态 |
+|---|---|---|
+| `UNBOOTSTRAPPED` | `/create project` CLI 命令 | `BOOTSTRAPPING` |
+| `BOOTSTRAPPING` | 7 步全部成功 | `PROVISIONED` |
+| `BOOTSTRAPPING` | `/create project --resume <name>`（从断点续跑） | `BOOTSTRAPPING`（幂等重入） |
+| `PROVISIONED` | `/archive project`（Phase 2） | `ARCHIVED` |
+| `ARCHIVED` | `/decommission project`（Phase 2） | `DECOMMISSIONED` |
+
+**无"回退"路径**：失败 = 保留已完成步骤状态，`--resume` 续跑；不回退到 `UNBOOTSTRAPPED`。超过 24 小时未推进到 `PROVISIONED` → 群内自动告警卡。
+
+#### Bootstrap 7 步（每步幂等，`--resume` 可续跑）
+
+| 步 | 标识符 | 动作 | 产出 / 幂等方式 |
+|---|---|---|---|
+| 1 | `VALIDATE` | 校验输入（name 正则 + 全局唯一性；category 合法；owner 非空） | 无副作用；纯检查；失败不写任何状态 |
+| 2 | `UPSERT_CONFIG` | Upsert `project_configs` 行，`bootstrap_status=BOOTSTRAPPING` | 按 project 主键 upsert；已有行则更新，不报错 |
+| 3 | `CREATE_REPO` | 从 Template 仓库生成 `Snowziio/{project}` GitHub repo | repo 已存在则跳过（`get_repo` 探测） |
+| 4 | `POPULATE_MAIN` | 一次 commit 到 main，渲染并写入所有 per-project 文件（`docs/ARCHITECTURE.md` / `CLAUDE.md` / `SKILL.md` / `project/req-registry.yaml` / `project/environments.yaml` / `project/SECRETS-TODO.md` 等） | 按文件 SHA 对比，缺则补，已存在则跳过 |
+| 5 | `CREATE_ARCHITECTURE_DOC` | 创建飞书 ARCHITECTURE docx（Construction-phase SOT），写入 category 渲染后的骨架内容；回写 `architecture_doc_id` / `architecture_doc_url` | 若 `architecture_doc_id` 已有则跳过 |
+| 6 | `CREATE_FEISHU_GROUP` | 创建飞书协作群，拉入 owner + 机器人 | 若 `feishu_chat_id` 已有则跳过 |
+| 7 | `FINALIZE` | `bootstrap_status=PROVISIONED`；群内发欢迎卡；进度卡更新为"全部绿" | 终态标记 |
+
+每步执行后 append 一条 `bootstrap_log` 条目（`{step, ts, status, error_msg}`），支持断点可视化与续跑定位。
+
+---
+
+### §5.5 Hook 装配
+
+Bootstrap 7 步以顺序过程式方式执行（非状态机 onEnter / onExit 分派），每步对应一个幂等 Hook 实现：
+
+| 步骤 | Hook 实现 | 调用能力层 |
+|---|---|---|
+| VALIDATE | `bootstrap_hooks.validate_input(name, category, owner)` | 无（纯本地校验） |
+| UPSERT_CONFIG | `bootstrap_hooks.upsert_project_config(project, category, owner)` | Coordinator Service 存储（Bitable `project_configs`） |
+| CREATE_REPO | `bootstrap_hooks.create_repo_from_template(project)` | GitHub API（Template Generate `POST /repos/Snowziio/Template-repository/generate`） |
+| POPULATE_MAIN | `bootstrap_hooks.populate_main_branch(project, category)` | GitHub API（`commit_files` primitive，单次 commit 到 main） |
+| CREATE_ARCHITECTURE_DOC | `bootstrap_hooks.create_architecture_document(project, category)` | Feishu API（创建 docx + 写入渲染骨架） |
+| CREATE_FEISHU_GROUP | `bootstrap_hooks.create_feishu_group(project, owner)` | Feishu API（建群 + 拉人 + 拉机器人） |
+| FINALIZE | `bootstrap_hooks.finalize(project)` | Coordinator Service 存储（更新 `bootstrap_status=PROVISIONED`）+ Feishu API（发欢迎卡、更新进度卡） |
+
+**Coordinator Service 在 Bootstrap 触发后**派发一个进度卡片，Bootstrap 推进时实时更新卡片状态；全部成功后卡片变绿，失败时卡片变红并显示断点步骤与 `--resume` 提示。
+
+---
+
+### §5.6 能力层绑定
+
+| 能力层 | 角色 | 绑定环节 |
+|---|---|---|
+| **Coordinator Service** | Workflow Service；接收 `/create project` CLI 命令，解析参数，顺序编排 Bootstrap 7 步，持久化 `project_configs` 状态 | 全程驻留；Bootstrap 入口与 FINALIZE 均由 Coordinator Service 发起 |
+| **Feishu API** | 外部 API；创建飞书 ARCHITECTURE docx（Step 5）+ 创建协作群并拉入成员（Step 6）+ 发送进度卡片与欢迎卡（Step 7） | Steps 5 / 6 / 7 |
+| **GitHub API** | 外部 API；从 Template 仓库 Generate 新 repo（Step 3）+ 单次 commit populate per-project 文件（Step 4） | Steps 3 / 4 |
+
+> Project 寿命层的 Bootstrap 不使用 OpenClaw Agent——Bootstrap 是纯编排性质的流程（validate + create），无需 AI 推理能力。后续项目级上下文的演化（如 ARCHITECTURE 更新）由规划层 plan-author Agent 经 Planning Approval Gate 授权后执行，见 §6.2。
+
+---
+
+### §5.7 完成标准 & 失败回退
+
+#### 完成标准
+
+Bootstrap 成功的判定条件（全部满足才视为 `PROVISIONED`）：
+
+1. `bootstrap_status == PROVISIONED`（`project_configs` 行已写入）
+2. `project_configs` 行已落地，含 `tech_stack` / `category` / `feishu_chat_id` / `architecture_doc_id` / `github_repo_url`
+3. 飞书 ARCHITECTURE docx 已建（空骨架），`architecture_doc_id` / `architecture_doc_url` 已回写
+4. GitHub repo（`Snowziio/{project}`）已从 Template 仓库生成，per-project 文件已 populate 到 main
+5. 飞书协作群已建，owner + 机器人均已入群，`feishu_chat_id` 已回写
+
+#### 失败回退
+
+- 任一步失败 → `bootstrap_status` 保持 `BOOTSTRAPPING`（不推进、不回退）
+- `bootstrap_log` 记录断点步骤 + 错误信息；进度卡片变红并显示断点
+- 人工排查后执行 `/create project --resume <name>` → 从最后成功步+1 开始续跑（每步入口先做幂等检查）
+- 24 小时内未推进到 `PROVISIONED` → 群内自动发告警卡
+- 没有自动回退路径——已完成步骤的副作用（如已建 GitHub repo）通过幂等跳过保留，不尝试撤销
+
+#### 演化说明
+
+Bootstrap 只负责项目级上下文的**首次创建**。后续 Project-level 条目的演化（Architecture Snapshot / Known Constraint / External Integration 的增量变更）由规划层 Planning Approval Gate（D-PLAN-1）驱动，详见 §6.2。Bootstrap 不重跑，项目级资产的变更路径唯一：REQ → plan-author → `project_context_change` 信封 → Planning Approval Gate 授权 → 写回飞书 ARCHITECTURE docx。
+
+---
+
+## §六 需求寿命层 · 构造期
+
+需求寿命层·构造期（§六）含三个子层：**§6.1 需求层**、**§6.2 规划层**、**§6.3 规格层**。三层按顺序承接客户输入、产出机器可解析规格，并在构造期以飞书为 SOT（单一可信源）——在 §6.3 的冻结点（freeze-point）才向 GitHub 单向同步（详见 §四）。
+
+---
+
+### §6.1 需求层（Requirement Layer）
+
+#### §6.1.1 使命
+
+将模糊的客户需求转化为经 **Requirement Dual Gate**（D-REQ-1）双路确认的结构化 **Requirement Doc**（8 字段固定格式），形成 REQ-level Guides 起点，并在正式审查（D-REQ-2）通过后以 `APPROVED` 状态移交规划层。全过程约 80 字概括：客户模糊描述 → author 多轮 IM 补全 → AI 审查 + 人工确认双路闸门 → 正式审查卡片 → APPROVED Requirement Doc。
+
+#### §6.1.2 输入
+
+**A. 上下文（只读，Project-level 全集）**
+
+| 条目 | 类型 | 说明 |
+|---|---|---|
+| Tech Stack | Project-level Guide | 技术选型约束，供 author 字段补全参考 |
+| Architecture Snapshot | Project-level Guide | 当前架构快照（飞书 ARCHITECTURE docx），需求层只读 |
+| Known Constraints | Project-level Invariant | 不可逾越约束清单 |
+| Design System | Project-level Guide | UI 组件规范，`needs_ui = true` 时 author 参考 |
+
+**B. 决策点（本层触发）**
+
+| ID | 名称 | 类型 | 说明 |
+|---|---|---|---|
+| **D-REQ-1** | **Requirement Dual Gate** | 复合决策点（AI Ready + Human Confirmed） | 两道独立准入门，分别记录、分别失败、分别追溯；任一门失败回 `DRAFTING`，双路全绿方可进入 `FINAL_REVIEW` |
+| **D-REQ-2** | **Requirement Final Review** | 人工审查决策点 | 在项目群发正式审查卡片，项目干系人参与判断；通过 → `APPROVED`；打回 → 回 `DRAFTING` |
+
+#### §6.1.3 2×3 矩阵增量
+
+| | Project-level | REQ-level |
+|---|---|---|
+| Guides | N/A | **create**: Requirement Doc（8 字段） |
+| Sensors | N/A | N/A |
+| Invariants | N/A | N/A |
+
+> **说明**：需求层仅消费 Project-level 条目（只读），不新增或修改 Project-level cell。REQ-level Guides 增量为本层首次创建的 Requirement Doc；Sensors（偏离检测集）与 Invariants 在本层均无新增条目。
+
+#### §6.1.4 状态机
+
+**6 态状态机**：
+
+```
+CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROVED
+                   ↑___________↙              ↑___________↙       ↑________↙
+                （AI 退回）              （人工打回）        （审查打回，回 DRAFTING）
+```
+
+**状态说明**：
+
+| 状态 | 含义 |
+|---|---|
+| `CREATED` | REQ 已创建，尚未开始起草 |
+| `DRAFTING` | author Agent 正在 IM 多轮补全字段 |
+| `AI_REVIEW` | reviewer Agent 执行 AI 审查；AI Ready 子位在此阶段写入 |
+| `HUMAN_CONFIRM` | 人工确认阶段；Human Confirmed 子位在此阶段写入 |
+| `FINAL_REVIEW` | 正式审查卡片已推送；需等待干系人通过 |
+| `APPROVED` | 双路全绿且正式审查通过；Requirement Doc 冻结，移交规划层 |
+
+**Requirement Dual Gate（D-REQ-1）细节**：AI Ready 与 Human Confirmed 两道门独立记录、独立失败、独立追溯。任意一道门失败均回退 `DRAFTING`，两道门之间不相互污染。双路全绿是进入 `FINAL_REVIEW` 的必要条件。
+
+#### §6.1.5 Hook 装配
+
+| 事件 | Hook | 动作 |
+|---|---|---|
+| `onEnter(DRAFTING)` | Coordinator Service | 派发 `requirement-author`（OpenClaw Skill），在 author 私聊中开始字段补全 IM 多轮 |
+| `onEnter(AI_REVIEW)` | Coordinator Service | 派发 `requirement-reviewer`（OpenClaw Skill），执行 AI 审查并写回 `ai_ready` 标志位 |
+| `onEnter(FINAL_REVIEW)` | Coordinator Service | 向项目群推送正式审查卡片，触发 D-REQ-2 人工决策流 |
+| `onExit(FINAL_REVIEW)` | Checkpoint Handler | 将最终 `status`（`APPROVED` 或回退态）写回飞书 Bitable，更新 REQ 状态字段 |
+
+#### §6.1.6 能力层绑定
+
+**OpenClaw Skill**：
+
+| Skill | 触发时机 | 职责 |
+|---|---|---|
+| `requirement-author` | `onEnter(DRAFTING)` | IM 多轮交互补全 Requirement Doc 8 字段；section-level 幂等写回飞书 docx |
+| `requirement-reviewer` | `onEnter(AI_REVIEW)` | 审查 Requirement Doc 完整性与质量；写回 `ai_ready` 标志；判定失败时触发 DRAFTING 回退 |
+
+**外部 API**：
+
+| API | 用途 |
+|---|---|
+| 飞书 docx（section-level 幂等重写） | Requirement Doc 的 8 个 section 各自幂等更新，禁止全删重建 |
+| 飞书 Bitable | REQ 状态字段写回（`onExit(FINAL_REVIEW)` 钩子驱动） |
+
+#### §6.1.7 完成标准 & 失败回退
+
+**完成标准**：
+
+- `status == APPROVED`
+- Requirement Dual Gate（D-REQ-1）双路全绿：`ai_ready = true` 且 `human_confirmed = true`
+- Requirement Final Review（D-REQ-2）通过：正式审查卡片干系人确认
+
+**失败回退**：
+
+- D-REQ-1 任一路失败（AI 退回 或 人工打回）→ 状态回 `DRAFTING`；两路独立，不互相污染
+- D-REQ-2 打回（正式审查未通过）→ 状态回 `DRAFTING`
+
+**需求文档格式约束**：
+
+- 8 个固定 section：问题描述 / 使用场景 / 输入 / 输出 / 边界 / 验收标准 / 非功能要求 / 技术范围声明
+- 更新模式：section-level 幂等重写（禁止全删重建）
+- 输入/输出字段规范：须到字段名 + 类型 + 约束粒度，不接受纯自然语言描述
+- 验收标准格式：可测试断言（给定输入 → 期望输出 → 判断方式）
+
+**UI 两阶段模型**（`needs_ui = true` 时）：
+
+- **第一阶段（低保真线框）**：`onEnter(HUMAN_CONFIRM)` 时生成，辅助 author 判断 AI 是否理解需求方向
+- **第二阶段（高保真可运行原型）**：归并至规划层 DesignStatus（详见 §6.2），在 REQ APPROVED 后、Spec 生成前独立执行；确认后设计决策 append 进项目设计系统文档
+
+---
+
+### §6.2 规划层（Planning Layer）
+
+#### §6.2.1 使命
+
+把「怎么做的决策」从规格层剥离，分两步完成：先由 `design-author` 在 IM 多轮交互中产出 UI/交互设计（`needs_ui = true` 时激活）；再由 `plan-author` 产出结构化 **Plan**（多决策 + 可选 **`project_context_change` 块**（本方法论独创，定义见附录 A）——`project_context_change` 是 plan.md 中承载项目级制品变更请求的信封字段，含 `changes[]` 数组与授权位）。规划层是 **Project-level Architecture Snapshot 演化的唯一主通道**——规格层只读消费架构，增量演化权限归属本层的 **Planning Approval Gate**（本方法论独创，定义见附录 A）授权闸门。构造期全程以飞书文档为 SOT，`PlanStatus → READY` 时单向同步至 GitHub（详见 §四）。
+
+#### §6.2.2 输入
+
+**A. 上下文（只读）**
+
+| 条目 | 类型 | 说明 |
+|---|---|---|
+| Architecture Snapshot | Project-level Guide | 飞书 ARCHITECTURE docx（构造期 SOT）；判断是否需要 `project_context_change` 的基准 |
+| Known Constraints | Project-level Invariant | 不可逾越约束清单 |
+| Tech Stack | Project-level Guide | 技术选型约束 |
+| Design System | Project-level Guide | UI 组件规范，`needs_ui = true` 时 design-author 参考 |
+| Requirement Doc | REQ-level Guide | 8 字段结构化需求文档（§6.1 产出），只读 |
+
+**B. 决策点（本层触发）**
+
+| ID | 名称 | 类型 | 说明 |
+|---|---|---|---|
+| **D-PLAN-1** | **Planning Approval Gate**（同上，见附录 A） | 项目级上下文变更人工授权决策点 | 仅当 `plan.project_context_change != None` 时触发；授权人确认 before/after diff 后方可推进 `READY`；驳回则退回 `DRAFTING` |
+| **D-PLAN-2** | **Plan Final Approval**（本方法论独创，定义见附录 A） | 人工定稿决策点 | plan-author 产出完整 plan 后推送定稿预览卡，干系人确认方可触发 `PLAN_SUBMIT`；驳回则继续 DRAFTING 多轮 |
+
+#### §6.2.3 2×3 矩阵增量
+
+| | Project-level | REQ-level |
+|---|---|---|
+| Guides | **amend**: Architecture Snapshot / AI Integration / External Integration（经 `project_context_change` 块授权后，`onEnter(PlanStatus.READY)` hook 原子同步） | **create**: Plan（结构化 Decisions）/ Design Artifact（`needs_ui = true` 时） |
+| Sensors | N/A | N/A |
+| Invariants | **amend**: Known Constraint（若 `project_context_change` 涉及约束变更） | N/A |
+
+> **说明**：规划层是本方法论中**唯一允许修改 Project-level Guides 的构造期子层**。Project-level amend 须经 D-PLAN-1 Planning Approval Gate 授权，授权通过后由 `onEnter(PlanStatus.READY)` 钩子原子同步飞书 ARCHITECTURE 增量与 plan 到 GitHub 同一 commit；未涉及项目级变更时 `project_context_change == None`，PlanStatus 跳过 AUTH_PENDING 直达 READY。规划层 Sensors（偏离检测集）与 REQ-level Invariants 均无新增条目。
+
+#### §6.2.4 状态机
+
+**Parallel Sub-State Tracks**（本方法论独创，定义见附录 A）——三列状态（DesignStatus / PlanStatus / SpecStatus）在同一 REQ 内独立并行推进，列间由 Coordinator 前置条件检查阻塞，而非合并为单一状态机：
+
+```
+DesignStatus：null → DRAFTING → READY              （仅 needs_ui=true 时激活；DesignStatus 列独立推进，完成后作为 PlanStatus 启动前置条件，不在本层展开）
+PlanStatus：  null → DRAFTING → [AUTH_PENDING →] READY
+SpecStatus：  null → DRAFTING → TRANSFORMING → LOCKED
+                     ↑ DesignStatus=READY 才进入   ↑ PlanStatus=READY 才进入
+```
+
+**PlanStatus 事件**：
+
+| 事件 | 触发条件 | 状态转移 |
+|---|---|---|
+| `PLAN_START` | REQ APPROVED（`needs_ui=false`）或 DesignStatus=READY | null → DRAFTING |
+| `PLAN_SUBMIT` | D-PLAN-2 定稿卡片干系人确认通过（plan-author 产出完整 plan 后推送） | DRAFTING → AUTH_PENDING（若 `project_context_change != None`）或直接 → READY |
+| `PLAN_AUTHORIZE` | D-PLAN-1 人工授权通过 | AUTH_PENDING → READY |
+| `PLAN_AUTHORIZATION_REJECT` | D-PLAN-1 人工驳回 | AUTH_PENDING → DRAFTING |
+| `PLAN_RESTART` | `/plan restart` CLI 命令 | 任意 → null（级联 reset SpecStatus） |
+
+`plan_phase` 字段（OUTLINE_PENDING / OUTLINE_CONFIRMED / DECISIONS_IN_PROGRESS / FINAL_REVIEW_PENDING / FINAL）是 DRAFTING 子状态的内部推进字段，由 plan-author 回调直接写入，**不走状态机 apply_event**。
+
+#### §6.2.5 Hook 装配
+
+| 事件 | Hook | 动作 |
+|---|---|---|
+| `onEnter(PlanStatus.DRAFTING)` | Coordinator Service | 派发 `plan-author`（OpenClaw Skill），在 author 私聊中启动骨架-深入-定稿三阶段 IM 交互 |
+| `onEnter(PlanStatus.AUTH_PENDING)` | Coordinator Service | 向项目群推送 Planning Approval Gate 授权卡片（D-PLAN-1），展示 `project_context_change.changes[]` before/after diff；卡片按钮：**授权** / **驳回** |
+| `onEnter(PlanStatus.READY)` | Checkpoint Handler | 原子同步：读取冻结飞书 plan docx → 渲染 `plans/<req_id>.md`；若 `project_context_change != None` 同时渲染更新后飞书 ARCHITECTURE docx → `docs/ARCHITECTURE.md`；二者共享同一 GitHub commit；任何一步失败抛 `ProjectRepoError(recoverable=True)`（Coordinator Service 内部可恢复错误类型；`recoverable=True` 表示人工可触发重试而非直接降级，见附录 A），退回 AUTH_PENDING 并推失败卡片 |
+| `onExit(PlanStatus.READY)` | Coordinator Service | 解除 SpecStatus 前置锁：设置 `spec_precondition_met = true`，SpecStatus 进入 DRAFTING 可用 |
+
+#### §6.2.6 能力层绑定
+
+**OpenClaw Skill**：
+
+| Skill | 触发时机 | 职责 |
+|---|---|---|
+| `plan-author` | `onEnter(PlanStatus.DRAFTING)` | 三阶段交互（骨架 → 深入 → 定稿）产出结构化 Plan；按 IM 交互实时写入飞书 plan docx；产出 `project_context_change` 块（若需架构演化） |
+| `design-author` | `onEnter(DesignStatus.DRAFTING)`（`needs_ui=true`） | 多轮 IM 产出 UI/交互设计产物；落飞书 design 子目录；DesignStatus → READY 是 PlanStatus 启动的前置条件 |
+
+> **实装状态**：`plan-author` 已实装；`design-author` 当前为 stub，待 claude design 能力落地后激活。
+
+**外部 API**：
+
+| API | 用途 |
+|---|---|
+| 飞书 docx（plan doc，per-REQ） | plan-author 三阶段实时写入；`onEnter(PlanStatus.READY)` hook 读取冻结版本渲染为 GitHub plan.md |
+| 飞书 docx（ARCHITECTURE，Project-level） | 授权通过后 plan-author 按 `project_context_change.changes[]` 增量更新；`onEnter(PlanStatus.READY)` hook 读取冻结版同步到 GitHub |
+| GitHub API | `onEnter(PlanStatus.READY)` hook 原子写入 `plans/<req_id>.md` + 可选 `docs/ARCHITECTURE.md`（同一 commit） |
+
+#### §6.2.7 完成标准 & 失败回退
+
+**完成标准**：
+
+- `PlanStatus == READY`
+- plan 飞书文档已冻结（内容固化，不再接受编辑）
+- 若 `project_context_change != None`：D-PLAN-1 Planning Approval Gate 已通过（`authorized == true`，含授权人与时间）；飞书 ARCHITECTURE docx 已按 `changes[]` 增量更新；原子同步已完成（`plan_github_revision` + `architecture_github_revision` 均已写回审计字段）
+
+**失败回退**：
+
+- **Cascading Reset**（本方法论独创，定义见附录 A）——`/plan restart` → PlanStatus 重置为 null，**级联** SpecStatus → null；确认卡片列出将清理的下游产物
+- `/design restart` → DesignStatus → null，**级联** PlanStatus → null，**级联** SpecStatus → null；确认卡片同上
+- D-PLAN-1 驳回（`PLAN_AUTHORIZATION_REJECT`） → PlanStatus 退回 DRAFTING，`plan_phase = FINAL_REVIEW_PENDING`；plan-author 被重新拉起并带上驳回意见
+- `onEnter(PlanStatus.READY)` 同步失败 → 钩子抛 `ProjectRepoError(recoverable=True)`，PlanStatus 退回 AUTH_PENDING，推送失败卡片让人决定重试 / 驳回 / restart
+
+**Plan 文件格式**：YAML frontmatter + Decisions 正文（结构化多决策）+ 可选 `project_context_change` 块。完整 schema 见 `layers/planning-harness-layer.md §三`。
+
+**三阶段交互模式**：骨架（OUTLINE）→ 深入（DECISIONS_IN_PROGRESS）→ 定稿（FINAL）。骨架阶段先对齐 decision 清单范围，避免直接写细节的浪费；深入阶段逐个 decision 多轮对话产出 alternatives + rationale；定稿阶段一次性产出完整 plan 供人 final approve（即 D-PLAN-2 Plan Final Approval）。
+
+---
+
+### §6.3 规格层（Spec Layer）
+
+#### §6.3.1 使命
+
+将「规划层已定决策」+「Requirement Doc」翻译为「让生成层能够自驱 coding 的 **Spec Artifacts**（本方法论独创，定义见附录 A）三元组」——即 `design.md`（Guides）/ `ac-schedule.yaml`（Sensors）/ `design.md` `supersedes` 节 + `acm-registry.yaml` patch（Invariants）。飞书 9 节 Spec（Stage 1）不是本层终端交付物，而是「人-AI 协作协议」；**Checkpoint 1a**（本方法论独创，定义见附录 A；即 D-SPEC-1 Design Gate，本层唯一人工决策点）通过后，Stage 2 的 Spec Artifacts 才是下游消费对象。规格层**不做决策**，只翻译决策——所有「怎么做」的决策由规划层（§6.2）的 Plan 承载，spec-author 的职责是引用 `decision_id` 并将其翻译为工程契约，而非重新推理。
+
+> **关键架构说明**：v3.0 起规格层**不再演化 Architecture Snapshot**——演化主通道由规划层（§6.2）经 `project_context_change` 块 + Planning Approval Gate + `onEnter(PlanStatus.READY)` 钩子单向同步承担（见 §6.2.1 / §6.2.5）。规格层**只读消费** `docs/ARCHITECTURE.md`（实施期 GitHub SOT）。v2.6 的 `context_token + revision` 并发写回协议**整套退出**，由 §3.5 时相分段 Freeze Point 单向同步替代。
+
+#### §6.3.2 输入
+
+**A. 上下文（只读）**
+
+| 条目 | 类型 | 说明 |
+|---|---|---|
+| Architecture Snapshot | Project-level Guide | 实施期只读：`docs/ARCHITECTURE.md`（GitHub SOT）；规格层不演化此制品，见 §6.3.1 关键架构说明 |
+| ACM Registry | Project-level Invariant | `acm-registry.yaml`——全局 AC 注册表；Stage 2 读取 `acm_active_slice` 作为 Round 0 AC 认领基准 |
+| Design System Snapshot | Project-level Guide | UI 组件规范快照；`needs_ui = true` 时 spec-author 参考 |
+| Requirement Doc | REQ-level Guide | 8 字段结构化需求文档（§6.1 产出），只读 |
+| Plan | REQ-level Guide | 构造期读飞书 Plan docx（Stage 1）；Stage 2 读 `plans/<req_id>.md`（GitHub SOT）；spec-author 以 `decision_id` 引用决策，不重新推理 |
+| Design Artifact | REQ-level Guide | `needs_ui = true` 时由规划层 design-author 产出的高保真设计产物；SpecStatus 启动前置条件之一（见 §6.2.4） |
+
+**B. 决策点（本层触发）**
+
+| ID | 名称 | 类型 | 说明 |
+|---|---|---|---|
+| **D-SPEC-1** | **Checkpoint 1a · Design Gate** | 人工审查决策点（方案门） | 技术负责人在项目群卡片确认 9 节飞书 Spec 的设计方案、ACM 条目、`supersedes` 声明、架构接合点；通过 → 冻结飞书 Spec + 捕获 `spec_source_revision` + 进入 `SPEC_TRANSFORMING`；驳回 → `SPEC_REJECTED`（仅留档，不回退需求层） |
+
+#### §6.3.3 2×3 矩阵增量
+
+| | Project-level | REQ-level |
+|---|---|---|
+| Guides | N/A（**只读**消费，规格层不再演化 Architecture Snapshot，见 §6.3.1） | **create**: Spec Stage 1（飞书 9 节 Spec，构造期 SOT，Checkpoint 1a 冻结）→ Spec Artifacts（`design.md` / `tasks.md`，由 Spec Transformation Loop 产出） |
+| Sensors | N/A | **create**: `ac-schedule.yaml`（本 REQ AC 排班，声明式 `expected` + harness 骨架组合构成可执行 Sensors） |
+| Invariants | **amend**: ACM Registry（`acm-registry.yaml` patch，`SPEC_LOCKED` 时由 Coordinator 原子写入） | **create**: `design.md` `supersedes` 节（声明本 REQ 取代的历史 AC，防止生成层越界触碰既有契约） |
+
+> **说明**：规格层在 Project-level 维度**仅修改 ACM Registry**（通过 Spec PR 原子 patch，不经 Planning Approval Gate）；Architecture Snapshot 演化权限属于规划层（§6.2），本层只读。Sensors（偏离检测集）仅在 REQ-level 新增 `ac-schedule.yaml`；Project-level Sensors 无新增条目。
+
+#### §6.3.4 状态机（Spec 子状态机）
+
+Spec 子状态机是需求层 6 态机的下挂子状态，仅在 `requirement.status == APPROVED` 时生效；与需求层正交，Spec 驳回或中止**不会**回写 `requirement.status`。三列 **Parallel Sub-State Tracks**（定义见附录 A；DesignStatus / PlanStatus / SpecStatus 同一 REQ 内独立并行推进）中，SpecStatus 须等待 `PlanStatus == READY` 才可从 null 进入 DRAFTING（见 §6.2.4）。
+
+```
+                 spec_start
+      null ─────────────────────► SPEC_DRAFTING
+       ▲                            │   ▲
+       │                            │   │  ai_review_reject
+       │                            │   └──────────────────── (留在 SPEC_DRAFTING)
+       │                  ai_review_pass
+       │                            ▼
+       │                    （等待 Checkpoint 1a 卡片）
+       │         checkpoint_1a_pass │     (捕获 spec_source_revision)
+       │                            ▼
+       │              SPEC_TRANSFORMING ◄───┐ transform_deadlock
+       │                            │      │ （自循环：写人工工单，
+       │                            │      │  不回退 SPEC_DRAFTING）
+       │                            ├──────┘
+       │                 transform_converged
+       │                            ▼
+       │                      SPEC_LOCKED ──► 进入 Harness 层（§7.1）
+       │
+       │         checkpoint_1a_reject / spec_abort
+       └──────────────────── SPEC_REJECTED
+                                 （仅作历史留档，不回退需求层状态；
+                                  需人工决定是否重启 spec_start）
+```
+
+**`transform_deadlock`**（自循环事件）：当 **Spec Transformation Loop**（本方法论独创，定义见附录 A；指 `SPEC_TRANSFORMING` 内 spec-transformer → Computational gate → spec-transformer-reviewer 的多轮迭代机制）达到 `max_rounds` 上限仍未 converge 时触发；状态留在 `SPEC_TRANSFORMING` 自循环，并写入人工工单，不回退 `SPEC_DRAFTING`（Checkpoint 1a 已有人工决策，回退会使技术负责人的确认结论失效）。
+
+**事件一览**：`spec_start` / `spec_submit` / `ai_review_pass` / `ai_review_reject` / `checkpoint_1a_pass` / `checkpoint_1a_reject` / `transform_converged` / `transform_deadlock` / `spec_abort` / `spec_restart`。
+
+#### §6.3.5 Hook 装配
+
+| 事件 | Hook | 动作 |
+|---|---|---|
+| `onEnter(SPEC_DRAFTING)` | Coordinator Service | 派发 `spec-author`（OpenClaw Skill）：创建飞书 9 节 Spec 文档、注入项目级上下文（Architecture Snapshot + ACM 切片 + 设计系统快照）、绑定 `req_id`，开始多轮 IM 撰写循环 |
+| `onExit(SPEC_DRAFTING on ai_review_pass)` | Coordinator Service | 向项目群推送 Checkpoint 1a 卡片（D-SPEC-1），展示设计方案摘要、ACM 条目、`supersedes` 声明、架构接合点；按钮：**确认提交** / **返回修改** |
+| `onEnter(SPEC_TRANSFORMING)` | Coordinator Service | 冻结飞书 Spec（捕获 `spec_source_revision`）→ 单向同步 9 节飞书文档至 `specs/<req_id>/spec.md`（GitHub）→ 捕获 `acm_active_slice` 作为 Round 0 基准 → 派发 `spec-transformer`（OpenClaw Skill）启动 Spec Transformation Loop |
+| `onEnter(SPEC_LOCKED)` | Checkpoint Handler | 原子发布 Spec Artifacts PR（四文件 + `transform_trace.jsonl`，单次 Git Data API commit）→ patch `acm-registry.yaml` → 写回审计字段（`spec_pr_url` / `spec_source_revision` / `transform_trace_digest`）→ 触发 §7.1 Harness 层进入前置检查 |
+
+#### §6.3.6 能力层绑定
+
+**OpenClaw Skill**：
+
+| Skill | 触发时机 | 阶段 | 职责 |
+|---|---|---|---|
+| `spec-author` | `onEnter(SPEC_DRAFTING)` | Stage 1 | 读飞书需求文档 + Plan + Architecture Snapshot + ACM 切片 → 以 `decision_id` 引用规划层决策 → 撰写飞书 9 节 Spec；幂等写回飞书 docx（section-level） |
+| `spec-reviewer` | `onExit(SPEC_DRAFTING)` 内循环 | Stage 1 | 按 9 节质量清单审查（覆盖率 / API 入出参精度 / supersedes 依据 / AC 格式）；Inferential signal；`ai_review_pass` / `ai_review_reject` |
+| `spec-transformer` | `onEnter(SPEC_TRANSFORMING)` | Stage 2 | Spec Transformation Loop 生成方：读 `specs/<req_id>/spec.md` + Plan + Architecture Snapshot → 产出四文件；每轮 payload 顶层附 `round_zero_ac_ids` 回显全部 AC |
+| `spec-transformer-reviewer` | 每轮 Computational gate 通过后 | Stage 2 | Spec Transformation Loop 评审方：5 维度审查四文件质量；Inferential signal；`transform_converged` / `transform_deadlock`（达 `max_rounds`） |
+
+> **凭据隔离**：所有 GitHub I/O 由 Coordinator Service 的 `GitHubGateway` 独占，Agent 只产文本；能力层替换零风险，凭据审计面收敛到单一进程。
+
+**外部 API**：
+
+| API | 用途 |
+|---|---|
+| 飞书 docx（9 节 Spec，per-REQ） | Stage 1：spec-author 幂等撰写；Checkpoint 1a 通过后冻结（只读） |
+| GitHub API（Git Data API） | Stage 2：`onEnter(SPEC_LOCKED)` 单次原子 commit 发布 Spec Artifacts PR（四文件 + `transform_trace.jsonl`）+ `acm-registry.yaml` patch |
+
+#### §6.3.7 完成标准 & 失败回退
+
+**完成标准**：
+
+- `SpecStatus == LOCKED`
+- Spec Artifacts PR 已合入（`design.md` / `tasks.md` / `ac-schedule.yaml` / harness 骨架）
+- `acm-registry.yaml` 已 patch（审计字段 `spec_pr_url` / `spec_source_revision` / `transform_trace_digest` 已写回）
+
+**失败回退**：
+
+- Stage 1 `ai_review_reject` → 留在 `SPEC_DRAFTING`，spec-author 迭代重写（人不感知）
+- Checkpoint 1a reject（`checkpoint_1a_reject`）→ `SPEC_REJECTED`（仅留档，**不回退需求层**；`requirement.status` 保持 `APPROVED`）
+- Stage 2 `max_rounds` 超限 → `transform_deadlock` 自循环 + 写人工工单（不回退 `SPEC_DRAFTING`；Checkpoint 1a 结论不失效）
+- `/spec restart` → 重置 `SpecStatus` 为 null（**不级联上游** PlanStatus / `requirement.status`）
+
+**四道工程闸门**（每道实现细节见 [`layers/spec-harness-layer.md §六`](layers/spec-harness-layer.md)）：
+
+| 闸门 | 位置 | 性质 | 作用 |
+|---|---|---|---|
+| **Round 0 AC 认领** | Spec Transformation Loop 起点（首轮前置） | 机械 | spec-transformer 必须逐条回显全部 AC-K（`round_zero_ac_ids`），堵住"漏 AC" |
+| **Computational gate** | 每轮 transformer → reviewer 之间 | 机械 | 预检 schema / tasks 正则 / supersedes / 路径一致性，节约 Inferential 预算 |
+| **transform_trace** | Spec Transformation Loop 全程 | 可观测性 | 每轮事件写入 `transform_trace.jsonl`，支撑 deadlock 诊断与回溯；`SPEC_LOCKED` 时 `sha256[:12]` 摘要落审计字段 |
+| **Regression scan** | `SPEC_LOCKED` 前 | 机械 | 扫描 `acm-registry` 有效 AC 是否全部被新骨架绑定，防止旧 AC 遗弃 |
+
+**闸门哲学**：Inferential signals 只用于 spec-reviewer（Stage 1）+ spec-transformer-reviewer（Stage 2）；Computational signals 前置所有 schema / 正则 / 路径一致性 / 回归扫描；Human signal 只保留 Checkpoint 1a（D-SPEC-1）。
+
+---
+
+<!-- §七 及后续章节由 Task 9–12 填写 -->
