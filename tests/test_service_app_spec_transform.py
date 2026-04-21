@@ -243,6 +243,52 @@ def test_runtime_wires_spec_orchestrator_when_github_token_set(tmp_path, monkeyp
     assert app.service._acm_registry is not None
 
 
+def test_runtime_wires_plan_syncer_when_github_token_set(tmp_path, monkeypatch):
+    """Phase 4-G: with github_token set, the runtime must wire a
+    FeishuToGitHubSyncer into configure_plan_hooks so on_enter(PlanStatus.READY)
+    freezes from the Feishu SOT instead of the legacy local audit copy."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    for key in ("all_proxy", "ALL_PROXY", "http_proxy", "HTTP_PROXY",
+                "https_proxy", "HTTPS_PROXY"):
+        monkeypatch.delenv(key, raising=False)
+    from requirement_workflow_v12.config import Settings
+    from requirement_workflow_v12.service_app import CoordinatorRuntimeApp
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    from requirement_workflow_v12.feishu_to_github_syncer import FeishuToGitHubSyncer
+    settings = Settings(
+        feishu_app_id="x", feishu_app_secret="y",
+        state_store_path=str(tmp_path / "state.json"),
+        github_token="ghp_test",
+        spec_trace_dir=str(tmp_path / "traces"),
+    )
+    svc = CoordinatorService()
+    gateway = MagicMock()
+    gateway.list_project_configs = MagicMock(return_value={})
+    app = CoordinatorRuntimeApp(settings, service=svc, gateway=gateway)
+    assert isinstance(app.service._plan_syncer, FeishuToGitHubSyncer)
+
+
+def test_runtime_leaves_plan_syncer_none_when_no_github_token(tmp_path):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from requirement_workflow_v12.config import Settings
+    from requirement_workflow_v12.service_app import CoordinatorRuntimeApp
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    settings = Settings(
+        feishu_app_id="x", feishu_app_secret="y",
+        state_store_path=str(tmp_path / "state.json"),
+        github_token="",
+    )
+    svc = CoordinatorService()
+    gateway = MagicMock()
+    gateway.list_project_configs = MagicMock(return_value={})
+    app = CoordinatorRuntimeApp(settings, service=svc, gateway=gateway)
+    assert getattr(app.service, "_plan_syncer", None) is None
+
+
 def test_runtime_leaves_spec_orchestrator_none_when_no_github_token(tmp_path):
     import sys
     from pathlib import Path

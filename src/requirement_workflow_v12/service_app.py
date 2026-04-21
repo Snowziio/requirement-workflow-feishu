@@ -189,6 +189,7 @@ class CoordinatorRuntimeApp:
             from pathlib import Path
             from .github_gateway import GitHubGateway
             from .project_repo import GitHubProjectRepoTools
+            from .feishu_to_github_syncer import FeishuToGitHubSyncer
             github_gateway = GitHubGateway(settings)
             self._github_gateway = github_gateway
             tools = GitHubProjectRepoTools(github_gateway)
@@ -199,6 +200,10 @@ class CoordinatorRuntimeApp:
                 trace_dir=trace_dir,
                 feishu=self.gateway,
             )
+            plan_syncer = FeishuToGitHubSyncer(
+                feishu=self.gateway, project_repo_tools=tools,
+            )
+            self.service.configure_plan_hooks(tools=tools, syncer=plan_syncer)
             if self._project_bootstrap_service is None:
                 from .project_bootstrap.service import ProjectBootstrapService
                 self._project_bootstrap_service = ProjectBootstrapService(

@@ -351,6 +351,19 @@ class FeishuGateway:
         response = self.client.docx.v1.document_block_children.create(request)
         self._ensure_success(response, "write document text")
 
+    def read_document_text(self, document_id: str) -> str:
+        """Return the plain-text content of a Feishu docx.
+
+        Used by freeze-point syncers (Feishu → GitHub) to read the
+        construction-phase SOT. Raises on SDK failure so callers can decide
+        whether to fall back to an audit copy.
+        """
+        LOGGER.info("Feishu read_document_text document_id=%s", document_id)
+        response = self.client.docx.v1.document.raw_content(document_id)
+        self._ensure_success(response, "read document text")
+        content = getattr(response.data, "content", None) or ""
+        return content
+
     def fetch_document_revision(self, document_id: str) -> str:
         """Return a revision marker for the document.
 
