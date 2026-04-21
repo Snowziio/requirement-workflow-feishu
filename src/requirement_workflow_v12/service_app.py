@@ -1565,8 +1565,22 @@ class CoordinatorRuntimeApp:
                 return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
             if requirement.status != WorkflowStatus.APPROVED:
                 return 200, {"toast": {"type": "error", "content": f"当前需求不处于 APPROVED 阶段（status={requirement.status.value}），不能启动 Plan 撰写。"}}
+            plan_doc_id = ""
+            plan_doc_url = ""
             try:
-                self.service.plan_start(req_id)
+                created = self.gateway.create_plan_document(requirement)
+            except Exception as exc:
+                LOGGER.warning("Failed to create Feishu plan document req_id=%s: %s", req_id, exc)
+                return 200, {"toast": {"type": "error", "content": "创建飞书 Plan 文档失败，请稍后重试。"}}
+            if created is not None:
+                plan_doc_id = created.document_id
+                plan_doc_url = created.document_url
+            try:
+                self.service.plan_start(
+                    req_id,
+                    plan_doc_id=plan_doc_id,
+                    plan_doc_url=plan_doc_url,
+                )
             except ValueError as exc:
                 return 200, {"toast": {"type": "error", "content": f"Plan 启动失败：{exc}"}}
             self._save_state()
@@ -2359,7 +2373,8 @@ class CoordinatorRuntimeApp:
             f"请私聊 {agent_name}，并发送以下完整上下文：\n\n"
             f"请开始 Plan 撰写 {requirement.req_id}\n"
             f"需求名称：{requirement.name}\n"
-            f"需求文档：{requirement.document_url or '（待同步）'}"
+            f"需求文档：{requirement.document_url or '（待同步）'}\n"
+            f"Plan 文档：{requirement.plan_doc_url or '（创建中）'}"
         )
 
     def _build_spec_author_handoff_text(self, requirement: Requirement) -> str:

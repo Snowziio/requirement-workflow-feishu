@@ -48,6 +48,30 @@ def test_plan_start_rejected_when_already_drafting():
         svc.plan_start(r.req_id)
 
 
+def test_plan_start_persists_plan_doc_id_and_url_when_provided():
+    svc = CoordinatorService()
+    r = _approved_req(svc)
+
+    result = svc.plan_start(
+        r.req_id,
+        plan_doc_id="docx-plan-abc",
+        plan_doc_url="https://feishu.example/docx/docx-plan-abc",
+    )
+
+    assert result.plan_doc_id == "docx-plan-abc"
+    assert result.plan_doc_url == "https://feishu.example/docx/docx-plan-abc"
+
+
+def test_plan_start_plan_doc_fields_default_empty_when_omitted():
+    svc = CoordinatorService()
+    r = _approved_req(svc)
+
+    result = svc.plan_start(r.req_id)
+
+    assert result.plan_doc_id == ""
+    assert result.plan_doc_url == ""
+
+
 from unittest.mock import MagicMock
 
 

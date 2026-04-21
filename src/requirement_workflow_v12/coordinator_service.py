@@ -792,7 +792,13 @@ class CoordinatorService:
 
     # ── PLANNING layer ──────────────────────────────────────────────────
 
-    def plan_start(self, req_id: str) -> Requirement:
+    def plan_start(
+        self,
+        req_id: str,
+        *,
+        plan_doc_id: str = "",
+        plan_doc_url: str = "",
+    ) -> Requirement:
         r = self.requirements[req_id]
         if r.status != WorkflowStatus.APPROVED:
             raise ValueError(
@@ -806,6 +812,8 @@ class CoordinatorService:
         self._hooks.fire_exit(prev, r)
         r.plan_status = decision.next_status
         r.plan_phase = PlanPhase.OUTLINE_PENDING
+        r.plan_doc_id = plan_doc_id
+        r.plan_doc_url = plan_doc_url
         self._hooks.fire_enter(r.plan_status, r)
         return r
 
