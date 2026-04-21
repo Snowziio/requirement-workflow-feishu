@@ -892,12 +892,22 @@ class CoordinatorService:
         self._hooks.fire_enter(r.plan_status, r)
         return r
 
-    def configure_plan_hooks(self, *, tools) -> None:
-        """Register PLANNING-layer hooks. Idempotent: safe to call twice."""
+    def configure_plan_hooks(self, *, tools, syncer=None) -> None:
+        """Register PLANNING-layer hooks. Idempotent: safe to call twice.
+
+        When ``syncer`` (a ``FeishuToGitHubSyncer``) is provided, the READY
+        hook reads plan.md from the Feishu SOT via the syncer and uses the
+        buffered ``pending_plan_draft.plan_md_content`` as audit fallback.
+        Without a syncer, the hook falls back to the legacy path that
+        commits ``pending_plan_draft.plan_md_content`` directly — used only
+        by tests that don't care about the Feishu seam.
+        """
         if getattr(self, "_plan_tools", None) is not None:
             self._plan_tools = tools
+            self._plan_syncer = syncer
             return
         self._plan_tools = tools
+        self._plan_syncer = syncer
         self._hooks.on_enter(
             PlanStatus.READY, self._commit_plan_and_maybe_architecture,
         )
@@ -912,15 +922,28 @@ class CoordinatorService:
         message_parts = [f"plan({r.req_id}): land plan.md"]
         if project_context_change is not None:
             message_parts.append("and apply project_context_change")
-        artifacts = PlanArtifacts(
-            project_repo=project_repo,
-            req_id=r.req_id,
-            plan_md_content=plan_md_content,
-            project_context_change=project_context_change,
-            commit_message=" ".join(message_parts),
-        )
-        result = self._plan_tools.commit_plan_artifacts(artifacts)
-        r.plan_pr_url = result.commit_sha
+        commit_message = " ".join(message_parts)
+
+        if getattr(self, "_plan_syncer", None) is not None:
+            sync_result = self._plan_syncer.sync_plan(
+                req_id=r.req_id,
+                project_repo=project_repo,
+                plan_doc_id=r.plan_doc_id,
+                project_context_change=project_context_change,
+                commit_message=commit_message,
+                fallback_plan_md=plan_md_content,
+            )
+            r.plan_pr_url = sync_result.commit_sha
+        else:
+            artifacts = PlanArtifacts(
+                project_repo=project_repo,
+                req_id=r.req_id,
+                plan_md_content=plan_md_content,
+                project_context_change=project_context_change,
+                commit_message=commit_message,
+            )
+            result = self._plan_tools.commit_plan_artifacts(artifacts)
+            r.plan_pr_url = result.commit_sha
         r.pending_plan_draft = None
 
     def _fetch_plan_md(self, req_id: str) -> str:

@@ -205,6 +205,77 @@ def test_on_enter_ready_commits_plan_and_clears_draft():
     assert artifacts.project_repo == "owner/repo"
 
 
+def test_on_enter_ready_hook_delegates_to_feishu_syncer_when_wired():
+    """When a FeishuToGitHubSyncer is wired, the hook reads plan.md from the
+    Feishu SOT via the syncer (passing pending_plan_draft.plan_md_content as
+    audit fallback) instead of building PlanArtifacts directly from the draft.
+    """
+    from requirement_workflow_v12.feishu_to_github_syncer import PlanSyncResult
+    svc = CoordinatorService()
+    tools = MagicMock()
+    syncer = MagicMock()
+    syncer.sync_plan.return_value = PlanSyncResult(
+        commit_sha="https://github.com/owner/repo/commit/sha-s",
+        plan_github_path="docs/specs/REQ-P-1/plan.md",
+        architecture_updated=False,
+    )
+    svc.configure_plan_hooks(tools=tools, syncer=syncer)
+
+    from requirement_workflow_v12.project_config import ProjectConfig
+    svc.project_configs["P"] = ProjectConfig(
+        category="web", template_version="v1",
+        architecture_doc_id="", architecture_doc_url="",
+        tech_stack={}, github_repo_url="owner/repo",
+    )
+    r = _approved_req(svc)
+    svc.plan_start(
+        r.req_id, plan_doc_id="docx-plan-abc",
+        plan_doc_url="https://feishu/docx/docx-plan-abc",
+    )
+    svc.plan_submit(
+        r.req_id, plan_md_content="---\nreq_id: REQ-P-1\n---\n",
+        project_context_change=None,
+    )
+
+    syncer.sync_plan.assert_called_once()
+    kwargs = syncer.sync_plan.call_args.kwargs
+    assert kwargs["req_id"] == "REQ-P-1"
+    assert kwargs["project_repo"] == "owner/repo"
+    assert kwargs["plan_doc_id"] == "docx-plan-abc"
+    assert kwargs["project_context_change"] is None
+    assert kwargs["fallback_plan_md"] == "---\nreq_id: REQ-P-1\n---\n"
+    tools.commit_plan_artifacts.assert_not_called()
+    assert r.plan_pr_url == "https://github.com/owner/repo/commit/sha-s"
+    assert r.pending_plan_draft is None
+
+
+def test_on_enter_ready_hook_syncer_recoverable_error_wraps_cleanly():
+    """Syncer-raised FeishuSyncerError(recoverable=True) propagates so the
+    approve card can retry — mirrors legacy ProjectRepoError behavior."""
+    from requirement_workflow_v12.feishu_to_github_syncer import FeishuSyncerError
+    svc = CoordinatorService()
+    tools = MagicMock()
+    syncer = MagicMock()
+    syncer.sync_plan.side_effect = FeishuSyncerError(
+        "apply conflict", recoverable=True,
+    )
+    svc.configure_plan_hooks(tools=tools, syncer=syncer)
+
+    from requirement_workflow_v12.project_config import ProjectConfig
+    svc.project_configs["P"] = ProjectConfig(
+        category="web", template_version="v1",
+        architecture_doc_id="", architecture_doc_url="",
+        tech_stack={}, github_repo_url="o/r",
+    )
+    r = _approved_req(svc)
+    svc.plan_start(r.req_id, plan_doc_id="docx-1", plan_doc_url="u")
+    with pytest.raises(FeishuSyncerError) as exc_info:
+        svc.plan_submit(
+            r.req_id, plan_md_content="---\n---\n", project_context_change=None,
+        )
+    assert exc_info.value.recoverable is True
+
+
 def test_on_enter_ready_hook_propagates_recoverable_error():
     svc = CoordinatorService()
     tools = MagicMock()
