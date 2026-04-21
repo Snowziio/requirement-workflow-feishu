@@ -81,3 +81,35 @@ def test_plan_context_allowed_when_needs_ui_true_and_no_design():
     ctx = builder.build(r.req_id)
     assert ctx["req_id"] == "REQ-P-1"
     assert ctx["needs_ui"] is True
+
+
+def test_plan_context_exposes_feishu_plan_doc_fields():
+    """Time-phased SOT (2026-04-21): plan-author MUST see the Feishu plan docx
+    URL/id so it can read/write the construction-phase SOT. Without these
+    fields the agent falls back to 'where is my plan doc?' confusion."""
+    svc = CoordinatorService()
+    r = _req(svc)
+    r.plan_status = PlanStatus.DRAFTING
+    r.plan_doc_id = "docx-plan-abc"
+    r.plan_doc_url = "https://my.feishu.cn/docx/docx-plan-abc"
+    builder = PlanContextBuilder(service=svc)
+
+    ctx = builder.build(r.req_id)
+
+    assert ctx["plan_doc_id"] == "docx-plan-abc"
+    assert ctx["plan_doc_url"] == "https://my.feishu.cn/docx/docx-plan-abc"
+
+
+def test_plan_context_plan_doc_fields_default_empty_string():
+    """Backward-compatible default: for REQs whose plan docx was never
+    created (legacy or misconfigured folder_token), plan-author receives
+    empty strings rather than missing keys, so jq/JSON access stays safe."""
+    svc = CoordinatorService()
+    r = _req(svc)
+    # plan_doc_id / plan_doc_url never set
+    builder = PlanContextBuilder(service=svc)
+
+    ctx = builder.build(r.req_id)
+
+    assert ctx["plan_doc_id"] == ""
+    assert ctx["plan_doc_url"] == ""

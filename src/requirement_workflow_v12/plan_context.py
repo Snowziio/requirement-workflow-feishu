@@ -50,6 +50,8 @@ class PlanContextBuilder:
             "template_version": cfg.template_version,
             "architecture_doc_url": cfg.architecture_doc_url,
             "project_repo": cfg.github_repo_url,
+            "plan_doc_id": r.plan_doc_id,
+            "plan_doc_url": r.plan_doc_url,
             "plan_outline": list(r.plan_outline),
             "plan_decisions_wip": list(r.plan_decisions_wip),
             "plan_phase": r.plan_phase.value if r.plan_phase else None,

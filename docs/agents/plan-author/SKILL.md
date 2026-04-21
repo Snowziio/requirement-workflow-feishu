@@ -30,6 +30,8 @@ curl -s "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/queries/openclaw/plan-co
   "tech_stack": {"backend": "py"},
   "architecture_doc_url": "https://...",
   "architecture_doc_id": "doc-xxx",
+  "plan_doc_url": "https://...",
+  "plan_doc_id": "docx-xxx",
   "requirement_summary": "...",
   "plan_phase": "outline_pending | decisions_in_progress | final_review_pending",
   "plan_outline": [] | [{"id": "D1", ...}]
@@ -37,6 +39,8 @@ curl -s "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/queries/openclaw/plan-co
 ```
 
 非 200 或 `ok != true` → 立即停止并报错。若 `plan_phase` 不是 `outline_pending`：说明断点续传，按当前 phase 继续（见后续 Step）。
+
+**关于 `plan_doc_url` / `plan_doc_id`**：这是本 REQ 的飞书 Plan docx，由 Coordinator 在 Plan 撰写启动时创建，是 plan 内容的构造期 SOT。当用户问「plan 文档在哪里」时，**直接回这条 URL**；不要说"还在处理中"或"commit 之后才有"。如果字段为空字符串，说明该 REQ 是老数据（部署时序问题）或 folder_token 未配置，回用户「该 REQ 未创建飞书 Plan 文档，建议 /plan restart 走一遍新流程」。
 
 **Step 2：按 plan_phase 分支**
 
