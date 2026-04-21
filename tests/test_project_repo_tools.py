@@ -218,3 +218,160 @@ def test_commit_spec_artifacts_on_commit_failure_cleans_branch():
         tools.commit_spec_artifacts("REQ-P-1", _happy_artifacts())
 
     gw.delete_branch.assert_called_once()
+
+
+# ── _parse_repo normalization (Bitable may store full URL) ──────────────
+#
+# Bitable's project_repo column historically stored shorthand "owner/repo",
+# but Bootstrap writes it as "https://github.com/owner/repo". Without
+# normalization every facade method splitting on "/" breaks silently into
+# a nonsensical GitHub API path (owner="https:", repo="/github.com/...").
+# These tests lock the helper's contract and the three facade call sites.
+
+from requirement_workflow_v12.project_repo.tools import _parse_repo
+
+
+def test_parse_repo_accepts_shorthand():
+    assert _parse_repo("acme/repo") == ("acme", "repo")
+
+
+def test_parse_repo_accepts_https_github_url():
+    assert _parse_repo("https://github.com/acme/repo") == ("acme", "repo")
+
+
+def test_parse_repo_strips_trailing_git_suffix():
+    assert _parse_repo("https://github.com/acme/repo.git") == ("acme", "repo")
+
+
+def test_parse_repo_accepts_ssh_url():
+    assert _parse_repo("git@github.com:acme/repo.git") == ("acme", "repo")
+
+
+def test_parse_repo_rejects_invalid_input():
+    with pytest.raises(ValueError):
+        _parse_repo("not-a-repo")
+    with pytest.raises(ValueError):
+        _parse_repo("")
+    with pytest.raises(ValueError):
+        _parse_repo("a/b/c")
+
+
+def _url_artifacts():
+    return SpecArtifacts(
+        project_repo="https://github.com/acme/repo",
+        branch="spec/REQ-P-1",
+        base_branch="main",
+        files={"docs/specs/REQ-P-1/design.md": "# Design\n"},
+        commit_message="feat(spec): REQ-P-1",
+        pr_title="Spec: REQ-P-1",
+        pr_body="body",
+    )
+
+
+def test_commit_spec_artifacts_normalizes_full_url_project_repo():
+    gw = MagicMock()
+    gw.create_branch = MagicMock(return_value="head-sha")
+    gw.commit_spec_pr_files = MagicMock(return_value="commit-sha")
+    gw.open_pull_request = MagicMock(
+        return_value={"number": 42, "html_url": "https://gh/pr/42"},
+    )
+    tools = GitHubProjectRepoTools(gw)
+
+    tools.commit_spec_artifacts("REQ-P-1", _url_artifacts())
+
+    gw.create_branch.assert_called_once_with(
+        owner="acme", repo="repo",
+        branch="spec/REQ-P-1", from_branch="main",
+    )
+    gw.commit_spec_pr_files.assert_called_once_with(
+        "acme/repo", "spec/REQ-P-1",
+        {"docs/specs/REQ-P-1/design.md": "# Design\n"},
+        "feat(spec): REQ-P-1",
+    )
+    gw.open_pull_request.assert_called_once_with(
+        owner="acme", repo="repo",
+        head_branch="spec/REQ-P-1", base_branch="main",
+        title="Spec: REQ-P-1", body="body",
+    )
+
+
+def test_commit_spec_artifacts_url_failure_cleans_branch_with_shorthand():
+    gw = MagicMock()
+    gw.create_branch = MagicMock(return_value="head-sha")
+    gw.commit_spec_pr_files = MagicMock(
+        side_effect=GitHubGatewayError(409, "conflict"),
+    )
+    gw.delete_branch = MagicMock(return_value=None)
+    tools = GitHubProjectRepoTools(gw)
+
+    with pytest.raises(ProjectRepoError):
+        tools.commit_spec_artifacts("REQ-P-1", _url_artifacts())
+
+    gw.delete_branch.assert_called_once_with("acme/repo", "spec/REQ-P-1")
+
+
+def test_cleanup_failed_branch_normalizes_url():
+    gw = MagicMock()
+    gw.delete_branch = MagicMock(return_value=None)
+    tools = GitHubProjectRepoTools(gw)
+
+    tools.cleanup_failed_branch("https://github.com/acme/repo", "spec/REQ-P-1")
+
+    gw.delete_branch.assert_called_once_with("acme/repo", "spec/REQ-P-1")
+
+
+def test_fetch_project_context_normalizes_url():
+    gw = _mock_gateway()
+    tools = GitHubProjectRepoTools(gw)
+
+    ctx = tools.fetch_project_context("https://github.com/acme/repo")
+
+    # The stored project_repo on the returned context is the caller's string
+    # (we don't rewrite it); but gateway calls must see shorthand.
+    for call in gw.fetch_file_sha.call_args_list:
+        args, _kwargs = call
+        assert args[0] == "acme/repo", f"unexpected repo arg: {args[0]!r}"
+    assert ctx.arch_sha == "arch-sha"
+
+
+def test_commit_plan_artifacts_normalizes_url_project_repo():
+    from requirement_workflow_v12.project_repo.types import PlanArtifacts
+
+    gw = MagicMock()
+    gw.commit_files = MagicMock(return_value="plan-commit-sha")
+    tools = GitHubProjectRepoTools(gw)
+
+    result = tools.commit_plan_artifacts(PlanArtifacts(
+        project_repo="https://github.com/acme/repo",
+        req_id="REQ-P-1",
+        plan_md_content="# Plan\n",
+        project_context_change=None,
+        commit_message="docs(plan): REQ-P-1",
+    ))
+
+    assert result.commit_sha == "plan-commit-sha"
+    gw.commit_files.assert_called_once()
+    kwargs = gw.commit_files.call_args.kwargs
+    assert kwargs["owner"] == "acme"
+    assert kwargs["repo"] == "repo"
+    assert kwargs["branch"] == "main"
+
+
+def test_commit_spec_md_normalizes_url_project_repo():
+    from requirement_workflow_v12.project_repo.types import SpecMdArtifacts
+
+    gw = MagicMock()
+    gw.commit_files = MagicMock(return_value="spec-commit-sha")
+    tools = GitHubProjectRepoTools(gw)
+
+    result = tools.commit_spec_md(SpecMdArtifacts(
+        project_repo="https://github.com/acme/repo",
+        req_id="REQ-P-1",
+        spec_md_content="# Spec\n",
+        commit_message="docs(spec): REQ-P-1",
+    ))
+
+    assert result.commit_sha == "spec-commit-sha"
+    kwargs = gw.commit_files.call_args.kwargs
+    assert kwargs["owner"] == "acme"
+    assert kwargs["repo"] == "repo"

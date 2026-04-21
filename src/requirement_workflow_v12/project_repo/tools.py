@@ -27,6 +27,31 @@ from .types import (
 _logger = logging.getLogger(__name__)
 
 
+def _parse_repo(project_repo: str) -> tuple[str, str]:
+    """Normalize ``project_repo`` to ``(owner, name)``.
+
+    Accepts shorthand ``owner/name`` and common GitHub URL forms —
+    ``https://github.com/owner/name``, the SSH variant, optional ``.git``
+    suffix. Bootstrap writes the full URL into Bitable, but gateway
+    methods expect shorthand; callers funnel both forms through here.
+    """
+    s = (project_repo or "").strip()
+    for prefix in ("https://github.com/", "http://github.com/", "git@github.com:"):
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+            break
+    if s.endswith(".git"):
+        s = s[: -len(".git")]
+    s = s.strip("/")
+    parts = s.split("/")
+    if len(parts) != 2 or not all(parts):
+        raise ValueError(
+            f"invalid project_repo: {project_repo!r}; "
+            "expected 'owner/name' or a github URL"
+        )
+    return parts[0], parts[1]
+
+
 class ProjectRepoError(RuntimeError):
     """Layer-3 error wrapping a lower-level gateway failure.
 
@@ -79,12 +104,14 @@ class GitHubProjectRepoTools:
         self._gw = gateway
 
     def fetch_project_context(self, project_repo: str) -> ProjectContext:
+        owner, name = _parse_repo(project_repo)
+        short = f"{owner}/{name}"
         try:
             arch_sha, arch_text = self._gw.fetch_file_sha(
-                project_repo, "main", "ARCHITECTURE.yaml",
+                short, "main", "ARCHITECTURE.yaml",
             )
             registry_sha, registry_text = self._gw.fetch_file_sha(
-                project_repo, "main", "acm-registry.yaml",
+                short, "main", "acm-registry.yaml",
             )
         except GitHubGatewayError as exc:
             raise ProjectRepoError(
@@ -100,25 +127,28 @@ class GitHubProjectRepoTools:
         )
 
     def cleanup_failed_branch(self, project_repo: str, branch: str) -> None:
+        owner, name = _parse_repo(project_repo)
+        short = f"{owner}/{name}"
         try:
-            self._gw.delete_branch(project_repo, branch)
+            self._gw.delete_branch(short, branch)
         except GitHubGatewayError as exc:
             _logger.warning(
                 "cleanup_failed_branch could not delete %s/%s: %s",
-                project_repo, branch, exc,
+                short, branch, exc,
             )
 
     def commit_spec_artifacts(
         self, req_id: str, artifacts: SpecArtifacts,
     ) -> PrRef:
-        owner, name = artifacts.project_repo.split("/", 1)
+        owner, name = _parse_repo(artifacts.project_repo)
+        short = f"{owner}/{name}"
         try:
             self._gw.create_branch(
                 owner=owner, repo=name,
                 branch=artifacts.branch, from_branch=artifacts.base_branch,
             )
             head_sha = self._gw.commit_spec_pr_files(
-                artifacts.project_repo, artifacts.branch,
+                short, artifacts.branch,
                 artifacts.files, artifacts.commit_message,
             )
             pr = self._gw.open_pull_request(
@@ -127,7 +157,7 @@ class GitHubProjectRepoTools:
                 title=artifacts.pr_title, body=artifacts.pr_body,
             )
         except GitHubGatewayError as exc:
-            self.cleanup_failed_branch(artifacts.project_repo, artifacts.branch)
+            self.cleanup_failed_branch(short, artifacts.branch)
             raise ProjectRepoError(
                 f"commit_spec_artifacts failed for {req_id}: {exc}",
                 recoverable=False,
@@ -146,7 +176,8 @@ class GitHubProjectRepoTools:
             ProjectContextApplyError,
             apply_project_context_change,
         )
-        owner, name = artifacts.project_repo.split("/", 1)
+        owner, name = _parse_repo(artifacts.project_repo)
+        short = f"{owner}/{name}"
         plan_path = f"docs/specs/{artifacts.req_id}/plan.md"
         files_to_commit = [
             FileChange(path=plan_path, content=artifacts.plan_md_content),
@@ -157,7 +188,7 @@ class GitHubProjectRepoTools:
             arch_path = "docs/ARCHITECTURE.md"
             try:
                 _arch_sha, arch_text = self._gw.fetch_file_sha(
-                    artifacts.project_repo, "main", arch_path,
+                    short, "main", arch_path,
                 )
             except GitHubGatewayError as exc:
                 raise ProjectRepoError(
@@ -207,7 +238,7 @@ class GitHubProjectRepoTools:
         ``docs/specs/<req_id>/spec.md``. No project_context_change path —
         architecture freezes with plan.
         """
-        owner, name = artifacts.project_repo.split("/", 1)
+        owner, name = _parse_repo(artifacts.project_repo)
         spec_path = f"docs/specs/{artifacts.req_id}/spec.md"
         try:
             sha = self._gw.commit_files(
