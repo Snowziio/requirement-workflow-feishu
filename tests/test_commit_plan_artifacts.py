@@ -73,12 +73,12 @@ def test_commit_plan_artifacts_with_architecture_commits_both_files_atomically()
     result = tools.commit_plan_artifacts(artifacts)
 
     assert result.architecture_updated is True
-    gw.fetch_file_sha.assert_called_once_with("owner/repo", "main", "ARCHITECTURE.md")
+    gw.fetch_file_sha.assert_called_once_with("owner/repo", "main", "docs/ARCHITECTURE.md")
     kwargs = gw.commit_files.call_args.kwargs
     files = list(kwargs["files"])
     paths = sorted(fc.path for fc in files)
-    assert paths == ["ARCHITECTURE.md", "docs/specs/REQ-P-2/plan.md"]
-    arch_content = next(fc.content for fc in files if fc.path == "ARCHITECTURE.md")
+    assert paths == ["docs/ARCHITECTURE.md", "docs/specs/REQ-P-2/plan.md"]
+    arch_content = next(fc.content for fc in files if fc.path == "docs/ARCHITECTURE.md")
     assert "Redis" in arch_content
     assert "旧方案" not in arch_content
 
@@ -170,7 +170,7 @@ def test_commit_plan_artifacts_accepts_project_context_change_envelope():
     assert result.architecture_updated is True
     file_changes = list(gw.commit_files.call_args.kwargs["files"])
     paths = [fc.path for fc in file_changes]
-    assert "ARCHITECTURE.md" in paths
+    assert "docs/ARCHITECTURE.md" in paths
     assert "docs/specs/REQ-2026-04-20-001/plan.md" in paths
 
 

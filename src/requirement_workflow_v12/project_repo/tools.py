@@ -148,18 +148,19 @@ class GitHubProjectRepoTools:
         architecture_updated = False
 
         if artifacts.project_context_change is not None:
+            arch_path = "docs/ARCHITECTURE.md"
             try:
                 _arch_sha, arch_text = self._gw.fetch_file_sha(
-                    artifacts.project_repo, "main", "ARCHITECTURE.md",
+                    artifacts.project_repo, "main", arch_path,
                 )
             except GitHubGatewayError as exc:
                 raise ProjectRepoError(
-                    f"commit_plan_artifacts: cannot fetch ARCHITECTURE.md: {exc}",
+                    f"commit_plan_artifacts: cannot fetch {arch_path}: {exc}",
                     recoverable=False,
                 ) from exc
             try:
                 updated_files = apply_project_context_change(
-                    original_files={"ARCHITECTURE.md": arch_text},
+                    original_files={arch_path: arch_text},
                     change=artifacts.project_context_change,
                 )
             except ProjectContextApplyError as exc:
@@ -168,10 +169,10 @@ class GitHubProjectRepoTools:
                     f"commit_plan_artifacts: project_context_change apply failed: {exc}",
                     recoverable=recoverable,
                 ) from exc
-            new_arch = updated_files.get("ARCHITECTURE.md")
+            new_arch = updated_files.get(arch_path)
             if new_arch is not None and new_arch != arch_text:
                 files_to_commit.append(
-                    FileChange(path="ARCHITECTURE.md", content=new_arch),
+                    FileChange(path=arch_path, content=new_arch),
                 )
                 architecture_updated = True
 

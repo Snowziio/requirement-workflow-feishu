@@ -15,7 +15,7 @@ from requirement_workflow_v12.project_context_apply import (  # noqa: E402
 
 
 def test_dispatch_architecture_executor_returns_updated_files():
-    original = {"ARCHITECTURE.md": "## Storage\n\nTBD\n"}
+    original = {"docs/ARCHITECTURE.md": "## Storage\n\nTBD\n"}
     change = {
         "summary": "Add Redis storage",
         "changes": [
@@ -29,7 +29,7 @@ def test_dispatch_architecture_executor_returns_updated_files():
         ],
     }
     updated = apply_project_context_change(original_files=original, change=change)
-    assert "Redis 24h TTL" in updated["ARCHITECTURE.md"]
+    assert "Redis 24h TTL" in updated["docs/ARCHITECTURE.md"]
 
 
 def test_environments_and_skill_md_executors_are_noop_stubs_that_log(caplog):

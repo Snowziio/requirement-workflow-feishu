@@ -45,7 +45,7 @@ def apply_project_context_change(
             raise ProjectContextApplyError(f"unknown artifact: {artifact!r}")
 
     if arch_changes:
-        arch_path = "ARCHITECTURE.md"
+        arch_path = "docs/ARCHITECTURE.md"
         arch_text = updated.get(arch_path, "")
         try:
             updated[arch_path] = apply_architecture_changes(arch_text, arch_changes)
