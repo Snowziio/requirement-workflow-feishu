@@ -133,6 +133,12 @@ class Requirement:
     plan_decisions_wip: list[dict] = field(default_factory=list)
     pending_plan_draft: dict | None = None
     pending_plan_review: dict | None = None
+    plan_doc_id: str = ""
+    plan_doc_url: str = ""
+    plan_github_path: str = ""
+    plan_github_revision: str = ""
+    spec_github_path: str = ""
+    spec_github_revision: str = ""
     design_status: "DesignStatus | None" = None
     updated_at: datetime = field(default_factory=utc_now)
 

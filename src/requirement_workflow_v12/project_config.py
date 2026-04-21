@@ -19,6 +19,8 @@ class ProjectConfig:
     bootstrap_completed_at: str | None = None
     project_status: str = "UNBOOTSTRAPPED"
     feishu_chat_id: str = ""
+    architecture_github_path: str = "docs/ARCHITECTURE.md"
+    architecture_github_revision: str = ""
 
     @classmethod
     def from_dict(cls, data: dict) -> "ProjectConfig":
@@ -37,4 +39,6 @@ class ProjectConfig:
             bootstrap_completed_at=data.get("bootstrap_completed_at"),
             project_status=data.get("project_status", "UNBOOTSTRAPPED"),
             feishu_chat_id=data.get("feishu_chat_id", ""),
+            architecture_github_path=data.get("architecture_github_path", "docs/ARCHITECTURE.md"),
+            architecture_github_revision=data.get("architecture_github_revision", ""),
         )

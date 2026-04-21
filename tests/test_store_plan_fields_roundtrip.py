@@ -37,6 +37,12 @@ def _seed_full(req_id: str = "REQ-RT-1") -> Requirement:
         "submitted_at": "2026-04-21T00:00:00+00:00",
     }
     r.pending_plan_draft = {"note": "internal"}
+    r.plan_doc_id = "doc-plan-xyz"
+    r.plan_doc_url = "https://feishu.example/doc/plan-xyz"
+    r.plan_github_path = "plans/REQ-RT-1.md"
+    r.plan_github_revision = "sha-plan-1"
+    r.spec_github_path = "specs/REQ-RT-1/spec.md"
+    r.spec_github_revision = "sha-spec-1"
     r.design_status = DesignStatus.DRAFTING
     r.spec_status = SpecStatus.DRAFTING
     r.spec_deadlocked = True
@@ -66,6 +72,12 @@ def test_plan_fields_survive_save_load_roundtrip(tmp_path):
         "submitted_at": "2026-04-21T00:00:00+00:00",
     }
     assert reloaded.pending_plan_draft == {"note": "internal"}
+    assert reloaded.plan_doc_id == "doc-plan-xyz"
+    assert reloaded.plan_doc_url == "https://feishu.example/doc/plan-xyz"
+    assert reloaded.plan_github_path == "plans/REQ-RT-1.md"
+    assert reloaded.plan_github_revision == "sha-plan-1"
+    assert reloaded.spec_github_path == "specs/REQ-RT-1/spec.md"
+    assert reloaded.spec_github_revision == "sha-spec-1"
     assert reloaded.design_status == DesignStatus.DRAFTING
 
 
