@@ -15,6 +15,8 @@ from .types import (
     ProjectContext,
     RepoRef,
     SpecArtifacts,
+    SpecMdArtifacts,
+    SpecMdCommitResult,
 )
 
 __all__ = [
@@ -28,5 +30,7 @@ __all__ = [
     "ProjectRepoTools",
     "RepoRef",
     "SpecArtifacts",
+    "SpecMdArtifacts",
+    "SpecMdCommitResult",
     "StateTransitionHooks",
 ]

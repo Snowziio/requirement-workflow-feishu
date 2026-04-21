@@ -270,6 +270,36 @@ def test_runtime_wires_plan_syncer_when_github_token_set(tmp_path, monkeypatch):
     assert isinstance(app.service._plan_syncer, FeishuToGitHubSyncer)
 
 
+def test_runtime_wires_spec_syncer_when_github_token_set(tmp_path, monkeypatch):
+    """Phase 5-H: with github_token set, the runtime must also wire the
+    FeishuToGitHubSyncer into configure_spec_orchestrator so Checkpoint 1a
+    (on_enter(TRANSFORMING)) freezes the 9-section Spec from Feishu to
+    docs/specs/<req_id>/spec.md before the orchestrator starts."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    for key in ("all_proxy", "ALL_PROXY", "http_proxy", "HTTP_PROXY",
+                "https_proxy", "HTTPS_PROXY"):
+        monkeypatch.delenv(key, raising=False)
+    from requirement_workflow_v12.config import Settings
+    from requirement_workflow_v12.service_app import CoordinatorRuntimeApp
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    from requirement_workflow_v12.feishu_to_github_syncer import FeishuToGitHubSyncer
+    settings = Settings(
+        feishu_app_id="x", feishu_app_secret="y",
+        state_store_path=str(tmp_path / "state.json"),
+        github_token="ghp_test",
+        spec_trace_dir=str(tmp_path / "traces"),
+    )
+    svc = CoordinatorService()
+    gateway = MagicMock()
+    gateway.list_project_configs = MagicMock(return_value={})
+    app = CoordinatorRuntimeApp(settings, service=svc, gateway=gateway)
+    assert isinstance(app.service._spec_syncer, FeishuToGitHubSyncer)
+    # Same instance as plan syncer so both freeze points share one module.
+    assert app.service._spec_syncer is app.service._plan_syncer
+
+
 def test_runtime_leaves_plan_syncer_none_when_no_github_token(tmp_path):
     import sys
     from pathlib import Path

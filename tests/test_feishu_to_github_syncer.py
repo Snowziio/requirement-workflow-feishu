@@ -19,10 +19,12 @@ from requirement_workflow_v12.feishu_to_github_syncer import (  # noqa: E402
     FeishuSyncerError,
     FeishuToGitHubSyncer,
     PlanSyncResult,
+    SpecSyncResult,
 )
 from requirement_workflow_v12.project_repo import (  # noqa: E402
     PlanCommitResult,
     ProjectRepoError,
+    SpecMdCommitResult,
 )
 
 
@@ -176,3 +178,95 @@ def test_sync_plan_wraps_non_recoverable_project_repo_error():
             project_context_change=None, commit_message="m",
         )
     assert exc_info.value.recoverable is False
+
+
+# ── sync_spec (Checkpoint 1a freeze) ────────────────────────────────────
+
+
+def _make_spec_syncer(
+    *, feishu_text: str = "# spec", commit_result: SpecMdCommitResult | None = None,
+):
+    feishu = MagicMock()
+    feishu.read_document_text.return_value = feishu_text
+    tools = MagicMock()
+    tools.commit_spec_md.return_value = commit_result or SpecMdCommitResult(
+        commit_sha="spec-sha-1", branch="main",
+        spec_md_path="docs/specs/REQ-S-1/spec.md",
+    )
+    return FeishuToGitHubSyncer(
+        feishu=feishu, project_repo_tools=tools,
+    ), feishu, tools
+
+
+def test_sync_spec_reads_feishu_and_delegates_to_commit_spec_md():
+    syncer, feishu, tools = _make_spec_syncer(
+        feishu_text="# Spec from Feishu\n\n## Section 1\n",
+    )
+
+    result = syncer.sync_spec(
+        req_id="REQ-S-1",
+        project_repo="owner/repo",
+        spec_doc_id="docx-spec-abc",
+        commit_message="spec(REQ-S-1): freeze 9-section spec (Checkpoint 1a)",
+    )
+
+    feishu.read_document_text.assert_called_once_with("docx-spec-abc")
+    tools.commit_spec_md.assert_called_once()
+    artifacts = tools.commit_spec_md.call_args.args[0]
+    assert artifacts.project_repo == "owner/repo"
+    assert artifacts.req_id == "REQ-S-1"
+    assert artifacts.spec_md_content == "# Spec from Feishu\n\n## Section 1\n"
+    assert isinstance(result, SpecSyncResult)
+    assert result.commit_sha == "spec-sha-1"
+    assert result.spec_github_path == "docs/specs/REQ-S-1/spec.md"
+
+
+def test_sync_spec_raises_syncer_error_when_feishu_fails_without_fallback():
+    syncer, feishu, tools = _make_spec_syncer()
+    feishu.read_document_text.side_effect = RuntimeError("feishu 5xx")
+
+    with pytest.raises(FeishuSyncerError, match="cannot read Feishu spec doc"):
+        syncer.sync_spec(
+            req_id="REQ-S-2", project_repo="o/r", spec_doc_id="docx-bad",
+            commit_message="m",
+        )
+    tools.commit_spec_md.assert_not_called()
+
+
+def test_sync_spec_falls_back_to_audit_copy_when_feishu_fails():
+    syncer, feishu, tools = _make_spec_syncer()
+    feishu.read_document_text.side_effect = RuntimeError("feishu down")
+
+    result = syncer.sync_spec(
+        req_id="REQ-S-3", project_repo="o/r", spec_doc_id="docx-3",
+        commit_message="m", fallback_spec_md="# audit spec\n",
+    )
+
+    artifacts = tools.commit_spec_md.call_args.args[0]
+    assert artifacts.spec_md_content == "# audit spec\n"
+    assert result.commit_sha == "spec-sha-1"
+
+
+def test_sync_spec_without_doc_id_and_no_fallback_raises():
+    syncer, _feishu, tools = _make_spec_syncer()
+
+    with pytest.raises(FeishuSyncerError, match="no spec_doc_id and no fallback"):
+        syncer.sync_spec(
+            req_id="REQ-S-4", project_repo="o/r", spec_doc_id="",
+            commit_message="m",
+        )
+    tools.commit_spec_md.assert_not_called()
+
+
+def test_sync_spec_wraps_project_repo_error_preserving_recoverable():
+    syncer, _feishu, tools = _make_spec_syncer()
+    tools.commit_spec_md.side_effect = ProjectRepoError(
+        "commit failed", recoverable=True,
+    )
+
+    with pytest.raises(FeishuSyncerError) as exc_info:
+        syncer.sync_spec(
+            req_id="REQ-S-5", project_repo="o/r", spec_doc_id="docx-5",
+            commit_message="m",
+        )
+    assert exc_info.value.recoverable is True

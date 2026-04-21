@@ -195,13 +195,14 @@ class CoordinatorRuntimeApp:
             tools = GitHubProjectRepoTools(github_gateway)
             trace_dir = Path(settings.spec_trace_dir)
             trace_dir.mkdir(parents=True, exist_ok=True)
+            plan_syncer = FeishuToGitHubSyncer(
+                feishu=self.gateway, project_repo_tools=tools,
+            )
             self.service.configure_spec_orchestrator(
                 tools=tools,
                 trace_dir=trace_dir,
                 feishu=self.gateway,
-            )
-            plan_syncer = FeishuToGitHubSyncer(
-                feishu=self.gateway, project_repo_tools=tools,
+                syncer=plan_syncer,
             )
             self.service.configure_plan_hooks(tools=tools, syncer=plan_syncer)
             if self._project_bootstrap_service is None:

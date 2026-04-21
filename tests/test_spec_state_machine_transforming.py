@@ -124,6 +124,104 @@ def test_configure_spec_orchestrator_wires_orchestrator_and_callbacks(tmp_path):
     assert svc.spec_orchestrator._project_repo_for == svc._project_repo_for
 
 
+def test_configure_spec_orchestrator_accepts_syncer_and_hook_invokes_sync_spec(tmp_path):
+    """Phase 5-H: when a FeishuToGitHubSyncer is wired into
+    configure_spec_orchestrator, the on_enter(TRANSFORMING) hook MUST call
+    syncer.sync_spec(...) before delegating to orchestrator.on_enter_transforming
+    so the 9-section Spec freezes from Feishu SOT to docs/specs/<req_id>/spec.md
+    on main before the implementation phase starts reading GitHub.
+    """
+    from unittest.mock import MagicMock, call
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    from requirement_workflow_v12.feishu_to_github_syncer import SpecSyncResult
+
+    svc = CoordinatorService()
+    tools = MagicMock()
+    feishu = MagicMock()
+    syncer = MagicMock()
+    syncer.sync_spec.return_value = SpecSyncResult(
+        commit_sha="spec-sha-1",
+        spec_github_path="docs/specs/REQ-SYNC-1/spec.md",
+    )
+    svc.configure_spec_orchestrator(
+        tools=tools, trace_dir=tmp_path, feishu=feishu, syncer=syncer,
+    )
+
+    # Replace orchestrator so we can observe call order against syncer.
+    svc.spec_orchestrator = MagicMock()
+    svc.spec_orchestrator.on_enter_transforming = MagicMock(return_value=None)
+
+    r = Requirement(
+        req_id="REQ-SYNC-1", name="n", project="P", summary="s", creator="c",
+    )
+    r.status = WorkflowStatus.APPROVED
+    r.spec_status = SpecStatus.DRAFTING
+    r.spec_document_id = "docx-spec-sync-1"
+    r.spec_document_url = "https://feishu/docx/docx-spec-sync-1"
+    svc.requirements[r.req_id] = r
+
+    from requirement_workflow_v12.project_config import ProjectConfig
+    svc.project_configs["P"] = ProjectConfig(
+        category="web", template_version="v1",
+        architecture_doc_id="", architecture_doc_url="",
+        tech_stack={}, github_repo_url="owner/repo",
+    )
+
+    # Observe call ordering via parent mock.
+    parent = MagicMock()
+    parent.attach_mock(syncer.sync_spec, "sync_spec")
+    parent.attach_mock(svc.spec_orchestrator.on_enter_transforming, "on_enter_transforming")
+
+    svc.submit_checkpoint_1a_pass("REQ-SYNC-1")
+
+    syncer.sync_spec.assert_called_once()
+    kwargs = syncer.sync_spec.call_args.kwargs
+    assert kwargs["req_id"] == "REQ-SYNC-1"
+    assert kwargs["project_repo"] == "owner/repo"
+    assert kwargs["spec_doc_id"] == "docx-spec-sync-1"
+    assert "commit_message" in kwargs
+    svc.spec_orchestrator.on_enter_transforming.assert_called_once()
+    # Sync must happen BEFORE orchestrator.on_enter_transforming
+    assert parent.mock_calls[0].startswith == call.sync_spec.__dict__.get(
+        "startswith", None,
+    ) or parent.mock_calls[0][0] == "sync_spec"
+
+
+def test_on_enter_transforming_hook_without_syncer_still_calls_orchestrator(tmp_path):
+    """Backward compat: when no syncer is wired, hook delegates straight to the
+    orchestrator (legacy behavior used by older tests that don't exercise the
+    Feishu→GitHub seam)."""
+    from unittest.mock import MagicMock
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+
+    svc = CoordinatorService()
+    tools = MagicMock()
+    feishu = MagicMock()
+    svc.configure_spec_orchestrator(
+        tools=tools, trace_dir=tmp_path, feishu=feishu,
+    )
+    svc.spec_orchestrator = MagicMock()
+    svc.spec_orchestrator.on_enter_transforming = MagicMock(return_value=None)
+
+    r = Requirement(
+        req_id="REQ-NOSYNC-1", name="n", project="P", summary="s", creator="c",
+    )
+    r.status = WorkflowStatus.APPROVED
+    r.spec_status = SpecStatus.DRAFTING
+    r.spec_document_id = "docx-spec-2"
+    svc.requirements[r.req_id] = r
+
+    from requirement_workflow_v12.project_config import ProjectConfig
+    svc.project_configs["P"] = ProjectConfig(
+        category="web", template_version="v1",
+        architecture_doc_id="", architecture_doc_url="",
+        tech_stack={}, github_repo_url="o/r",
+    )
+
+    svc.submit_checkpoint_1a_pass("REQ-NOSYNC-1")
+    svc.spec_orchestrator.on_enter_transforming.assert_called_once()
+
+
 def test_on_spec_locked_transitions_and_stores_pr_url():
     from requirement_workflow_v12.coordinator_service import CoordinatorService
     from requirement_workflow_v12.models import Requirement, SpecStatus, WorkflowStatus

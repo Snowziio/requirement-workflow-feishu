@@ -19,6 +19,8 @@ from .types import (
     PrRef,
     ProjectContext,
     SpecArtifacts,
+    SpecMdArtifacts,
+    SpecMdCommitResult,
 )
 
 
@@ -50,6 +52,10 @@ class ProjectRepoTools(Protocol):
     def commit_plan_artifacts(
         self, artifacts: PlanArtifacts,
     ) -> PlanCommitResult: ...
+
+    def commit_spec_md(
+        self, artifacts: SpecMdArtifacts,
+    ) -> SpecMdCommitResult: ...
 
     def cleanup_failed_branch(self, project_repo: str, branch: str) -> None: ...
 
@@ -190,6 +196,32 @@ class GitHubProjectRepoTools:
             commit_sha=sha, branch="main",
             plan_md_path=plan_path,
             architecture_updated=architecture_updated,
+        )
+
+    def commit_spec_md(
+        self, artifacts: SpecMdArtifacts,
+    ) -> SpecMdCommitResult:
+        """Freeze the 9-section spec.md from Feishu into GitHub on main.
+
+        Mirrors ``commit_plan_artifacts`` but writes a single file
+        ``docs/specs/<req_id>/spec.md``. No project_context_change path —
+        architecture freezes with plan.
+        """
+        owner, name = artifacts.project_repo.split("/", 1)
+        spec_path = f"docs/specs/{artifacts.req_id}/spec.md"
+        try:
+            sha = self._gw.commit_files(
+                owner=owner, repo=name, branch="main",
+                files=[FileChange(path=spec_path, content=artifacts.spec_md_content)],
+                message=artifacts.commit_message,
+            )
+        except GitHubGatewayError as exc:
+            raise ProjectRepoError(
+                f"commit_spec_md: commit to main failed: {exc}",
+                recoverable=False,
+            ) from exc
+        return SpecMdCommitResult(
+            commit_sha=sha, branch="main", spec_md_path=spec_path,
         )
 
     def bootstrap_project_repo(

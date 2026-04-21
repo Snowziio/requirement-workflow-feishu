@@ -20,6 +20,8 @@ from .project_repo import (
     PlanCommitResult,
     ProjectRepoError,
     ProjectRepoTools,
+    SpecMdArtifacts,
+    SpecMdCommitResult,
 )
 
 
@@ -51,6 +53,12 @@ class PlanSyncResult:
     commit_sha: str
     plan_github_path: str
     architecture_updated: bool
+
+
+@dataclass(frozen=True)
+class SpecSyncResult:
+    commit_sha: str
+    spec_github_path: str
 
 
 class FeishuToGitHubSyncer:
@@ -127,4 +135,62 @@ class FeishuToGitHubSyncer:
             commit_sha=result.commit_sha,
             plan_github_path=result.plan_md_path,
             architecture_updated=result.architecture_updated,
+        )
+
+    def sync_spec(
+        self,
+        *,
+        req_id: str,
+        project_repo: str,
+        spec_doc_id: str,
+        commit_message: str,
+        fallback_spec_md: str = "",
+    ) -> SpecSyncResult:
+        """Freeze Feishu 9-section spec docx into GitHub docs/specs/<req_id>/spec.md.
+
+        Invoked at Checkpoint 1a — before the implementation-phase
+        spec-transformer starts reading GitHub. ``fallback_spec_md`` is
+        optional; the construction phase has no buffered audit copy by
+        default, so callers normally leave it empty and let Feishu failure
+        surface as ``FeishuSyncerError``.
+        """
+        spec_md = ""
+        if spec_doc_id:
+            try:
+                spec_md = self._feishu.read_document_text(spec_doc_id)
+            except Exception as exc:
+                if not fallback_spec_md:
+                    raise FeishuSyncerError(
+                        f"sync_spec: cannot read Feishu spec doc {spec_doc_id}: {exc}",
+                        recoverable=False,
+                    ) from exc
+                _logger.warning(
+                    "sync_spec: Feishu read failed for doc_id=%s, falling back to audit copy: %s",
+                    spec_doc_id, exc,
+                )
+                spec_md = fallback_spec_md
+        else:
+            if not fallback_spec_md:
+                raise FeishuSyncerError(
+                    "sync_spec: no spec_doc_id and no fallback_spec_md",
+                    recoverable=False,
+                )
+            spec_md = fallback_spec_md
+
+        artifacts = SpecMdArtifacts(
+            project_repo=project_repo,
+            req_id=req_id,
+            spec_md_content=spec_md,
+            commit_message=commit_message,
+        )
+        try:
+            result: SpecMdCommitResult = self._tools.commit_spec_md(artifacts)
+        except ProjectRepoError as exc:
+            raise FeishuSyncerError(
+                f"sync_spec: commit to GitHub failed: {exc}",
+                recoverable=exc.recoverable,
+            ) from exc
+        return SpecSyncResult(
+            commit_sha=result.commit_sha,
+            spec_github_path=result.spec_md_path,
         )

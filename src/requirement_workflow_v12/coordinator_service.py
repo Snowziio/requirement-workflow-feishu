@@ -677,12 +677,18 @@ class CoordinatorService:
         tools,
         trace_dir,
         feishu=None,
+        syncer=None,
     ) -> None:
         """Wire the spec transform orchestrator + ACM registry.
 
         ``tools`` is a ``ProjectRepoTools``; the caller (service_app) is
-        responsible for wrapping a ``GitHubGateway`` if needed. Idempotent:
-        calling twice replaces the previous orchestrator.
+        responsible for wrapping a ``GitHubGateway`` if needed. When
+        ``syncer`` (a ``FeishuToGitHubSyncer``) is provided, the
+        on_enter(TRANSFORMING) hook freezes the 9-section Spec from the
+        Feishu SOT to ``docs/specs/<req_id>/spec.md`` on main before
+        delegating to the orchestrator — the Checkpoint 1a freeze point in
+        the time-phased SOT model. Idempotent: calling twice replaces the
+        previous orchestrator.
         """
         from .acm_registry import AcmRegistry
         from .spec_state_machine import SpecStatus
@@ -697,11 +703,19 @@ class CoordinatorService:
             on_locked=self._on_spec_locked,
         )
         self.spec_orchestrator._project_repo_for = self._project_repo_for
+        self._spec_syncer = syncer
         self._hooks.on_enter(
             SpecStatus.TRANSFORMING, self._on_enter_transforming_hook,
         )
 
     def _on_enter_transforming_hook(self, r: Requirement) -> None:
+        if getattr(self, "_spec_syncer", None) is not None:
+            self._spec_syncer.sync_spec(
+                req_id=r.req_id,
+                project_repo=self._project_repo_for(r.req_id),
+                spec_doc_id=r.spec_document_id,
+                commit_message=f"spec({r.req_id}): freeze 9-section spec (Checkpoint 1a)",
+            )
         self.spec_orchestrator.on_enter_transforming(
             req_id=r.req_id,
             project_repo=self._project_repo_for(r.req_id),

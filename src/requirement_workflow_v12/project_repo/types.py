@@ -104,3 +104,24 @@ class PlanCommitResult:
     branch: str
     plan_md_path: str
     architecture_updated: bool
+
+
+@dataclass(frozen=True)
+class SpecMdArtifacts:
+    """9-section spec.md frozen from Feishu to GitHub at Checkpoint 1a.
+
+    Input to ``ProjectRepoTools.commit_spec_md``. Mirrors ``PlanArtifacts``
+    but carries only the spec body — no project_context_change envelope,
+    since architecture lands earlier via the plan freeze.
+    """
+    project_repo: str
+    req_id: str
+    spec_md_content: str
+    commit_message: str
+
+
+@dataclass(frozen=True)
+class SpecMdCommitResult:
+    commit_sha: str
+    branch: str
+    spec_md_path: str

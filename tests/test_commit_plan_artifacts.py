@@ -6,7 +6,9 @@ from unittest.mock import MagicMock
 from requirement_workflow_v12.project_repo import (
     GitHubProjectRepoTools, ProjectRepoError,
     PlanArtifacts, PlanCommitResult,
+    SpecMdArtifacts, SpecMdCommitResult,
 )
+from requirement_workflow_v12.github_gateway import GitHubGatewayError
 
 
 def test_commit_plan_artifacts_without_architecture_commits_plan_md_to_main():
@@ -172,6 +174,49 @@ def test_commit_plan_artifacts_accepts_project_context_change_envelope():
     paths = [fc.path for fc in file_changes]
     assert "docs/ARCHITECTURE.md" in paths
     assert "docs/specs/REQ-2026-04-20-001/plan.md" in paths
+
+
+def test_commit_spec_md_writes_spec_md_under_docs_specs():
+    gw = MagicMock()
+    gw.commit_files.return_value = "spec-sha"
+    tools = GitHubProjectRepoTools(gateway=gw)
+    artifacts = SpecMdArtifacts(
+        project_repo="owner/repo",
+        req_id="REQ-S-1",
+        spec_md_content="# Spec\n## 1 Goal\n...\n",
+        commit_message="spec(REQ-S-1): freeze 9-section spec (Checkpoint 1a)",
+    )
+    result = tools.commit_spec_md(artifacts)
+
+    assert isinstance(result, SpecMdCommitResult)
+    assert result.commit_sha == "spec-sha"
+    assert result.branch == "main"
+    assert result.spec_md_path == "docs/specs/REQ-S-1/spec.md"
+
+    gw.commit_files.assert_called_once()
+    kwargs = gw.commit_files.call_args.kwargs
+    assert kwargs["owner"] == "owner"
+    assert kwargs["repo"] == "repo"
+    assert kwargs["branch"] == "main"
+    files = list(kwargs["files"])
+    assert len(files) == 1
+    assert files[0].path == "docs/specs/REQ-S-1/spec.md"
+    assert "## 1 Goal" in files[0].content
+
+
+def test_commit_spec_md_wraps_gateway_errors_nonrecoverable():
+    gw = MagicMock()
+    gw.commit_files.side_effect = GitHubGatewayError(422, "unprocessable")
+    tools = GitHubProjectRepoTools(gateway=gw)
+    artifacts = SpecMdArtifacts(
+        project_repo="owner/repo", req_id="REQ-S-2",
+        spec_md_content="# x", commit_message="m",
+    )
+
+    import pytest
+    with pytest.raises(ProjectRepoError) as exc_info:
+        tools.commit_spec_md(artifacts)
+    assert exc_info.value.recoverable is False
 
 
 def test_plan_commit_result_fields():
