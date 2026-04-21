@@ -116,6 +116,54 @@ def test_plan_callback_plan_submit_branches_to_ready_when_no_architecture(app):
     assert r.pending_plan_review is not None
 
 
+def test_plan_callback_plan_submit_mirrors_md_into_feishu_plan_doc(app):
+    """Phase 2-D (time-phased SOT): after buffering pending_plan_review, the
+    callback must also mirror plan_md_content into the Feishu plan docx so
+    human reviewers see it in the SOT during Phase C."""
+    r = _approved_req(app)
+    app.service.plan_start(
+        r.req_id,
+        plan_doc_id="docx-plan-abc",
+        plan_doc_url="https://feishu.example/docx/docx-plan-abc",
+    )
+
+    body = {
+        "req_id": "REQ-P-1",
+        "event": "plan_submit",
+        "payload": {
+            "plan_md_content": "---\nreq_id: REQ-P-1\n---\n# Plan\n",
+            "architecture_change": None,
+        },
+    }
+    status, _ = app.handle_openclaw_plan_callback(body)
+
+    assert status == 200
+    app.gateway.write_document_text.assert_called_once_with(
+        "docx-plan-abc",
+        "---\nreq_id: REQ-P-1\n---\n# Plan\n",
+    )
+
+
+def test_plan_callback_plan_submit_skips_feishu_write_without_plan_doc_id(app):
+    """No plan_doc_id (feishu_doc_folder_token not configured or legacy
+    requirement) → don't attempt the write; still accept the callback."""
+    r = _approved_req(app)
+    app.service.plan_start(r.req_id)  # no plan_doc_id
+
+    body = {
+        "req_id": "REQ-P-1",
+        "event": "plan_submit",
+        "payload": {
+            "plan_md_content": "# plan",
+            "architecture_change": None,
+        },
+    }
+    status, _ = app.handle_openclaw_plan_callback(body)
+
+    assert status == 200
+    app.gateway.write_document_text.assert_not_called()
+
+
 def test_plan_callback_unknown_event_returns_400(app):
     r = _approved_req(app)
     status, resp = app.handle_openclaw_plan_callback(

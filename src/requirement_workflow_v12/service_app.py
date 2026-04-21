@@ -1233,8 +1233,9 @@ class CoordinatorRuntimeApp:
                         "error": "invalid_state",
                         "message": f"plan_submit requires plan_status=DRAFTING, got {r.plan_status.value if r.plan_status else 'None'}",
                     }
+                plan_md_content = payload.get("plan_md_content", "")
                 r.pending_plan_review = {
-                    "plan_md_content": payload.get("plan_md_content", ""),
+                    "plan_md_content": plan_md_content,
                     "project_context_change": (
                         payload.get("project_context_change")
                         or payload.get("architecture_change")
@@ -1243,6 +1244,16 @@ class CoordinatorRuntimeApp:
                 }
                 r.plan_phase = PlanPhase.FINAL_REVIEW_PENDING
                 self._save_state()
+                if r.plan_doc_id and plan_md_content:
+                    try:
+                        self.gateway.write_document_text(
+                            r.plan_doc_id, plan_md_content,
+                        )
+                    except Exception as exc:
+                        LOGGER.warning(
+                            "Failed to mirror plan_md into Feishu plan doc req_id=%s doc_id=%s: %s",
+                            req_id, r.plan_doc_id, exc,
+                        )
                 self._dispatch_transition_notifications(
                     r, trigger="plan_submitted_pending_review"
                 )
