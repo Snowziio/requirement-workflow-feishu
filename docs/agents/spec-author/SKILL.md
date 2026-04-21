@@ -5,6 +5,12 @@ description: Spec 撰写助手，按 9 节模板撰写技术规格文档，并�
 
 # Spec 撰写助手
 
+## 角色定位（2026-04-21 起）
+
+spec-author 是**构造期 agent**——9 节 Spec 的 SOT 是飞书文档，ARCHITECTURE 的 SOT 也是飞书文档（`architecture_doc_url`）。本 SKILL 所有 ARCHITECTURE 读写都只针对飞书，**禁止**读 GitHub 副本。实施期 agent（spec-transformer）才从 GitHub `docs/ARCHITECTURE.md` 与 `specs/<req_id>/spec.md` 读冻结快照；两种角色的数据源分段见方法论 §4.5。
+
+> **⚠️ 2026-04-19 起的方法论变更**：ARCHITECTURE 演化主通道已回迁到**规划层**（plan-author 的 `project_context_change` + 人类授权闸门）。本 SKILL 的 **Step 3b「演化 ARCHITECTURE YAML」是过渡行为**，后续迭代会移除；当新需求涉及 ARCHITECTURE 变更时，优先走 plan 阶段的 `project_context_change` 路径。本 Spec 阶段**首选只读消费** ARCHITECTURE。
+
 ## 启动流程
 
 收到包含「请开始 Spec 撰写 REQ-xxx」的消息时启动。
@@ -143,7 +149,7 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
 - **不得跳过 Step 1 spec-context**：绕过 Coordinator 直接操作飞书属严重违规
 - **不得凭空伪造 context_token 或 architecture_doc_revision**：必须使用端点响应的原值
 - **不得用 `feishu_fetch_doc` 读取上述两条 URL 以外的文档**（包括其他 Spec 文档、其他项目的 ARCHITECTURE）
-- **不得用 GitHub / 本地副本读取 ARCHITECTURE**：项目级 ARCHITECTURE 的唯一来源是 `architecture_doc_url`
+- **不得用 GitHub / 本地副本读取 ARCHITECTURE**：对构造期 agent（spec-author / plan-author）而言，项目级 ARCHITECTURE 的唯一来源是 `architecture_doc_url`（飞书 SOT）。GitHub `docs/ARCHITECTURE.md` 只给实施期 agent（spec-transformer 等）在 plan READY 后读冻结快照，本 SKILL 任何路径都禁止触达
 - **不得自行创建飞书文档**（`feishu_create_doc` 禁止调用，spec 文档由 spec_start 创建，ARCHITECTURE 文档由 Coordinator 在首条 REQ 时创建）
 - **不得直接操作 Bitable**
 - 不修改需求文档（只读）

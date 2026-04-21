@@ -1,5 +1,7 @@
 # Harness Engineering 全自动开发工作流：方法论
-## v2.5 | 2026-04-14（v2.1 补丁 · 2026-04-19：PLANNING 层｜v2.5 补丁 · 2026-04-20：Project 层）
+## v2.6 | 2026-04-14（v2.1 补丁 · 2026-04-19：PLANNING 层｜v2.5 补丁 · 2026-04-20：Project 层｜v2.6 补丁 · 2026-04-21：时相分段 SOT）
+
+> **v2.6 补丁摘要（2026-04-21）**：新增 [§4.5 构造期 SOT 与实施期 SOT 的时相分段](#45-构造期-sot-与实施期-sot-的时相分段)。plan.md / ARCHITECTURE / 9 节 Spec **构造期 SOT 均为飞书文档**（人类协同撰写、评审、固化），**实施期 SOT 为 GitHub 仓库**（AI 实施链只读消费），两相由 freeze 点的**单向同步**（飞书 → GitHub）衔接。相应调整：§4.2 双平面存储描述；§5.0 bootstrap 首份 GitHub 副本由首次 plan READY 同步产出；§5.2 plan 文档改为 per-REQ 飞书 docx；§5.3 9 节 Spec 在 Checkpoint 1a 后触发同步。对应能力层契约：plan-author 构造期在飞书作业；spec-author 构造期在飞书作业；spec-transformer 实施期只读 GitHub。
 
 > **v2.5 补丁摘要（2026-04-20）**：在需求层之前新增 **Project 层（§5.0）**，承接项目生命周期管理（Bootstrap 7 步、状态机、项目级 artifact）。REQ 创建硬切到 `/create project` + `/create req` 固化命令；plan-author 的 `architecture_change` 信封泛化为统一的 `project_context_change`（支持多 artifact）。
 
@@ -247,22 +249,27 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：
 
 #### 双平面存储与职责分工
 
-项目级上下文横跨飞书和 GitHub 两个平面。Coordinator Service 是同步枢纽：
+项目级上下文横跨飞书和 GitHub 两个平面。Coordinator Service 是同步枢纽。**构造期**（人类编辑、评审、固化）在飞书；**实施期**（AI 消费 invariants 驱动 implement→align→correct 闭环）在 GitHub；两相由 freeze 点的**单向同步**衔接（详见 §4.5）：
 
 ```
-飞书平面（人工协同轨 + 原始 Spec 草稿轨）   GitHub 平面（自动化 Coding 轨）
+飞书平面（构造期 SOT · 人工协同轨）         GitHub 平面（实施期 SOT · 自动化 Coding 轨）
   需求文档集（需求历史层）                  ACM 注册表（功能契约层）
   UI 原型集（需求历史层）                   设计系统快照（视觉层镜像）
   项目设计系统文档（视觉层）                CLAUDE.md（规范惯例层）
-  ARCHITECTURE 项目级文档（架构快照层）
+  ARCHITECTURE 项目级飞书文档  ──── 同步 ───► docs/ARCHITECTURE.md（架构快照镜像）
+  plan 飞书文档（每 REQ 一份）──── 同步 ───► plans/<req_id>.md（plan 快照镜像）
+  9 节 Spec 飞书文档          ──── 同步 ───► specs/<req_id>/spec.md（Spec 快照镜像）
 ```
 
-- **Coordinator Service**：管理飞书侧所有项目级资产；在 Spec 生成时导出设计系统快照到 GitHub
-- **spec-author Agent**：在每条 REQ 的 Spec 阶段演化 ARCHITECTURE 飞书文档（读当前 YAML → 增量合并 → 覆盖写回）
+- **Coordinator Service**：管理飞书侧所有项目级资产；在 plan READY / Spec checkpoint 1a 等 freeze 点触发单向同步到 GitHub，同时在 Spec 生成时导出设计系统快照
+- **plan-author Agent**：构造期在 plan 飞书文档内产出结构化决策，引用 ARCHITECTURE 飞书文档作为项目约束
+- **spec-author Agent**：构造期在 9 节 Spec 飞书文档内撰写功能规约，引用 plan + ARCHITECTURE 飞书文档
+- **spec-transformer Agent**：实施期（Stage 2 转化）只读 GitHub 侧 `plans/`、`docs/ARCHITECTURE.md`、`specs/<req_id>/spec.md` 快照
 - **checkpoint-handler**：维护 GitHub 侧 ACM 注册表（Phase 3 引入）
 
 **关键约束**：
-- ARCHITECTURE 是**项目级上下文**，被 Spec 层消费并演化，不是 Spec 层的专属产出物也不是前置基础设施。主存储在飞书（和需求文档、UI 原型同平面），跨 REQ 持续演化；0→1 初始化通过需求建立时的「产品形态模板」解决（首条 REQ 的 Spec 撰写时即落下基线，后续 REQ 增量合并）。GitHub 侧不需要 ARCHITECTURE.yaml 镜像（Harness/Impl 层未来若要消费，再走快照导出机制）。
+- ARCHITECTURE / plan.md / 9 节 Spec 在**构造期**由人在飞书编辑、在 freeze 点原子同步到 GitHub；进入**实施期**后 GitHub 副本即成为 AI 侧唯一 SOT，不再回流。任何修订回到飞书 + 下一次 freeze 覆盖同步（详见 §4.5）。
+- plan.md 的构造受 plan-author 引导；`project_context_change` 是对 ARCHITECTURE 飞书文档施加增量修订的唯一通道，走人类授权闸门。
 - UI 设计发生在代码仓库建立之前，设计系统的主存储必须在飞书；GitHub 快照在 Spec 生成时导出，供 AI Coding Agent 消费。
 
 所有更新 **append-only** 或飞书原生 revision 版本化，可追溯到触发它的 REQ ID。
@@ -310,6 +317,50 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：
 - 按钮点击事件由 checkpoint-handler 接收，触发对应 GitHub 操作
 - 每次判断记录到 Bitable，可追溯
 
+### 4.5 构造期 SOT 与实施期 SOT 的时相分段
+
+harness engineering 的北极星是**让 AI 实施闭环自驱**：上层所有产物（需求文档、plan.md、ARCHITECTURE、9 节 Spec、四文件）存在的唯一理由，是在交付给 AI 的那一刻组成足够完整、明确、机器可解析的**约束集 + 反馈集 + 边界锚**三元组。围绕这个目标，约束集类产物采用**时相分段 SOT** 模型：
+
+**模型核心**：
+
+| 时相 | SOT 介质 | 职责 | 可变性 |
+|---|---|---|---|
+| **构造期** | 飞书文档 | 人类与 AI 协同撰写、评审、固化 | 可编辑直至 freeze |
+| **实施期** | GitHub 仓库 | AI 实施链只读消费 | freeze 后不可变 |
+
+**跨时相只通过 freeze 点的单向同步衔接**（飞书 → GitHub），GitHub 侧不提供编辑回流通道；任何修订都回到飞书侧重开一轮 plan / Spec 周期。
+
+**产物与 freeze 点映射**：
+
+| 产物 | 构造期介质 | 实施期介质 | 同步触发点 |
+|---|---|---|---|
+| ARCHITECTURE | 飞书 docx（`architecture_doc_url`） | `docs/ARCHITECTURE.md` | 首次 plan READY；后续带 `project_context_change=architecture` 的 plan READY |
+| plan.md | 飞书 docx（`plan_doc_url`） | `plans/<req_id>.md` | `PlanStatus → READY` |
+| 9 节 Spec（Stage 1） | 飞书 docx（既有 `document_url`） | `specs/<req_id>/spec.md` | Spec Checkpoint 1a |
+| 四文件（Stage 2：design/tasks/ac-schedule/harness） | —（AI 自动产出，无人类编辑阶段） | GitHub 直写 | transform 收敛 |
+
+**原则四条**：
+
+1. **构造期飞书人类改，实施期 GitHub AI 读**——一次只有一个 SOT，消除双平面并发写回复杂度（参见 [infra/context-chain-principle.md §七](infra/context-chain-principle.md#七并发写回契约) 原先为 Spec 层 ARCHITECTURE 写回设计的 token+revision 协议自 2026-04-21 起退出）。
+2. **单向同步，无回流**——GitHub 副本是"冻结快照"，不接受反向编辑。
+3. **Freeze 即不可变**——plan.md 冻结后不可改，需变更另起新 REQ/新 plan 周期（`supersedes` 回指旧版）；9 节 Spec 冻结于 Checkpoint 1a，后续进入 Stage 2 转化而非 Stage 1 编辑。
+4. **渲染契约保 AI 侧可解析性**——飞书正文允许段落自然语言；同步器负责把结构化字段（plan Decisions / ARCHITECTURE section / 9 节 Spec 小节）解析成稳定 markdown 结构，保证 GitHub 侧 agent 能按 schema 读取。
+
+**字段落点**：
+
+- `ProjectConfig.architecture_doc_id / url`：飞书 ARCHITECTURE SOT
+- `ProjectConfig.architecture_github_path / revision`：GitHub ARCHITECTURE 最近同步点（审计 + 幂等）
+- `Requirement.plan_doc_id / url`：飞书 plan SOT
+- `Requirement.plan_github_path / revision`：GitHub plan 最近同步点
+- `Requirement.document_id / url`：飞书 9 节 Spec SOT（复用现有字段）
+- `Requirement.spec_github_path / revision`：GitHub 9 节 Spec 最近同步点
+
+**与三元组的对应**：
+
+- **约束集**（plan.md / ARCHITECTURE / design.md）——构造期飞书，实施期 GitHub，freeze 点同步；
+- **反馈集**（ac-schedule.yaml + harness）——仅 GitHub，无飞书镜像；
+- **边界锚**（`supersedes` / acm-registry / 四文件校验和）——仅 GitHub。
+
 ---
 
 ## 五、纵向流程各层规格
@@ -343,7 +394,7 @@ REQ ID（REQ-{PROJECT}-{NNN}）穿透全链路：
 
 每步幂等，`--resume` 可从任意断点续跑。
 
-**项目级上下文演化**：Project 级 artifact（ARCHITECTURE / environments / skill_md）的后续变更由 REQ 驱动：plan-author 在 Planning 阶段通过统一的 `project_context_change` 信封提交变更，走授权闸门后落盘。
+**项目级上下文演化**：Project 级 artifact（ARCHITECTURE / environments / skill_md）的后续变更由 REQ 驱动：plan-author 在 Planning 阶段通过统一的 `project_context_change` 信封提交变更，走授权闸门后落盘到飞书 ARCHITECTURE 文档，再由下一次 plan READY 的单向同步覆盖到 GitHub `docs/ARCHITECTURE.md`（详见 [§4.5](#45-构造期-sot-与实施期-sot-的时相分段)）。Bootstrap 的 `CREATE_ARCHITECTURE_DOC` 步骤只建飞书 SOT 文档；首份 GitHub 副本由首个 plan READY 同步产出，避免空镜像。
 
 ---
 
@@ -399,9 +450,9 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 
 | | 内容 |
 |---|---|
-| **输入** | APPROVED 需求文档 + `needs_ui` 位 + 当前 ARCHITECTURE.md + acm-registry 切片 + 历史 plan（brown-field） |
-| **输出** | `docs/specs/REQ-*/design/`（`needs_ui=true` 时）+ `docs/specs/REQ-*/plan.md`（不可变）+ 可选 ARCHITECTURE.md 增量 commit |
-| **完成标准** | PlanStatus = READY：plan.md 已 commit；若含架构变更，已通过人工授权闸门并原子 apply 到 ARCHITECTURE.md |
+| **输入** | APPROVED 需求文档 + `needs_ui` 位 + 当前 ARCHITECTURE 飞书文档 + acm-registry 切片 + 历史 plan（brown-field） |
+| **输出** | 构造期：plan 飞书文档（`plan_doc_url`）+ ARCHITECTURE 飞书文档增量（可选）。实施期：`plans/<req_id>.md` 不可变快照 + `docs/ARCHITECTURE.md` 覆盖同步（按需），二者由 READY hook 单向同步至 GitHub（见 [§4.5](#45-构造期-sot-与实施期-sot-的时相分段)） |
+| **完成标准** | PlanStatus = READY：plan 飞书文档已冻结；若含架构变更，已通过人工授权闸门；READY hook 已把 plan + 可选 ARCHITECTURE 原子同步到 GitHub（单 commit） |
 
 **核心机制**：
 
@@ -425,7 +476,9 @@ SpecStatus：  None → DRAFTING → TRANSFORMING → LOCKED
 
 **本阶段实施范围**：`plan-author` + `plan.md` 完整落地；`design-author` 仅占状态机位置和端点 stub（等 claude design 能力落地后再实装）。
 
-**ARCHITECTURE 关系**：规划层是 ARCHITECTURE **演化的主通道**（规格层只读消费 ARCHITECTURE，不再负责演化）。项目级上下文变更走统一的 `project_context_change` 块 → 人工授权 → 钩子原子 apply 的单一路径，消除了规格层期间的并发写回复杂度。
+**ARCHITECTURE 关系**：规划层是 ARCHITECTURE **演化的主通道**（规格层只读消费，不再负责演化）。项目级上下文变更走统一的 `project_context_change` 块 → 人工授权 → 钩子单向同步的单一路径，消除了规格层期间的并发写回复杂度。编辑发生在飞书 ARCHITECTURE 文档，GitHub `docs/ARCHITECTURE.md` 是 freeze 后的只读镜像——时相分段模型见 [§4.5](#45-构造期-sot-与实施期-sot-的时相分段)。
+
+**存储模型**（承接 §4.5）：plan 文档在 DRAFTING 开始时由 Coordinator 创建一份 **per-REQ 飞书 docx**（title=`{req_id} Plan – {name}`），plan-author 三阶段交互都在此编辑；`PlanStatus → READY` 的 on_enter hook 把冻结飞书文本渲染为 `plans/<req_id>.md`（保留 YAML frontmatter + 结构化 Decisions 小节），与可能的 ARCHITECTURE 覆盖同步共享同一个 GitHub commit。plan.md 冻结后 GitHub 侧不可变——需要变更须另起新 REQ / 新 plan 周期，新文件用 `supersedes` 指回旧版。
 
 实现细节（`plan.md` schema、状态机事件表、卡片模板、钩子契约、端点契约、Agent prompt 契约）见 [layers/planning-harness-layer.md](layers/planning-harness-layer.md) 和 [docs/superpowers/specs/2026-04-19-planning-phase-design.md](../superpowers/specs/2026-04-19-planning-phase-design.md)。
 
@@ -449,18 +502,18 @@ SpecStatus：  None → DRAFTING → TRANSFORMING → LOCKED
 
 | | 内容 |
 |---|---|
-| **输入** | APPROVED 需求文档 + **规划层产出的 `plan.md`**（必备，从 2026-04-19 起）+ `needs_ui = true` 时的高保真 UI 原型（规划层 design 产物，claude design 实装后）+ 项目级上下文（ARCHITECTURE 当前 revision + ACM 注册表 + 设计系统快照） |
-| **输出** | **原始产出**：飞书 9 节 Spec（卡点 1a 锁定的协作草稿）<br>**派生产出**：GitHub 四文件（`design.md` + `tasks.md` + `ac-schedule.yaml` + harness 骨架）+ `acm-registry.yaml` patch，统一落在 `docs/specs/REQ-{PROJECT}-{NNN}/` 的 Spec PR |
-| **完成标准** | 卡点 1a 通过 → 博弈收敛（或死锁后人工兜底）→ Spec PR 合入 → `SPEC_LOCKED` |
+| **输入** | APPROVED 需求文档 + **规划层产出的 plan 飞书文档**（构造期）/ `plans/<req_id>.md`（Stage 2 实施期）+ `needs_ui = true` 时的高保真 UI 原型 + 项目级上下文（ARCHITECTURE：构造期飞书 / 实施期 GitHub + ACM 注册表 + 设计系统快照） |
+| **输出** | **Stage 1 产出**：飞书 9 节 Spec（构造期 SOT，卡点 1a 冻结）→ Checkpoint 1a 通过后单向同步为 `specs/<req_id>/spec.md`<br>**Stage 2 产出**：GitHub 四文件（`design.md` + `tasks.md` + `ac-schedule.yaml` + harness 骨架）+ `acm-registry.yaml` patch，统一落在 `docs/specs/REQ-{PROJECT}-{NNN}/` 的 Spec PR |
+| **完成标准** | 卡点 1a 通过（触发 9 节 Spec 同步）→ 博弈收敛（或死锁后人工兜底）→ Spec PR 合入 → `SPEC_LOCKED` |
 
-**两阶段 Spec 模型**（避免两轨混淆）：
+**两阶段 Spec 模型**（避免两轨混淆；与 [§4.5](#45-构造期-sot-与实施期-sot-的时相分段) 时相分段模型一致）：
 
-| 阶段 | 载体 | 目的 | 可变性 |
-|---|---|---|---|
-| **原始（阶段一）** | 飞书 9 节 Spec | 人-AI 协作协议；卡点 1a 的人类审阅界面 | 卡点 1a 前可改；通过后冻结 |
-| **派生（阶段二）** | GitHub `docs/specs/REQ-*/` 四文件 | 喂给 `spec-to-harness.yml` 等自动化管道；ACM/CI 唯一数据源 | 博弈转化产出；Spec PR 合入后锁定 |
+| 阶段 | 构造期 SOT | 实施期 SOT | 目的 | 可变性 |
+|---|---|---|---|---|
+| **原始（阶段一，9 节 Spec）** | 飞书文档（`document_url`） | `specs/<req_id>/spec.md` | 人-AI 协作协议；卡点 1a 的人类审阅界面 | 卡点 1a 前可改；通过后冻结 + 单向同步 GitHub |
+| **派生（阶段二，四文件）** | —（AI 自动产出） | GitHub `docs/specs/REQ-*/` 四文件 | 喂给 `spec-to-harness.yml` 等自动化管道；ACM/CI 唯一数据源 | 博弈转化产出；Spec PR 合入后锁定 |
 
-阶段一让"讨论与决策"发生在人最熟悉的协作空间；阶段二让自动化链路有确定性文件结构。**卡点 1a 是两阶段之间的唯一人工决策点**——通过即授权 AI 博弈转化，转化过程不引入新的人工节点（除非死锁）。
+阶段一让"讨论与决策"发生在人最熟悉的协作空间；阶段二让自动化链路有确定性文件结构。**卡点 1a 是两阶段之间的唯一人工决策点**——通过即授权 AI 博弈转化 + 触发 9 节 Spec 同步到 GitHub；转化过程不引入新的人工节点（除非死锁）。
 
 **Spec 子状态机**：需求层 6 态机的下挂子状态，仅在 `requirement.status == APPROVED` 时生效；与需求层正交，Spec 驳回或中止**不会**回写 `requirement.status`。
 
@@ -511,7 +564,14 @@ SpecStatus：  None → DRAFTING → TRANSFORMING → LOCKED
 - **凭据隔离**——所有 GitHub I/O 由 Coordinator 的 `GitHubGateway` 独占，agent 只产文本；能力层替换零风险，凭据审计面收敛到单一进程。
 - **单向审计**——`spec_source_revision` + Spec PR number + `transform_round` 合成单向链路（飞书 → GitHub），不做双向握手（飞书 Spec PR 合入后已冻结，无并发写回风险）。
 
-**ARCHITECTURE 与本层的关系**：**2026-04-19 起调整**——ARCHITECTURE 的**演化主通道回迁到规划层**（通过 plan.md 的 `project_context_change` 块 + 人工授权闸门 + `on_enter(PlanStatus.READY)` 钩子原子 apply）。**规格层只读消费 ARCHITECTURE**，不再负责并发写回。原先在本层的 `context_token` + revision round-trip 协议（见 [infra/context-chain-principle.md §七](infra/context-chain-principle.md#七并发写回契约)）在 ARCHITECTURE 的写回场景下退出，规划层钩子事务替代之；本层仅在未来如需触发架构二次变更时保留该协议作为 fallback。ACM / 设计系统快照在本层是**只读输入**。
+**ARCHITECTURE 与本层的关系**：**2026-04-19 起调整**——ARCHITECTURE 的**演化主通道回迁到规划层**（通过 plan.md 的 `project_context_change` 块 + 人工授权闸门 + `on_enter(PlanStatus.READY)` 钩子单向同步至 GitHub）。**规格层只读消费 ARCHITECTURE**，不再负责并发写回。原先在本层的 `context_token` + revision round-trip 协议（见 [infra/context-chain-principle.md §七](infra/context-chain-principle.md#七并发写回契约)）在 ARCHITECTURE 的写回场景下退出，规划层的单向同步替代之。
+
+**Stage 1 / Stage 2 的存储分段**（承接 §4.5）：
+- **Stage 1（9 节 Spec）构造期 SOT 是飞书文档**（复用现有 `document_id/url`）。spec-author 在飞书内完成撰写 + spec-reviewer 往返，直到 **Checkpoint 1a** 通过。
+- **Checkpoint 1a 触发单向同步**：Coordinator 把冻结的 9 节飞书文档渲染为 `specs/<req_id>/spec.md`，写 `spec_github_path / revision` 审计字段。此后 spec-transformer 与其他实施链 agent 只读 GitHub 副本，不再回读飞书。
+- **Stage 2（四文件）无飞书镜像**：spec-transformer / spec-transformer-reviewer 在 GitHub 博弈，产出 design.md / tasks.md / ac-schedule.yaml / harness 骨架。
+
+**实施期 Agent 读取 ARCHITECTURE 的源头**：spec-author（构造期）读飞书；spec-transformer（实施期 Stage 2）读 GitHub `docs/ARCHITECTURE.md`。按角色分段，见各自 SKILL.md。ACM / 设计系统快照在本层是**只读输入**。
 
 实现细节（四文件字段 schema、Agent prompt 契约、博弈参数、卡片模板、harness 目录结构、治理事件）见 [layers/spec-harness-layer.md](layers/spec-harness-layer.md)。
 

@@ -4,6 +4,8 @@
 **范围**：把 APPROVED 后的卡片流程接上 Plan 阶段，让 `APPROVED → Plan 撰写 → Plan READY → Spec 撰写` 成为唯一路径。
 **MVP Scope**：`architecture_change=None` 路径；不实现 `AUTH_PENDING`；仅一张终审卡；驳回采用纯状态重置（无自动 DM 唤醒）。
 
+> **2026-04-21 methodology callout（时相分段 SOT）**：本设计中 `plan_submit` 分支目前假设"落 GitHub PR 并切换 `PlanStatus.READY`"。自 2026-04-21 方法论 §4.5 时相分段 SOT 模型落地后，实际语义调整为：plan 构造期 SOT 是**飞书 plan docx**（Coordinator 在 DRAFTING 时创建），人工通过终审卡后 `on_enter(PlanStatus.READY)` hook 从飞书冻结版**单向同步**到 GitHub `plans/<req_id>.md`（而非直接把 plan-author 回传的文本作为 GitHub 源文件）。本 spec 的卡片流程与人工闸门不变；变的是落盘目标媒介。详见 [§4.5](../../context/harness-engineering-methodology-v2.0.md#45-构造期-sot-与实施期-sot-的时相分段) 与 [planning-harness-layer §6.2](../../context/layers/planning-harness-layer.md)。
+
 ## 背景
 
 PLANNING 阶段的状态机、CoordinatorService 方法、hook、HTTP endpoint（plan-context / plan-callback）已在 2026-04-19 落盘并实施完毕（见 `2026-04-19-planning-phase-design.md`）。但卡片流程仍停留在旧路径：APPROVED 后的 `final_review_passed` 卡片直接提供「开始 Spec 撰写」按钮，Plan 阶段在用户视角完全不可见、`plan_status` 始终为 None。本次任务把 Plan 嵌入卡片流。

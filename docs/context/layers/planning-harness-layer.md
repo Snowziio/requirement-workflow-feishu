@@ -13,6 +13,13 @@
 > `project_context_change`（支持 `architecture` / `environments` / `skill_md`
 > 三种 artifact）。MVP 只实现 `architecture` 执行器；其他 artifact 为 stub。
 > 详见 [docs/superpowers/specs/2026-04-20-project-layer-design.md](../../superpowers/specs/2026-04-20-project-layer-design.md)。
+>
+> **存储模型变更（2026-04-21，方法论 §4.5）**：plan.md / ARCHITECTURE / 9 节 Spec
+> **构造期 SOT 为飞书文档**，实施期 SOT 为 GitHub 仓库，两相由 freeze 点的**单向同步**
+> 衔接。本文以下所有涉及"commit plan.md"的描述都应理解为"从飞书冻结版同步渲染到
+> GitHub"。plan-author 构造期在飞书 plan docx 内作业；`PlanStatus → READY` hook 把
+> 飞书 plan 文本 + 可选 ARCHITECTURE 增量原子同步到 GitHub。详见方法论
+> [§4.5](../harness-engineering-methodology-v2.0.md#45-构造期-sot-与实施期-sot-的时相分段)。
 
 ---
 
@@ -38,8 +45,8 @@
 
 ### 1.2 关键判定（PlanStatus == READY 时必须满足）
 
-1. `plan.md` 已 commit 到 GitHub `main`，路径 `docs/specs/REQ-*/plan.md`
-2. 若 `project_context_change != None`：`ARCHITECTURE.md`（或对应 artifact）已按 `changes[]` **原子更新**，commit message 引用本 plan；`project_context_change.authorized == true` 含授权人与时间
+1. plan 飞书文档已冻结（内容固化，不再接受编辑）；READY hook 已把文本单向同步为 GitHub `plans/<req_id>.md`（默认路径，可由 ProjectConfig 配置）
+2. 若 `project_context_change != None`：飞书 ARCHITECTURE 文档已按 `changes[]` **增量更新**，且同一 READY hook 已把飞书冻结版覆盖同步到 GitHub `docs/ARCHITECTURE.md`，与 plan.md 共享同一 commit；`project_context_change.authorized == true` 含授权人与时间
 3. 所有 Decision 的 `chosen` 字段非空；每条 alternative 至少一条 pro / con
 4. 若 `needs_ui=true`，`DesignStatus == READY` 是 PlanStatus 进入 DRAFTING 的前置条件
 
@@ -48,7 +55,8 @@
 - **不**产出业务功能明细 / AC / API 细节 / 代码（spec-author 职责）
 - **不**替代设计者；plan-author 是**引导者 + 记录者**
 - **不**管项目骨架（Bootstrap 职责）
-- **不**管 ARCHITECTURE.md 首次初始化，只管**增量演进**
+- **不**管 ARCHITECTURE 首次初始化（Bootstrap 建飞书 SOT docx），只管**增量演进**
+- **不**管 GitHub 侧副本——构造期完全不触达 GitHub；GitHub 副本由 READY hook 的同步器产出
 
 ---
 
@@ -64,18 +72,18 @@
 |---|---|---|---|
 | 需求文档 8 字段 | 飞书 docx | 只读 | 决策输入 |
 | `needs_ui` | Bitable | 只读 | 是否跳过 DESIGNING |
-| design 产物（若 needs_ui=true） | `docs/specs/REQ-*/design/` | 只读 | 决策输入（UI 决定技术选择） |
-| 当前 `ARCHITECTURE.md` | GitHub 项目仓库 | 只读 | 架构约束；判断是否需 `project_context_change` |
+| design 产物（若 needs_ui=true） | 飞书 design docx（构造期） | 只读 | 决策输入（UI 决定技术选择） |
+| 当前 ARCHITECTURE（构造期 SOT） | 飞书 ARCHITECTURE docx（`architecture_doc_url`） | 只读 | 架构约束；判断是否需 `project_context_change` |
 | acm-registry 切片 | Coordinator 按技术范围过滤 | 只读 | 边界锚（supersedes 线索） |
 | tech_stack / category | project_config | 只读 | 技术栈锚 |
 
 ### 2.2 规划层产出物
 
-| 产物 | 路径 | 落盘时机 | 后置消费者 |
-|---|---|---|---|
-| `plan.md`（结构化多决策） | `docs/specs/REQ-*/plan.md` | `on_enter(PlanStatus.READY)` 原子 commit | spec-author（输入） |
-| `ARCHITECTURE.md` 增量补丁 | 项目仓库根 `ARCHITECTURE.md` | 同上，同一 commit | 所有下游层 |
-| DesignStatus / PlanStatus 状态字段 | Coordinator `Requirement` | 每次转移 | `/spec status` CLI / 飞书卡片 |
+| 产物 | 构造期介质 | 实施期介质（同步后） | 落盘时机 | 后置消费者 |
+|---|---|---|---|---|
+| plan 内容（结构化多决策） | 飞书 plan docx（`plan_doc_url`） | `plans/<req_id>.md` | 构造期：plan-author 按 IM 交互实时写入飞书；实施期：`on_enter(PlanStatus.READY)` 触发飞书→GitHub 单向同步 | spec-author 构造期读飞书；spec-transformer 实施期读 GitHub |
+| ARCHITECTURE 增量 | 飞书 ARCHITECTURE docx | `docs/ARCHITECTURE.md` | 构造期：plan-author 通过 `project_context_change` 授权门编辑飞书；实施期：READY hook 与 plan 同步共享 commit | 所有下游层 |
+| DesignStatus / PlanStatus 状态字段 | Coordinator `Requirement` | — | 每次转移 | `/spec status` CLI / 飞书卡片 |
 
 ---
 
@@ -229,17 +237,18 @@ plan-author 分三阶段与人协作；每阶段通过 IM 卡片驱动：
 - `on_enter(AUTH_PENDING)` 钩子推送授权卡片到创建群，展示 before/after diff + rationale + changes[] 数量
 - 两个按钮：**授权** / **驳回**
 
-### 6.2 授权后的原子 apply
+### 6.2 授权后的单向同步（飞书 → GitHub）
 
 `on_enter(PlanStatus.READY)` 钩子（同一事务内）：
 
-1. 读取当前 `ARCHITECTURE.md` + SHA（GitHub）
-2. 按 `project_context_change.changes[]` 依次 apply section patch（按 `artifact` 分派，MVP 仅 `architecture` 落盘）
-3. 生成新 `ARCHITECTURE.md` 内容
-4. 生成 `plan.md` 内容（内嵌 `authorized_by` / `authorized_at`）
-5. **原子 commit**：两文件一个 commit，message 引用本 REQ + plan
-6. 任何一步失败 → 整体回滚 + 转移失败（钩子抛 `ProjectRepoError(recoverable=True, reason="architecture_conflict")`）
-7. 回滚路径：coordinator 把 PlanStatus 退回 AUTH_PENDING，推送失败卡片让人决定重试 / 驳回 / restart
+1. 读取冻结后的飞书 plan docx 文本（通过 `plan_doc_id`），渲染为 `plans/<req_id>.md`（保留 YAML frontmatter + 结构化 Decisions 小节）
+2. 若 `project_context_change != None`：读取飞书 ARCHITECTURE docx（按授权授权前已完成增量编辑），渲染为 `docs/ARCHITECTURE.md`（按 `artifact` 分派，MVP 仅 `architecture` 落盘）
+3. 读取 GitHub 侧当前 `plans/<req_id>.md` SHA 与 `docs/ARCHITECTURE.md` SHA（后者用于幂等检查，仅在内容变更时加入本次 commit）
+4. **原子 commit**：plan + 可选 ARCHITECTURE 同一 commit，message 引用本 REQ + plan；写回 `plan_github_revision` / `architecture_github_revision` 审计字段
+5. 任何一步失败 → 整体回滚 + 转移失败（钩子抛 `ProjectRepoError(recoverable=True, reason="architecture_conflict" | "plan_sync_failed")`）
+6. 回滚路径：coordinator 把 PlanStatus 退回 AUTH_PENDING，推送失败卡片让人决定重试 / 驳回 / restart
+
+> 同步是**单向**的：GitHub 副本从不反向编辑；任何 plan / ARCHITECTURE 修订都回到飞书，再由下一次 plan READY 覆盖同步。
 
 ### 6.3 驳回路径
 
@@ -320,7 +329,10 @@ spec-author 在 SPEC_DRAFTING 阶段消费 plan.md，**不再做决策**：
 
 ## 十二、已知遗留（实施时登记到 session memory）
 
-- design-author 的具体产物格式待 Phase 2 第一次真实 needs_ui=true REQ 落地时收敛；当前设计文档留空 `docs/specs/REQ-*/design/` 目录结构，不强制 schema
-- `ARCHITECTURE.md` 的 section_path 匹配算法（header-based vs line-range）实施阶段再定
+- design-author 的具体产物格式待 Phase 2 第一次真实 needs_ui=true REQ 落地时收敛；当前设计文档留空飞书 design 子目录结构，不强制 schema
+- ARCHITECTURE 的 section_path 匹配算法（header-based vs line-range）实施阶段再定
 - plan-author / design-author 的 SKILL.md 位于 OpenClaw 仓库，遵循 skills+workspace 双份同步约束（见 `reference_openclaw_skill_dual_sync.md`）
-- spec-context 的 `_fetch_plan_md(req_id)` 默认返回空串，生产环境需替换成从 GitHub 拉 `docs/specs/<req>/plan.md` 的实现（留给下一次部署迭代处理）
+- **（2026-04-21 新增）飞书→GitHub 单向同步器尚未实装**：`_commit_plan_and_maybe_architecture` 当前按"在 GitHub 直接生成 plan.md"语义实现，需重构为"读飞书 plan docx → 渲染 → commit"；`_fetch_plan_md(req_id)` 原为 GitHub 读 stub，语义改为飞书适配层
+- **（2026-04-21 新增）`configure_plan_hooks` 生产未接线**（`service_app.py:201` 只装配到 ProjectBootstrap/Spec，未装配 plan hooks），导致 plan READY 时不触发任何同步
+- **（2026-04-21 新增）ARCHITECTURE 路径不一致**：bootstrap 写 `docs/ARCHITECTURE.md`、plan tools 读/写 `ARCHITECTURE.md` 根、spec-transformer 读 `ARCHITECTURE.yaml` 根——三处需收敛到 `docs/ARCHITECTURE.md`（md 格式，放弃 yaml 双写）
+- **（2026-04-21 新增）字段扩展**：ProjectConfig 需增 `architecture_github_path / revision`；Requirement 需增 `plan_doc_id / plan_doc_url / plan_github_path / plan_github_revision`

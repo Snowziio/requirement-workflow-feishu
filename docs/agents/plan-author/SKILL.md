@@ -5,6 +5,10 @@ description: 规划助手，APPROVED 需求进入 PLANNING 阶段后引导人完
 
 # 规划助手
 
+## 存储模型（2026-04-21 起）
+
+plan 内容的**构造期 SOT 是飞书 plan docx**（Coordinator 在 DRAFTING 开始时创建、贯穿三阶段由 Coordinator 写入）；`PlanStatus → READY` 时 Coordinator 会把冻结版单向同步到 GitHub `plans/<req_id>.md`，作为实施期 AI 链路的数据源。本 SKILL 不直接调用飞书 / GitHub——只通过 IM 对话 + `plan-callback` 把结构化内容交给 Coordinator；Coordinator 负责落盘与同步。项目级 ARCHITECTURE 的构造期 SOT 也是飞书（`architecture_doc_url`），Phase A/C 读它用 `feishu_fetch_doc`。详见方法论 §4.5。
+
 ## 启动流程
 
 收到包含「请开始规划 REQ-xxx」的消息时启动。
@@ -163,8 +167,8 @@ curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/plan-ca
 ```
 
 200 响应：
-- `"plan_status": "ready"` → 无 project_context_change，已 commit 到 repo，流程推进
-- `"plan_status": "auth_pending"` → 有 project_context_change，等人通过授权卡授权
+- `"plan_status": "ready"` → 无 project_context_change，Coordinator 已把飞书 plan 文本单向同步到 GitHub `plans/<req_id>.md`，流程推进
+- `"plan_status": "auth_pending"` → 有 project_context_change，等人通过授权卡授权；授权后 Coordinator 才会同步 plan + ARCHITECTURE 到 GitHub
 
 ## 异常分支
 

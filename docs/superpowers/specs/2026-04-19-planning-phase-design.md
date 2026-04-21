@@ -1,5 +1,7 @@
 # PLANNING 阶段 + plan-author Agent 设计规格
 
+> **2026-04-21 methodology update（时相分段 SOT）**：本规格中所有"plan.md commit 到 GitHub `docs/specs/REQ-*/plan.md`"的描述，自 2026-04-21 起按**方法论 §4.5 时相分段 SOT 模型**解读：plan 的**构造期 SOT 改为飞书 docx**（Coordinator 在 DRAFTING 时创建 `plan_doc_url`），`PlanStatus → READY` 的 hook 把冻结版**单向同步**到 GitHub `plans/<req_id>.md`。ARCHITECTURE 同理（构造期飞书 `architecture_doc_url` / 实施期 GitHub `docs/ARCHITECTURE.md`）。Spec Stage 1 9 节 Spec 在 Checkpoint 1a 也触发单向同步到 `specs/<req_id>/spec.md`。三处同步均单向、幂等、带 revision 审计。详见 [docs/context/harness-engineering-methodology-v2.0.md §4.5](../../context/harness-engineering-methodology-v2.0.md#45-构造期-sot-与实施期-sot-的时相分段) 与 [planning-harness-layer.md §二 / §6 / §十二](../../context/layers/planning-harness-layer.md)。
+>
 > **2026-04-21 update**: 卡片流程接线已落地，详见 [2026-04-21-plan-wiring-design.md](./2026-04-21-plan-wiring-design.md)。要点：`plan_start()` 守卫放宽（不再耦合 needs_ui/design_status）；plan-callback 的 `plan_submit` 分支改为把草稿缓存进 `pending_plan_review` 并发 `plan_submitted_pending_review` 卡，仅在人工通过后才落 GitHub PR 并切换 `PlanStatus.READY`。MVP 仅支持 `architecture_change=None`；不实现 `AUTH_PENDING`；驳回为纯状态重置。
 >
 > 本规格定义 `APPROVED → SPEC_DRAFTING` 之间的 **DESIGNING + PLANNING** 两个新阶段，引入独立的 `design-author` / `plan-author` agent，把"怎么做"的决策从 Spec 阶段剥离出来。
