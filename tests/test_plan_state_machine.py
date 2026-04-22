@@ -75,14 +75,14 @@ def test_design_start_from_none_goes_drafting():
     assert d.next_status is DesignStatus.DRAFTING
 
 
-def test_design_submit_goes_ready():
+def test_design_submit_goes_submit_pending_review():
     d = apply_design_event(DesignStatus.DRAFTING, DesignEvent.DESIGN_SUBMIT)
     assert d.allowed is True
-    assert d.next_status is DesignStatus.READY
+    assert d.next_status is DesignStatus.SUBMIT_PENDING_REVIEW
 
 
 def test_design_restart_from_any_allowed_returns_none():
-    for status in (DesignStatus.DRAFTING, DesignStatus.READY):
+    for status in (DesignStatus.DRAFTING, DesignStatus.SUBMIT_PENDING_REVIEW, DesignStatus.READY):
         d = apply_design_event(status, DesignEvent.DESIGN_RESTART)
         assert d.allowed is True
         assert d.next_status is None
