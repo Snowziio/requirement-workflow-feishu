@@ -1020,6 +1020,30 @@ class CoordinatorService:
         self._hooks.fire_enter(r.design_status, r)
         return r
 
+    def design_submit(
+        self,
+        req_id: str,
+        *,
+        archive_path: str,
+        pages_touched: list[dict],
+    ) -> "Requirement":
+        r = self.requirements[req_id]
+        decision = apply_design_event(r.design_status, DesignEvent.DESIGN_SUBMIT)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        r.pending_design_handoff = {
+            "archive_path": archive_path,
+            "pages_touched": list(pages_touched),
+            "submitted_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        prev = r.design_status
+        self._hooks.fire_exit(prev, r)
+        r.design_status = decision.next_status
+        self._hooks.fire_enter(r.design_status, r)
+        return r
+
     def _cascade_reset_spec(self, r: Requirement) -> None:
         """Quiet spec reset used by plan_restart; no deadlock precondition."""
         if r.spec_status is None:

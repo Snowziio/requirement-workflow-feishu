@@ -69,3 +69,70 @@ def test_design_start_fires_exit_hook_for_prev_status():
     svc.design_start(r.req_id, design_doc_id="d", design_doc_url="u")
     svc._hooks.fire_exit.assert_called_once()
     svc._hooks.fire_enter.assert_called_once()
+
+
+def test_design_submit_requires_drafting():
+    svc = _make_svc()
+    r = Requirement(
+        req_id="REQ-X-010", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=None,
+    )
+    svc.requirements[r.req_id] = r
+    import pytest
+    with pytest.raises(ValueError):
+        svc.design_submit(r.req_id, archive_path="design/archive/REQ-X-010_x/",
+                          pages_touched=[])
+
+
+def test_design_submit_transitions_to_submit_pending_review():
+    svc = _make_svc()
+    r = Requirement(
+        req_id="REQ-X-011", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.DRAFTING,
+    )
+    svc.requirements[r.req_id] = r
+    out = svc.design_submit(
+        r.req_id,
+        archive_path="design/archive/REQ-X-011_foo/",
+        pages_touched=[{"display_name": "Upload", "action": "new"}],
+    )
+    assert out.design_status is DesignStatus.SUBMIT_PENDING_REVIEW
+    assert out.pending_design_handoff is not None
+    assert out.pending_design_handoff["archive_path"] == "design/archive/REQ-X-011_foo/"
+    assert out.pending_design_handoff["pages_touched"] == [
+        {"display_name": "Upload", "action": "new"}
+    ]
+
+
+def test_design_submit_records_timestamp():
+    svc = _make_svc()
+    r = Requirement(
+        req_id="REQ-X-012", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.DRAFTING,
+    )
+    svc.requirements[r.req_id] = r
+    svc.design_submit(
+        r.req_id, archive_path="design/archive/REQ-X-012_foo/", pages_touched=[],
+    )
+    assert "submitted_at" in r.pending_design_handoff
+    assert r.pending_design_handoff["submitted_at"]
+
+
+def test_design_submit_fires_hooks_in_order():
+    svc = _make_svc()
+    r = Requirement(
+        req_id="REQ-X-013", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.DRAFTING,
+    )
+    svc.requirements[r.req_id] = r
+    svc.design_submit(r.req_id, archive_path="x", pages_touched=[])
+    # Exit called first with DRAFTING, enter called with SUBMIT_PENDING_REVIEW
+    svc._hooks.fire_exit.assert_called_once()
+    svc._hooks.fire_enter.assert_called_once()
+    # Call order: exit.call_args[0][0] should be DRAFTING; enter.call_args[0][0] should be SUBMIT_PENDING_REVIEW
+    assert svc._hooks.fire_exit.call_args[0][0] is DesignStatus.DRAFTING
+    assert svc._hooks.fire_enter.call_args[0][0] is DesignStatus.SUBMIT_PENDING_REVIEW
