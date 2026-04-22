@@ -992,6 +992,34 @@ class CoordinatorService:
             self.plan_restart(req_id)
         return r
 
+    # ── DESIGN layer ────────────────────────────────────────────────────
+
+    def design_start(
+        self,
+        req_id: str,
+        *,
+        design_doc_id: str = "",
+        design_doc_url: str = "",
+    ) -> "Requirement":
+        r = self.requirements[req_id]
+        if r.status != WorkflowStatus.APPROVED:
+            raise ValueError(
+                f"design_start requires workflow_status=APPROVED, got {r.status.value}"
+            )
+        if not r.needs_ui:
+            raise ValueError("design_start requires needs_ui=True")
+        decision = apply_design_event(r.design_status, DesignEvent.DESIGN_START)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        prev = r.design_status
+        self._hooks.fire_exit(prev, r)
+        r.design_status = decision.next_status
+        r.design_doc_id = design_doc_id
+        r.design_doc_url = design_doc_url
+        self._hooks.fire_enter(r.design_status, r)
+        return r
+
     def _cascade_reset_spec(self, r: Requirement) -> None:
         """Quiet spec reset used by plan_restart; no deadlock precondition."""
         if r.spec_status is None:
