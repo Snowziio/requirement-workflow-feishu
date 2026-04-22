@@ -296,6 +296,34 @@ class FeishuGateway:
             document_url=f"{self.settings.feishu_base_url}/docx/{document.document_id}",
         )
 
+    def create_design_document(self, requirement: Requirement) -> CreatedDocument | None:
+        if not self.settings.feishu_doc_folder_token:
+            return None
+        title = f"{requirement.req_id} {requirement.name} — Design Brief"
+        LOGGER.info("Feishu create_design_document req_id=%s title=%s", requirement.req_id, title)
+        request = (
+            CreateDocumentRequest.builder()
+            .request_body(
+                CreateDocumentRequestBody.builder()
+                .folder_token(self.settings.feishu_doc_folder_token)
+                .title(title)
+                .build()
+            )
+            .build()
+        )
+        response = self.client.docx.v1.document.create(request)
+        self._ensure_success(response, "create design document")
+        document = response.data.document
+        LOGGER.info(
+            "Feishu created design document req_id=%s document_id=%s",
+            requirement.req_id,
+            document.document_id,
+        )
+        return CreatedDocument(
+            document_id=document.document_id,
+            document_url=f"{self.settings.feishu_base_url}/docx/{document.document_id}",
+        )
+
     def create_architecture_document(self, project: str) -> CreatedDocument | None:
         if not self.settings.feishu_doc_folder_token:
             return None
