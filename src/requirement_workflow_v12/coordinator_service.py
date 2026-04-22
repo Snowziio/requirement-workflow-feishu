@@ -1044,6 +1044,49 @@ class CoordinatorService:
         self._hooks.fire_enter(r.design_status, r)
         return r
 
+    def design_final_approve(
+        self, req_id: str, *, approved_by: str = "",
+    ) -> "Requirement":
+        r = self.requirements[req_id]
+        decision = apply_design_event(r.design_status, DesignEvent.DESIGN_FINAL_APPROVE)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        handoff = r.pending_design_handoff or {}
+        r.design_archive_path = handoff.get("archive_path", "")
+
+        prev = r.design_status
+        self._hooks.fire_exit(prev, r)
+        r.design_status = decision.next_status
+        r.design_precondition_met = True
+        r.pending_design_handoff = None    # cleared; now archived
+        self._hooks.fire_enter(r.design_status, r)
+        LOGGER.info(
+            "design_final_approve req_id=%s approved_by=%s archive=%s",
+            req_id, approved_by, r.design_archive_path,
+        )
+        return r
+
+    def design_final_reject(
+        self, req_id: str, *, reason: str = "",
+    ) -> "Requirement":
+        r = self.requirements[req_id]
+        decision = apply_design_event(r.design_status, DesignEvent.DESIGN_FINAL_REJECT)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        handoff = r.pending_design_handoff or {}
+        handoff["reject_reason"] = reason
+        r.pending_design_handoff = handoff
+
+        prev = r.design_status
+        self._hooks.fire_exit(prev, r)
+        r.design_status = decision.next_status
+        r.design_precondition_met = False
+        self._hooks.fire_enter(r.design_status, r)
+        LOGGER.info("design_final_reject req_id=%s reason=%s", req_id, reason)
+        return r
+
     def _cascade_reset_spec(self, r: Requirement) -> None:
         """Quiet spec reset used by plan_restart; no deadlock precondition."""
         if r.spec_status is None:

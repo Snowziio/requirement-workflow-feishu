@@ -136,3 +136,86 @@ def test_design_submit_fires_hooks_in_order():
     # Call order: exit.call_args[0][0] should be DRAFTING; enter.call_args[0][0] should be SUBMIT_PENDING_REVIEW
     assert svc._hooks.fire_exit.call_args[0][0] is DesignStatus.DRAFTING
     assert svc._hooks.fire_enter.call_args[0][0] is DesignStatus.SUBMIT_PENDING_REVIEW
+
+
+def test_design_final_approve_transitions_to_ready_and_unlocks_plan():
+    svc = _make_svc()
+    r = Requirement(
+        req_id="REQ-X-020", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.SUBMIT_PENDING_REVIEW,
+        pending_design_handoff={
+            "archive_path": "design/archive/REQ-X-020_x/",
+            "pages_touched": [],
+            "submitted_at": "2026-04-23T00:00:00+00:00",
+        },
+    )
+    svc.requirements[r.req_id] = r
+    out = svc.design_final_approve(r.req_id, approved_by="tech-lead-1")
+    assert out.design_status is DesignStatus.READY
+    assert out.design_precondition_met is True
+    assert out.pending_design_handoff is None     # cleared after approval
+    assert out.design_archive_path == "design/archive/REQ-X-020_x/"
+
+
+def test_design_final_approve_rejects_non_submit_pending_review():
+    svc = _make_svc()
+    r = Requirement(
+        req_id="REQ-X-021", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.DRAFTING,
+    )
+    svc.requirements[r.req_id] = r
+    import pytest
+    with pytest.raises(ValueError):
+        svc.design_final_approve(r.req_id, approved_by="x")
+
+
+def test_design_final_reject_returns_to_drafting():
+    svc = _make_svc()
+    r = Requirement(
+        req_id="REQ-X-022", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.SUBMIT_PENDING_REVIEW,
+        pending_design_handoff={
+            "archive_path": "design/archive/REQ-X-022_x/",
+            "pages_touched": [],
+            "submitted_at": "2026-04-23T00:00:00+00:00",
+        },
+    )
+    svc.requirements[r.req_id] = r
+    out = svc.design_final_reject(r.req_id, reason="配色偏差")
+    assert out.design_status is DesignStatus.DRAFTING
+    assert out.design_precondition_met is False
+    # handoff kept for reference; reason recorded
+    assert out.pending_design_handoff is not None
+    assert out.pending_design_handoff["reject_reason"] == "配色偏差"
+
+
+def test_design_final_reject_rejects_non_submit_pending_review():
+    svc = _make_svc()
+    r = Requirement(
+        req_id="REQ-X-023", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.DRAFTING,
+    )
+    svc.requirements[r.req_id] = r
+    import pytest
+    with pytest.raises(ValueError):
+        svc.design_final_reject(r.req_id, reason="x")
+
+
+def test_design_final_approve_without_pending_handoff_still_transitions():
+    """Edge case: if pending_design_handoff is None for some reason, the transition
+    should still succeed; design_archive_path just stays empty."""
+    svc = _make_svc()
+    r = Requirement(
+        req_id="REQ-X-024", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.SUBMIT_PENDING_REVIEW,
+        pending_design_handoff=None,
+    )
+    svc.requirements[r.req_id] = r
+    out = svc.design_final_approve(r.req_id, approved_by="x")
+    assert out.design_status is DesignStatus.READY
+    assert out.design_archive_path == ""
