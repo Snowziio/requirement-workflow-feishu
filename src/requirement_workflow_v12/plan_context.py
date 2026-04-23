@@ -55,4 +55,12 @@ class PlanContextBuilder:
             "plan_outline": list(r.plan_outline),
             "plan_decisions_wip": list(r.plan_decisions_wip),
             "plan_phase": r.plan_phase.value if r.plan_phase else None,
+            "design_artifact": self._design_artifact_slice(r),
+        }
+
+    def _design_artifact_slice(self, r) -> dict:
+        return {
+            "archive_path": getattr(r, "design_archive_path", "") or "",
+            "needs_ui": getattr(r, "needs_ui", False),
+            "design_status": r.design_status.value if getattr(r, "design_status", None) else None,
         }

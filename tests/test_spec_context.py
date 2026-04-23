@@ -215,3 +215,67 @@ def test_spec_context_includes_plan_md_content_when_ready(tmp_path):
     assert "plan_md_content" in result.context
     assert "req_id: R" in result.context["plan_md_content"]
     assert result.context["plan_decision_ids"] == ["D1", "D2"]
+
+
+def test_spec_context_includes_design_artifact():
+    """Spec context must include design_artifact slice for spec-author consumption."""
+    from requirement_workflow_v12.plan_state_machine import PlanStatus, DesignStatus
+    from requirement_workflow_v12.spec_context import SpecContextBuilder
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    from requirement_workflow_v12.models import Requirement, WorkflowStatus
+    from requirement_workflow_v12.project_config import ProjectConfig
+    from unittest.mock import MagicMock
+
+    svc = CoordinatorService()
+    r = Requirement(req_id="R", name="n", project="P", summary="s", creator="c")
+    r.status = WorkflowStatus.APPROVED
+    r.plan_status = PlanStatus.READY
+    r.needs_ui = True
+    r.design_status = DesignStatus.READY
+    r.design_archive_path = "design/archive/R_foo/"
+    svc.requirements["R"] = r
+    svc.project_configs["P"] = ProjectConfig(
+        category="web", template_version="v1",
+        architecture_doc_id="a", architecture_doc_url="u",
+        tech_stack={}, github_repo_url="o/r",
+    )
+    gw = MagicMock()
+    gw.fetch_document_revision.return_value = "rev-1"
+    builder = SpecContextBuilder(svc, gw)
+
+    result = builder.build("R")
+
+    assert "design_artifact" in result.context
+    assert result.context["design_artifact"]["archive_path"] == "design/archive/R_foo/"
+    assert result.context["design_artifact"]["needs_ui"] is True
+    assert result.context["design_artifact"]["design_status"] == "DESIGN_READY"
+
+
+def test_spec_context_design_artifact_when_no_design():
+    """REQ without design still gets design_artifact slice with None/empty defaults."""
+    from requirement_workflow_v12.plan_state_machine import PlanStatus
+    from requirement_workflow_v12.spec_context import SpecContextBuilder
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    from requirement_workflow_v12.models import Requirement, WorkflowStatus
+    from requirement_workflow_v12.project_config import ProjectConfig
+    from unittest.mock import MagicMock
+
+    svc = CoordinatorService()
+    r = Requirement(req_id="R", name="n", project="P", summary="s", creator="c")
+    r.status = WorkflowStatus.APPROVED
+    r.plan_status = PlanStatus.READY
+    svc.requirements["R"] = r
+    svc.project_configs["P"] = ProjectConfig(
+        category="web", template_version="v1",
+        architecture_doc_id="a", architecture_doc_url="u",
+        tech_stack={}, github_repo_url="o/r",
+    )
+    gw = MagicMock()
+    gw.fetch_document_revision.return_value = "rev-1"
+    builder = SpecContextBuilder(svc, gw)
+
+    result = builder.build("R")
+
+    assert result.context["design_artifact"]["archive_path"] == ""
+    assert result.context["design_artifact"]["needs_ui"] is False
+    assert result.context["design_artifact"]["design_status"] is None
