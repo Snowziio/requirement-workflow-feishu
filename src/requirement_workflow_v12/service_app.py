@@ -1885,10 +1885,32 @@ class CoordinatorRuntimeApp:
                     "type": "error",
                     "content": f"保存失败：{exc}",
                 }}
-            return 200, {"toast": {
-                "type": "success",
-                "content": "已保存。本项目现在可以接收 needs_ui=true 的需求。",
-            }}
+
+            # Self-heal: reqs that reached APPROVED before this binding existed
+            # were blocked from dispatching design (guard raised in design_start).
+            # Now that the URL is set, retry dispatch for any stuck reqs in this
+            # project so they can enter DRAFTING without operator intervention.
+            resumed = []
+            for r in list(self.service.requirements.values()):
+                if (
+                    r.project == project
+                    and r.needs_ui
+                    and r.status == WorkflowStatus.APPROVED
+                    and r.design_status is None
+                ):
+                    dispatch_design_start_if_needed(self, r)
+                    resumed.append(r.req_id)
+            if resumed:
+                LOGGER.info(
+                    "bind_claude_design_project resumed design dispatch project=%s reqs=%s",
+                    project, resumed,
+                )
+                self._save_state()
+
+            toast_content = "已保存。本项目现在可以接收 needs_ui=true 的需求。"
+            if resumed:
+                toast_content += f" 已为 {len(resumed)} 个卡住的需求恢复 design 派发。"
+            return 200, {"toast": {"type": "success", "content": toast_content}}
 
         if action_name == "submit_create_project":
             form = self._extract_project_form_payload(
