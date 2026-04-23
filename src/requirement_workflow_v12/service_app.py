@@ -137,6 +137,36 @@ class OutboundCard:
     receive_id_type: str = "chat_id"
 
 
+def dispatch_design_start_if_needed(app, requirement) -> None:
+    """Called from approve_requirement post-hook. Creates Feishu design docx and
+    calls service.design_start. No-op when needs_ui=False. Never raises."""
+    if not requirement.needs_ui:
+        return
+    try:
+        created = app.gateway.create_design_document(requirement)
+    except Exception as exc:
+        LOGGER.warning(
+            "create_design_document failed req_id=%s: %s", requirement.req_id, exc,
+        )
+        return
+    if created is None:
+        LOGGER.info(
+            "create_design_document returned None (folder token empty?) req_id=%s",
+            requirement.req_id,
+        )
+        return
+    try:
+        app.service.design_start(
+            requirement.req_id,
+            design_doc_id=created.document_id,
+            design_doc_url=created.document_url,
+        )
+    except Exception as exc:
+        LOGGER.warning(
+            "design_start failed req_id=%s: %s", requirement.req_id, exc,
+        )
+
+
 class CoordinatorRuntimeApp:
     """Harness-style runtime for the coordinator service."""
 
@@ -880,6 +910,8 @@ class CoordinatorRuntimeApp:
                     )
                 except Exception as exc:
                     LOGGER.warning("Failed to create design system document: %s", exc)
+
+            dispatch_design_start_if_needed(self, requirement)
 
         self._save_state()
         self._dispatch_transition_notifications(requirement, trigger="final_review_passed" if approved else "final_review_rejected")
