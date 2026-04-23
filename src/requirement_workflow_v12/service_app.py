@@ -2977,6 +2977,31 @@ class CoordinatorRuntimeApp:
                     "value": {"action": "send_spec_author_start", "req_id": requirement.req_id},
                 },
             ]
+        if trigger == "design_submit_pending_review":
+            return [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "通过（D-DESIGN-2）"},
+                    "type": "primary",
+                    "value": {"action": "design_final_approve", "req_id": requirement.req_id},
+                },
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "打回"},
+                    "type": "default",
+                    "value": {"action": "design_final_reject", "req_id": requirement.req_id},
+                },
+            ]
+        if trigger == "design_ready":
+            return [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "开始 Plan 撰写"},
+                    "type": "primary",
+                    "value": {"action": "send_plan_author_start", "req_id": requirement.req_id},
+                },
+            ]
+        # design_brief_ready has no buttons (informational only); falls through to default []
         return []
 
     def _transition_notification_content(self, requirement: Requirement, *, trigger: str) -> tuple[str, str, str, str, str]:
@@ -3090,6 +3115,40 @@ class CoordinatorRuntimeApp:
                 f"Plan PR：{requirement.plan_pr_url or '（创建中）'}",
                 "Plan 已合并至项目仓库，需求进入 Spec 撰写阶段。",
                 f"请点击「开始 Spec 撰写」，将启动指令私发给自己后转发给 {spec_agent_name}。",
+            )
+        if trigger == "design_brief_ready":
+            doc_url = requirement.design_doc_url or "待同步"
+            return (
+                "indigo",
+                f"{requirement.req_id} 设计 Brief 已就绪",
+                "design-brief-author 已生成首轮 Prompt，设计师可以前往 Claude Design 作业。",
+                f"飞书 Brief：{doc_url}\n提示：进 Claude Design 后先点 Sync now 拉取最新代码。",
+                "完成 Handoff 导出后，点击本卡片的「上传 Handoff」按钮回流产物。",
+            )
+        if trigger == "design_submit_pending_review":
+            archive_path = requirement.design_archive_path or "（未解析）"
+            pages: list[str] = []
+            if requirement.pending_design_handoff:
+                pages = [
+                    p.get("display_name", "")
+                    for p in requirement.pending_design_handoff.get("pages_touched") or []
+                    if p.get("display_name")
+                ]
+            pages_str = "、".join(pages) if pages else "（无页面声明）"
+            return (
+                "orange",
+                f"{requirement.req_id} 设计终审待处理（D-DESIGN-2）",
+                f"设计师已提交 handoff bundle，归档路径：{archive_path}\n本次涉及页面：{pages_str}",
+                "终审人可查看归档内容并决定通过或打回。",
+                "请终审人完成 D-DESIGN-2 审查：通过后 Plan 阶段将解锁；打回则退回 DRAFTING。",
+            )
+        if trigger == "design_ready":
+            return (
+                "green",
+                f"{requirement.req_id} 设计阶段完成",
+                "D-DESIGN-2 终审通过，设计归档已冻结。",
+                f"归档：{requirement.design_archive_path or '（同步中）'}\n提交 SHA：{requirement.design_github_revision or '（待同步）'}",
+                "Plan 阶段已解锁，点击「开始 Plan 撰写」继续。",
             )
         return ("grey", "", "", "", "")
 
