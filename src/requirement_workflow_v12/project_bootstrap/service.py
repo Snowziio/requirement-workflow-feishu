@@ -422,6 +422,13 @@ class ProjectBootstrapService:
             bootstrap_log=new_log,
         )
         self._feishu.upsert_project_config(request.project, cfg)
+        try:
+            self._emit_design_binding_reminder_card(project=request.project, cfg=cfg)
+        except Exception as exc:
+            _logger.warning(
+                "design binding reminder emission failed project=%s: %s",
+                request.project, exc,
+            )
         return cfg
 
     def _emit_design_binding_reminder_card(

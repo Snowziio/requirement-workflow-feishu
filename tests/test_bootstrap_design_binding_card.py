@@ -120,3 +120,92 @@ def test_emit_design_binding_reminder_card_failure_does_not_raise():
     )
     # Must not raise
     service._emit_design_binding_reminder_card(project="testp", cfg=cfg)
+
+
+def test_finalize_calls_emit_binding_card():
+    """FINALIZE step must invoke _emit_design_binding_reminder_card on success."""
+    from unittest.mock import MagicMock
+    from requirement_workflow_v12.project_bootstrap.service import ProjectBootstrapService
+    from requirement_workflow_v12.project_bootstrap.types import BootstrapRequest
+    from requirement_workflow_v12.project_config import ProjectConfig
+
+    service = ProjectBootstrapService(
+        repo_tools=MagicMock(), feishu_gateway=MagicMock(), github_gateway=MagicMock(),
+        template_owner="org", template_repo="t", new_owner="new",
+    )
+    # Prime a config that's mid-bootstrap with steps 1-6 completed (ready for FINALIZE)
+    cfg = ProjectConfig(
+        category="enterprise-app", template_version="enterprise-app.v1",
+        architecture_doc_id="d", architecture_doc_url="u",
+        feishu_chat_id="oc_xyz",
+        github_repo_url="https://github.com/org/testp",
+        bootstrap_status="BOOTSTRAPPING",
+        project_status="BOOTSTRAPPING",
+        bootstrap_log=[{"step": i, "status": "ok", "step_name": f"STEP{i}", "ts": "2026-04-23T00:00:00+00:00"} for i in range(1, 7)],
+    )
+    configs = {"testp": cfg}
+    service._feishu.list_project_configs.return_value = configs
+
+    def _upsert(project, new_cfg):
+        configs[project] = new_cfg
+        return new_cfg
+    service._feishu.upsert_project_config.side_effect = _upsert
+
+    request = BootstrapRequest(
+        project="testp", category="enterprise-app",
+        owner_user_id="u1", creator_chat_id="c1",
+    )
+    result_cfg = service.finalize(request)
+
+    # Binding card sent
+    service._feishu.send_card.assert_called_once()
+    # Verify the card was sent to the right chat
+    args = service._feishu.send_card.call_args
+    chat_id = args.args[0] if args.args else args.kwargs.get("receive_id")
+    assert chat_id == "oc_xyz"
+    # And the cfg is PROVISIONED (existing behavior preserved)
+    assert (
+        result_cfg.bootstrap_status == "PROVISIONED"
+        or result_cfg.project_status == "PROVISIONED"
+    )
+
+
+def test_finalize_binding_card_failure_does_not_block_finalize():
+    """If send_card raises, FINALIZE still completes (best-effort)."""
+    from unittest.mock import MagicMock
+    from requirement_workflow_v12.project_bootstrap.service import ProjectBootstrapService
+    from requirement_workflow_v12.project_bootstrap.types import BootstrapRequest
+    from requirement_workflow_v12.project_config import ProjectConfig
+
+    service = ProjectBootstrapService(
+        repo_tools=MagicMock(), feishu_gateway=MagicMock(), github_gateway=MagicMock(),
+        template_owner="org", template_repo="t", new_owner="new",
+    )
+    cfg = ProjectConfig(
+        category="enterprise-app", template_version="enterprise-app.v1",
+        architecture_doc_id="d", architecture_doc_url="u",
+        feishu_chat_id="oc_xyz",
+        github_repo_url="https://github.com/org/testp",
+        bootstrap_status="BOOTSTRAPPING",
+        bootstrap_log=[{"step": i, "status": "ok", "step_name": f"STEP{i}", "ts": "2026-04-23T00:00:00+00:00"} for i in range(1, 7)],
+    )
+    configs = {"testp": cfg}
+    service._feishu.list_project_configs.return_value = configs
+
+    def _upsert(project, new_cfg):
+        configs[project] = new_cfg
+        return new_cfg
+    service._feishu.upsert_project_config.side_effect = _upsert
+    service._feishu.send_card.side_effect = RuntimeError("feishu 500")
+
+    request = BootstrapRequest(
+        project="testp", category="enterprise-app",
+        owner_user_id="u1", creator_chat_id="c1",
+    )
+    # Must not raise
+    result_cfg = service.finalize(request)
+    # Finalize still completes despite send_card error
+    assert (
+        result_cfg.bootstrap_status == "PROVISIONED"
+        or result_cfg.project_status == "PROVISIONED"
+    )
