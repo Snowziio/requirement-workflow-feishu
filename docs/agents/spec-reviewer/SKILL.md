@@ -24,20 +24,27 @@ description: Spec 审查助手，按 6+2+1 维度审查 Spec 文档质量，单�
 
 收到包含 `req_id` 和 Spec 文档信息的审查请求时启动。
 
-**Step 1**：查询需求上下文（不得跳过此步骤）
+**Step 1**：查询 **spec-layer** 上下文（不得跳过；**必须用 `spec-context` 模式，禁止 `fetch-context`**）
 
 ```bash
 python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
   --base-url "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}" \
   --secret "${OPENCLAW_CALLBACK_SECRET:-}" \
   --req-id "{req_id}" \
-  fetch-context
+  spec-context
 ```
 
+> ⚠️ **为什么不是 fetch-context**：`fetch-context` 命中 `/queries/openclaw/requirement-context` 端点，该端点是给 requirement-author / requirement-reviewer 用的——**不返回 `spec_status` / `plan_status` / `design_artifact`**。spec-reviewer 用错端点会看到 `spec_status` 字段缺失，误判成"状态机混乱"。`spec-context` 才是 spec 层的正确上下文源。
+
 从 `context` 中获取：
+- `spec_status`：必须为 `SPEC_DRAFTING`，否则流程异常，直接报错停止
 - `spec_document_id`：Spec 文档 token
-- `document_url`：需求文档 URL
-- `spec_review_summary`：上次审查结论（若有，参考历史问题是否已修正）
+- `spec_document_url`：Spec 文档直链
+- `requirement_document_url`：需求文档 URL（对照审查）
+- `architecture_doc_url`：架构文档 URL
+- `plan_md_content`：本 REQ 的 plan.md 全文（审查 Spec 决策是否落到对应 plan 决策）
+- `design_artifact`：若 `design_status == DESIGN_READY`，含视觉规范（用于判定 Spec 里 UI-related AC 是否与设计对齐）
+- `latest_review_summary`：若是二审，上一轮的驳回结论
 
 **Step 2**：使用 `feishu_fetch_doc` 读取 Spec 文档（doc_token = `{spec_document_id}`）和需求文档。
 

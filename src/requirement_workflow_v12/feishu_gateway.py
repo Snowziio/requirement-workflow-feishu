@@ -449,15 +449,44 @@ class FeishuGateway:
         response = self.client.docx.v1.document_block_children.create(request)
         self._ensure_success(response, "write document text")
 
+    def _build_raw_content_request(self, document_id: str):
+        """Build a RawContentDocumentRequest for the Feishu docx raw_content
+        endpoint. Lazy-imports the SDK class so the module can still load in
+        test environments without lark_oapi. Tests that don't install the SDK
+        can patch this method to return a mock.
+
+        Raises RuntimeError if lark_oapi is absent and no patch is in place.
+        """
+        try:
+            from lark_oapi.api.docx.v1 import RawContentDocumentRequest
+        except ImportError as exc:
+            raise RuntimeError(
+                "lark_oapi not installed; install the runtime deps or patch "
+                "FeishuGateway._build_raw_content_request in tests."
+            ) from exc
+        return (
+            RawContentDocumentRequest.builder()
+            .document_id(document_id)
+            .build()
+        )
+
     def read_document_text(self, document_id: str) -> str:
         """Return the plain-text content of a Feishu docx.
 
         Used by freeze-point syncers (Feishu → GitHub) to read the
         construction-phase SOT. Raises on SDK failure so callers can decide
         whether to fall back to an audit copy.
+
+        IMPORTANT: the lark-oapi SDK's ``document.raw_content(request)`` expects
+        a ``RawContentDocumentRequest`` (a ``BaseRequest`` subclass with
+        ``.token_types``), not the raw document_id string. Passing the string
+        directly raises ``AttributeError: 'str' object has no attribute
+        'token_types'`` from deep inside the SDK — previously this crashed the
+        spec-layer sync on SPEC_DRAFTING → TRANSFORMING transition (2026-04-24).
         """
         LOGGER.info("Feishu read_document_text document_id=%s", document_id)
-        response = self.client.docx.v1.document.raw_content(document_id)
+        request = self._build_raw_content_request(document_id)
+        response = self.client.docx.v1.document.raw_content(request)
         self._ensure_success(response, "read document text")
         content = getattr(response.data, "content", None) or ""
         return content
@@ -471,7 +500,8 @@ class FeishuGateway:
         """
         import time as _time
         try:
-            response = self.client.docx.v1.document.raw_content(document_id)
+            request = self._build_raw_content_request(document_id)
+            response = self.client.docx.v1.document.raw_content(request)
             self._ensure_success(response, "fetch document revision")
             revision_id = getattr(response.data, "revision_id", None)
             if revision_id is not None:

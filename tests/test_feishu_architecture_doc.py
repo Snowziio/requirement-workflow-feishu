@@ -80,15 +80,32 @@ def test_write_document_text_creates_block():
     gateway.client.docx.v1.document_block_children.create.assert_called_once()
 
 
-def test_fetch_document_revision_returns_string():
+def _fake_request(document_id: str):
+    """A minimal stand-in for RawContentDocumentRequest that satisfies the
+    test assertion: not-a-str, has token_types, carries the document_id."""
+    req = MagicMock(name="RawContentDocumentRequest")
+    req.token_types = {"tenant"}
+    req.document_id = document_id
+    return req
+
+
+def _gateway_with_request_stub():
+    """Build a FeishuGateway whose _build_raw_content_request is patched so
+    tests don't require lark_oapi to be installed."""
     from requirement_workflow_v12.feishu_gateway import FeishuGateway
 
     gateway = FeishuGateway.__new__(FeishuGateway)
     gateway.settings = MagicMock()
+    gateway.client = MagicMock()
+    gateway._build_raw_content_request = _fake_request
+    return gateway
+
+
+def test_fetch_document_revision_returns_string():
+    gateway = _gateway_with_request_stub()
     response = MagicMock(code=0, msg="ok")
     response.success.return_value = True
     response.data = MagicMock(revision_id=42)
-    gateway.client = MagicMock()
     gateway.client.docx.v1.document.raw_content.return_value = response
 
     rev = gateway.fetch_document_revision("doc_arch_1")
@@ -96,12 +113,53 @@ def test_fetch_document_revision_returns_string():
 
 
 def test_fetch_document_revision_falls_back_when_api_unavailable():
-    from requirement_workflow_v12.feishu_gateway import FeishuGateway
-
-    gateway = FeishuGateway.__new__(FeishuGateway)
-    gateway.settings = MagicMock()
-    gateway.client = MagicMock()
+    gateway = _gateway_with_request_stub()
     gateway.client.docx.v1.document.raw_content.side_effect = AttributeError("no raw_content")
 
     rev = gateway.fetch_document_revision("doc_arch_1")
     assert rev.startswith("ts-") and rev[3:].isdigit()
+
+
+def test_read_document_text_passes_request_object_not_raw_string():
+    """Regression: lark-oapi's raw_content(request) expects a RawContentDocumentRequest
+    with .token_types attribute, not the document_id string. Passing the string
+    directly raises AttributeError('str' object has no attribute 'token_types')
+    inside the SDK, which crashed the spec→transforming hook on 2026-04-24 and
+    blocked the whole Spec review → LOCKED transition.
+    """
+    gateway = _gateway_with_request_stub()
+    response = MagicMock(code=0, msg="ok")
+    response.success.return_value = True
+    response.data = MagicMock(content="hello world")
+    gateway.client.docx.v1.document.raw_content.return_value = response
+
+    text = gateway.read_document_text("doc_xyz")
+    assert text == "hello world"
+
+    call_args = gateway.client.docx.v1.document.raw_content.call_args
+    passed = call_args.args[0]
+    assert not isinstance(passed, str), (
+        "raw_content() must receive a RawContentDocumentRequest, not a str; "
+        "SDK will otherwise raise 'str has no attribute token_types'"
+    )
+    assert hasattr(passed, "token_types")
+    assert passed.document_id == "doc_xyz"
+
+
+def test_fetch_document_revision_passes_request_object_not_raw_string():
+    """Same SDK-signature fix as read_document_text — fetch_document_revision
+    previously masked the bug via try/except (silently returning timestamps),
+    which hid the AttributeError but also meant the revision field was always
+    a fake ts-* marker. Must now pass the builder-constructed request."""
+    gateway = _gateway_with_request_stub()
+    response = MagicMock(code=0, msg="ok")
+    response.success.return_value = True
+    response.data = MagicMock(revision_id=99)
+    gateway.client.docx.v1.document.raw_content.return_value = response
+
+    rev = gateway.fetch_document_revision("doc_rev_test")
+    assert rev == "rev-99"
+
+    passed = gateway.client.docx.v1.document.raw_content.call_args.args[0]
+    assert not isinstance(passed, str)
+    assert passed.document_id == "doc_rev_test"
