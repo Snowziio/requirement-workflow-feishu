@@ -115,6 +115,8 @@
 - Bootstrap FINALIZE 成功后自动推送"Claude Design 绑定提醒卡"到创建群
 - 飞书卡片 `bind_claude_design_project` action：用户填 URL → 回写 ProjectConfig
 - `design_start` 懒检查 `claude_design_project_url`：未绑定时阻断并重新推送绑定卡
+- OpenClaw skill `design-brief-author` 单轮批处理 agent：`docs/agents/design-brief-author/SKILL.md` + callback-schema；deploy 侧 `deploy/openclaw/workspace/agents/design-brief-author/` 全量 workspace；已注册到 `scripts/sync_openclaw_server.sh`
+- Coordinator `dispatch_design_start_if_needed` 在 design_start 成功后自动发 handoff DM 给 REQ 创建者，内含触发 skill 的文本（`请开始设计 Brief 生成 REQ-xxx` + `COORDINATOR_BASE_URL`）
 
 私发启动指令约定：
 
@@ -135,6 +137,9 @@
 - DS 快照自动同步（当前只占位 `design/system/.gitkeep`；v2 补）
 - 前端脚手架代码 scaffold（当前只 `.gitkeep` 占位；需单独设计规格）
 - 既有 bootstrapped 项目的迁移（手工 PR 补齐 / 后续 REQ 级 `project_context_change` gate 补）
+- design-brief-author skill 的真实联调（sync 到 staging → 创建 needs_ui=true REQ → 验证 Brief 写入飞书 design docx + callback 成功）
+- handoff DM 当前是"让用户手工转发给 agent"模式；v2 可探索 coordinator 直连 agent IM session 的 dispatch
+- design-context 的 `current_pages` 仍 stub 为空（design-phase Minor #11）；补全后 skill 可自动识别 new vs modify
 
 ## 联调参考
 
@@ -158,6 +163,11 @@
   [2026-04-23-bootstrap-design-integration-design.md](docs/superpowers/specs/2026-04-23-bootstrap-design-integration-design.md)
 - Bootstrap 层 design 集成实装计划：
   [2026-04-23-bootstrap-design-integration-plan.md](docs/superpowers/plans/2026-04-23-bootstrap-design-integration-plan.md)
+- design-brief-author skill 设计规格：
+  [2026-04-23-design-brief-author-skill-design.md](docs/superpowers/specs/2026-04-23-design-brief-author-skill-design.md)
+- design-brief-author skill 实装计划：
+  [2026-04-23-design-brief-author-skill-plan.md](docs/superpowers/plans/2026-04-23-design-brief-author-skill-plan.md)
+- SKILL.md 源：[docs/agents/design-brief-author/SKILL.md](docs/agents/design-brief-author/SKILL.md)
 
 ## Bitable Schema 约定
 
