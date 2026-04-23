@@ -34,13 +34,45 @@ curl -s "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/queries/openclaw/plan-co
   "plan_doc_id": "docx-xxx",
   "requirement_summary": "...",
   "plan_phase": "outline_pending | decisions_in_progress | final_review_pending",
-  "plan_outline": [] | [{"id": "D1", ...}]
+  "plan_outline": [] | [{"id": "D1", ...}],
+  "design_artifact": {
+    "archive_path": "design/archive/REQ-xxx_slug/",
+    "needs_ui": true,
+    "design_status": "DESIGN_READY | DESIGN_DRAFTING | null",
+    "github_revision": "commit-sha",
+    "feishu_brief_url": "https://.../docx/brief-id",
+    "design_system_doc_url": "https://.../docx/ds-id",
+    "pages": [{"display_name": "DashboardPage", "action": "new"}]
+  }
 }
 ```
 
 非 200 或 `ok != true` → 立即停止并报错。若 `plan_phase` 不是 `outline_pending`：说明断点续传，按当前 phase 继续（见后续 Step）。
 
 **关于 `plan_doc_url` / `plan_doc_id`**：这是本 REQ 的飞书 Plan docx，由 Coordinator 在 Plan 撰写启动时创建，是 plan 内容的构造期 SOT。当用户问「plan 文档在哪里」时，**直接回这条 URL**；不要说"还在处理中"或"commit 之后才有"。如果字段为空字符串，说明该 REQ 是老数据（部署时序问题）或 folder_token 未配置，回用户「该 REQ 未创建飞书 Plan 文档，建议 /plan restart 走一遍新流程」。
+
+**Step 1.5：Design → Plan 对齐契约（仅当 `design_artifact.design_status == "DESIGN_READY"` 触发）**
+
+这一步**必做**，否则会违反方法论 §6.2.8。如果 `design_artifact.design_status` 是 `null` 或 `"DESIGN_DRAFTING"`，跳过本步。
+
+进入 Phase A 骨架之前，**必须**读这三处设计产物：
+
+1. **Archive 归档（GitHub 冻结态）**——用 `design_artifact.github_revision` 钉到具体 commit 拉取：
+   - `<archive_path>MANIFEST.md`（页面清单 + 锚点元信息）
+   - `<archive_path>extracted/*/src/*.jsx`（视觉规范/布局/交互意图）
+   - `<archive_path>extracted/*/styles/tokens.css` 或 `assets/colors_and_type.css`（token 约束）
+2. **Design Brief 飞书文档**——`feishu_fetch_doc(design_artifact.feishu_brief_url 对应 doc_id)`，了解设计师的首轮 Prompt/目标
+3. **项目级 Design System**——`feishu_fetch_doc(design_artifact.design_system_doc_url 对应 doc_id)` 如非空，了解组件/token 规范
+
+**决策识别规则**（违反 = 破坏 design/plan 对齐）：
+
+- ❌ **design 已决定的事 → 禁止进入 outline**：layout、配色、字体、排版、组件视觉、交互动效——设计师已拍板，plan 不得回放。示例违规："D1. Dashboard 采用单栏还是多栏"（设计师已决，跳过）
+- ✅ **design 开放的事 → 必须在 outline 覆盖**：跨 design/plan 边界的决策不得默认沉默。典型边界决策：
+  - **数据源**：每个设计的 page 用什么数据（mock / 真实 API / 混合）
+  - **路由与导航**：URL 路径结构、页面间跳转策略
+  - **前端框架 / 组件库**：Vite+React / Next.js / shadcn/ui 等（若 ARCHITECTURE.md 未定）
+  - **token → framework 映射**：tokens.css 怎么翻译到 Tailwind theme / CSS Variables / styled-components
+  - **视觉参考翻译口径**：按像素还原 / 按语义重搭 / 按组件库替换
 
 **Step 2：按 plan_phase 分支**
 
@@ -133,6 +165,7 @@ curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/plan-ca
 schema_version: "1.0"
 req_id: "REQ-xxx"
 authored_by: "ou-xxx"  # 当前 session owner
+design_handoff_ref: "design/archive/REQ-xxx_slug/@<github_revision>"  # 仅 needs_ui=true 时必填；未做 design 的 REQ 省略此字段
 decisions:
   - id: D1
     title: "会话存储选型"
@@ -151,6 +184,8 @@ decisions:
 
 ## 决策（N 条，格式同 YAML 头，人可读展开）
 ```
+
+**关于 `design_handoff_ref`**：若 `design_artifact.design_status == "DESIGN_READY"`，YAML 头**必须**声明此字段，值为 `"{archive_path}@{github_revision}"`（取自 plan-context 响应）。这是 plan → design 追溯链的锚点，缺失会被 Coordinator 在 `plan_submit` 时校验拒绝。非 `needs_ui` REQ 省略此字段。
 
 2. 判断是否有 `project_context_change`：
    - **任一 decision 触及项目级制品** (ARCHITECTURE.md / project/environments.yaml / SKILL.md) → 生成 change block
@@ -204,6 +239,7 @@ curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/plan-ca
 - **不替用户拍板**：Phase B 讨论中若人犹豫，refine 问题而不是直接替答
 - **每次 wake-up 先拉 plan-context**：避免用陈旧 state
 - **plan.md schema 必须自验**：提交前确保 YAML front-matter 可解析、decisions 数组非空、每条有 chosen
+- **⚠️ Design → Plan 对齐（§6.2.8）**：`design_artifact.design_status == "DESIGN_READY"` 时，必须先按 Step 1.5 读设计产物再进 Phase A；plan.md YAML 必须带 `design_handoff_ref`；outline 不得重决策设计师已决定事项、必须覆盖 design-open 边界决策
 
 ## 反模式
 
@@ -213,3 +249,6 @@ curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/plan-ca
 - ❌ Phase C 在 curl 之前 IM 先发 plan.md 预览 + "提交中..." ——**最常见卡死模式**。这句话让用户以为 callback 已触发，实际你根本没调 curl 就结束了会话。修法：curl 先行，拿到 200 再说话。
 - ❌ Phase C callback 失败后伪装成已完成结束会话
 - ❌ 在 outline 已确认后的 Phase B 又改 outline 条数
+- ❌ **needs_ui REQ 忽略 design_artifact**：不读 archive 直接识别决策，结果 outline 里全是设计师已决定的 UI 选型，plan 和 design 永久漂移
+- ❌ **needs_ui REQ 的 plan.md YAML 缺 `design_handoff_ref`**：破坏 plan → design 追溯链，Coordinator 会拒收
+- ❌ Outline 提"Dashboard 采用什么布局 / 配色"等已在 design 阶段拍板的事项——重决策浪费用户时间并导致漂移
