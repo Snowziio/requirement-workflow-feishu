@@ -96,6 +96,10 @@ class ProjectRepoTools(Protocol):
         collaborator_username: str | None,
     ) -> BootstrapRepoResult: ...
 
+    def project_repo_commit(
+        self, *, project_repo: str, message: str, files: dict,
+    ) -> str: ...
+
 
 class GitHubProjectRepoTools:
     """Default implementation; delegates to ``GitHubGateway``."""
@@ -254,6 +258,48 @@ class GitHubProjectRepoTools:
         return SpecMdCommitResult(
             commit_sha=sha, branch="main", spec_md_path=spec_path,
         )
+
+    def project_repo_commit(
+        self, *, project_repo: str, message: str, files: dict,
+    ) -> str:
+        """Atomically commit a dict of ``{repo_path: content_bytes_or_str}`` to main.
+
+        Generic multi-file commit helper used by ``DesignSyncer``. Mirrors
+        ``commit_plan_artifacts``'s internal pattern but without the plan /
+        ARCHITECTURE coupling — just a flat files map.
+
+        Non-UTF-8 bytes (e.g. binary bundle.zip) are skipped with a warning,
+        since ``FileChange.content`` requires text in this iteration.
+
+        Returns the commit SHA.
+        """
+        owner, name = _parse_repo(project_repo)
+        file_changes = []
+        for path, content in files.items():
+            try:
+                text = (
+                    content.decode("utf-8") if isinstance(content, (bytes, bytearray))
+                    else content
+                )
+            except UnicodeDecodeError:
+                _logger.warning(
+                    "project_repo_commit: skipping non-UTF-8 file %s "
+                    "(binary content not supported in MVP)",
+                    path,
+                )
+                continue
+            file_changes.append(FileChange(path=path, content=text))
+        try:
+            sha = self._gw.commit_files(
+                owner=owner, repo=name, branch="main",
+                files=file_changes, message=message,
+            )
+        except GitHubGatewayError as exc:
+            raise ProjectRepoError(
+                f"project_repo_commit: commit to main failed: {exc}",
+                recoverable=False,
+            ) from exc
+        return sha
 
     def bootstrap_project_repo(
         self,

@@ -169,6 +169,20 @@ def dispatch_design_start_if_needed(app, requirement) -> None:
         )
 
 
+def _wire_design_hooks(*, service, github_tools, archive_root) -> None:
+    """Instantiate ``DesignSyncer`` and register design hooks on the service.
+
+    ``archive_root`` is the path to ``design/archive/`` (Task 15 intake root);
+    ``design_root`` is its parent (``design/``). The design READY hook needs
+    ``design_root`` to locate ``PAGES.yaml`` / ``INDEX.md`` at sync time.
+    """
+    from .design_syncer import DesignSyncer
+    archive_root_path = Path(archive_root)
+    design_root = archive_root_path.parent
+    syncer = DesignSyncer(github_tools)
+    service.configure_design_hooks(syncer=syncer, design_root=design_root)
+
+
 class CoordinatorRuntimeApp:
     """Harness-style runtime for the coordinator service."""
 
@@ -217,6 +231,14 @@ class CoordinatorRuntimeApp:
         self._seen_card_action_ids: collections.OrderedDict[tuple[str, str], None] = collections.OrderedDict()
         self._seen_card_action_ids_max = 1024
 
+        # Design handoff archive root (for Task 15 intake). Initialized here
+        # so downstream wiring (design hooks) can reference ``self.archive_root``.
+        self.archive_root = Path(os.environ.get("DESIGN_ARCHIVE_ROOT", "design/archive"))
+        try:
+            self.archive_root.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            LOGGER.warning("archive_root mkdir failed: %s", exc)
+
         if settings.github_token:
             from .github_gateway import GitHubGateway
             from .project_repo import GitHubProjectRepoTools
@@ -236,6 +258,11 @@ class CoordinatorRuntimeApp:
                 syncer=plan_syncer,
             )
             self.service.configure_plan_hooks(tools=tools, syncer=plan_syncer)
+            _wire_design_hooks(
+                service=self.service,
+                github_tools=tools,
+                archive_root=self.archive_root,
+            )
             if self._project_bootstrap_service is None:
                 from .project_bootstrap.service import ProjectBootstrapService
                 self._project_bootstrap_service = ProjectBootstrapService(
@@ -257,13 +284,6 @@ class CoordinatorRuntimeApp:
         self._plan_context_builder = PlanContextBuilder(service=self.service)
         from .design_context import DesignContextBuilder
         self._design_context_builder = DesignContextBuilder(self.service)
-
-        # Design handoff archive root (for Task 15 intake)
-        self.archive_root = Path(os.environ.get("DESIGN_ARCHIVE_ROOT", "design/archive"))
-        try:
-            self.archive_root.mkdir(parents=True, exist_ok=True)
-        except Exception as exc:
-            LOGGER.warning("archive_root mkdir failed: %s", exc)
 
     def build_event_dispatcher(self):
         self._require_lark()

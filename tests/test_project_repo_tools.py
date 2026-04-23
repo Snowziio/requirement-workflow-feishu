@@ -68,6 +68,7 @@ def test_project_repo_tools_is_protocol():
             populate_commit_message,
             collaborator_username,
         ): ...
+        def project_repo_commit(self, *, project_repo, message, files): ...
 
     assert isinstance(Dummy(), ProjectRepoTools)
 
