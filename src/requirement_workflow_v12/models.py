@@ -147,6 +147,10 @@ class Requirement:
     design_precondition_met: bool = False
     pending_design_brief: dict | None = None
     pending_design_handoff: dict | None = None
+    # Pages touched by this REQ's design handoff, persisted past final_approve
+    # so plan-author can surface design-derived decisions (§6.2.8 contract).
+    # Each entry: {"display_name": str, "action": "new" | "modify", ...}.
+    design_pages: list[dict] = field(default_factory=list)
     updated_at: datetime = field(default_factory=utc_now)
 
     def touch(self) -> None:

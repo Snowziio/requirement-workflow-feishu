@@ -380,7 +380,10 @@ class CoordinatorRuntimeApp:
             gateway=self.gateway,
         )
         from .plan_context import PlanContextBuilder
-        self._plan_context_builder = PlanContextBuilder(service=self.service)
+        self._plan_context_builder = PlanContextBuilder(
+            service=self.service,
+            feishu_base_url=self.settings.feishu_base_url,
+        )
         from .design_context import DesignContextBuilder
         self._design_context_builder = DesignContextBuilder(self.service)
 

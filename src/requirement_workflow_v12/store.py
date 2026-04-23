@@ -114,6 +114,8 @@ class JsonStateStore:
         pending_design_handoff = data.get("pending_design_handoff")
         if pending_design_handoff is not None and not isinstance(pending_design_handoff, dict):
             pending_design_handoff = None
+        design_pages_raw = data.get("design_pages") or []
+        design_pages = [p for p in design_pages_raw if isinstance(p, dict)]
 
         requirement = Requirement(
             req_id=data["req_id"],
@@ -177,6 +179,7 @@ class JsonStateStore:
             design_precondition_met=design_precondition_met,
             pending_design_brief=pending_design_brief,
             pending_design_handoff=pending_design_handoff,
+            design_pages=design_pages,
             discussion_history=[self._discussion_turn_from_payload(item) for item in discussion_history_payload],
             review_history=[self._review_result_from_payload(item) for item in review_history_payload],
             human_review_history=[

@@ -1060,6 +1060,7 @@ class CoordinatorService:
         r.design_precondition_met = False
         r.pending_design_brief = None
         r.pending_design_handoff = None
+        r.design_pages = []
         if r.plan_status is not None:
             self.plan_restart(req_id)
         return r
@@ -1132,6 +1133,10 @@ class CoordinatorService:
 
         handoff = r.pending_design_handoff or {}
         r.design_archive_path = handoff.get("archive_path", "")
+        # Persist pages_touched past this reset so plan-author can read them
+        # (§6.2.8 Design → Plan alignment). pending_design_handoff is wiped
+        # right below — without this copy the pages list would be lost.
+        r.design_pages = list(handoff.get("pages_touched") or [])
 
         prev = r.design_status
         self._hooks.fire_exit(prev, r)
