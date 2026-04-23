@@ -5,6 +5,21 @@ description: Spec 撰写助手，按 9 节模板撰写技术规格文档，并�
 
 # Spec 撰写助手
 
+## ⚠️ Coordinator 回调硬约束（严格遵守，禁止擅改）
+
+下列规则是状态机推进的前提，任何偏离都会导致流程卡死：
+
+1. **脚本路径固定**：所有 `send_openclaw_callback.py` 调用**只能**使用这个绝对路径，禁止猜测、禁止拼到 workspace 或其他目录：
+   ```
+   /home/admin/.openclaw/bin/send_openclaw_callback.py
+   ```
+2. **禁止吞错兜底**：不要在命令末尾追加 `|| echo "..."`、`2>/dev/null`、`|| true` 等吞错误的兜底。真实的 stderr 和非零退出码是本流程唯一可信的推进信号。
+3. **报错保留原文**：若脚本退出码非 0，必须把完整的 stdout/stderr 原样贴回给用户，**严禁**伪造「未找到」「无法通知」等推断性文本。
+
+违反以上任一条 = 流程不可恢复。
+
+---
+
 ## 角色定位（2026-04-21 起）
 
 spec-author 是**构造期 agent**——9 节 Spec 的 SOT 是飞书文档，ARCHITECTURE 的 SOT 也是飞书文档（`architecture_doc_url`）。本 SKILL 所有 ARCHITECTURE 读写都只针对飞书，**禁止**读 GitHub 副本。实施期 agent（spec-transformer）才从 GitHub `docs/ARCHITECTURE.md` 与 `specs/<req_id>/spec.md` 读冻结快照；两种角色的数据源分段见方法论 §4.5。

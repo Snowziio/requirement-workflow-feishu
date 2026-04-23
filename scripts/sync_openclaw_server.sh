@@ -145,6 +145,13 @@ for agent in "${AGENTS[@]}"; do
   echo "[info] pushing skills/${skill}/SKILL.md (mirror of workspace SKILL.md)"
   ssh "${REMOTE}" "mkdir -p ~/.openclaw/skills/${skill}"
   scp -q "${STAGING}/skills/${skill}/SKILL.md" "${REMOTE}:~/.openclaw/skills/${skill}/SKILL.md"
+
+  # Safety net: models occasionally hallucinate the script path into the
+  # agent's own workspace dir (observed with MiniMax-M2.7, 2026-04-24).
+  # The canonical copy lives at ~/.openclaw/bin/send_openclaw_callback.py;
+  # a symlink in the workspace dir makes both paths work.
+  echo "[info] symlinking send_openclaw_callback.py into workspace/agents/${agent}/"
+  ssh "${REMOTE}" "ln -sfn /home/admin/.openclaw/bin/send_openclaw_callback.py /home/admin/.openclaw/workspace/agents/${agent}/send_openclaw_callback.py"
 done
 
 echo "[info] restarting openclaw-gateway.service"
