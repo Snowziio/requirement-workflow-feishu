@@ -1656,6 +1656,42 @@ class CoordinatorRuntimeApp:
         if action_name == "design_upload_bundle":
             return self._handle_design_upload_bundle_action(value, operator)
 
+        if action_name == "design_final_approve":
+            req_id = value.get("req_id", "")
+            if not req_id:
+                return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            user_id = operator.get("operator_id", {}).get("user_id", "") if isinstance(operator, dict) else ""
+            try:
+                self.service.design_final_approve(req_id, approved_by=user_id)
+            except ValueError as exc:
+                return 200, {"toast": {"type": "error", "content": str(exc)}}
+            except Exception as exc:
+                LOGGER.exception("design_final_approve failed req=%s", req_id)
+                return 200, {"toast": {"type": "error", "content": f"提交失败：{exc}"}}
+            self._save_state()
+            try:
+                r = self.service.requirements.get(req_id)
+                if r is not None:
+                    self._dispatch_transition_notifications(r, trigger="design_ready")
+            except Exception:
+                LOGGER.exception("design ready card dispatch failed req=%s", req_id)
+            return 200, {"toast": {"type": "success", "content": "设计通过，Plan 阶段已解锁。"}}
+
+        if action_name == "design_final_reject":
+            req_id = value.get("req_id", "")
+            reason = value.get("reason", "")
+            if not req_id:
+                return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            try:
+                self.service.design_final_reject(req_id, reason=reason)
+            except ValueError as exc:
+                return 200, {"toast": {"type": "error", "content": str(exc)}}
+            except Exception as exc:
+                LOGGER.exception("design_final_reject failed req=%s", req_id)
+                return 200, {"toast": {"type": "error", "content": f"打回失败：{exc}"}}
+            self._save_state()
+            return 200, {"toast": {"type": "success", "content": "已打回设计。"}}
+
         if action_name == "submit_create_project":
             form = self._extract_project_form_payload(
                 payload, user_id=user_id, user_name=user_name,

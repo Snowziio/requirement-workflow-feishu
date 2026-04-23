@@ -230,3 +230,87 @@ def test_design_upload_bundle_action_rejects_missing_params():
     status, resp = app._handle_design_upload_bundle_action(value, {})
     assert status == 200
     assert resp.get("toast", {}).get("type") == "error"
+
+
+def test_design_final_approve_action_promotes_req_to_ready():
+    r = Requirement(
+        req_id="REQ-X-050", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.SUBMIT_PENDING_REVIEW,
+        pending_design_handoff={
+            "archive_path": "design/archive/REQ-X-050_x/",
+            "pages_touched": [],
+            "submitted_at": "2026-04-23T00:00:00+00:00",
+        },
+    )
+    app = _app_with_req(r, _cfg())
+    app._save_state = MagicMock()
+    app._dispatch_transition_notifications = MagicMock()
+
+    def fake_approve(req_id, *, approved_by=""):
+        r.design_status = DesignStatus.READY
+        r.design_precondition_met = True
+        return r
+    app.service.design_final_approve = MagicMock(side_effect=fake_approve)
+
+    status, resp = app._handle_card_action_payload({
+        "action": {"value": {"action": "design_final_approve", "req_id": "REQ-X-050"}},
+        "operator": {"operator_id": {"user_id": "u-tech-lead"}},
+    })
+    app.service.design_final_approve.assert_called_once()
+    kwargs = app.service.design_final_approve.call_args.kwargs
+    assert kwargs.get("approved_by") == "u-tech-lead"
+    assert app._save_state.called
+
+
+def test_design_final_reject_action_returns_to_drafting():
+    r = Requirement(
+        req_id="REQ-X-051", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.SUBMIT_PENDING_REVIEW,
+    )
+    app = _app_with_req(r, _cfg())
+    app._save_state = MagicMock()
+    app._dispatch_transition_notifications = MagicMock()
+    app.service.design_final_reject = MagicMock(return_value=r)
+
+    status, resp = app._handle_card_action_payload({
+        "action": {"value": {
+            "action": "design_final_reject",
+            "req_id": "REQ-X-051",
+            "reason": "配色不对",
+        }},
+        "operator": {"operator_id": {"user_id": "u"}},
+    })
+    app.service.design_final_reject.assert_called_once_with(
+        "REQ-X-051", reason="配色不对",
+    )
+
+
+def test_design_final_approve_missing_req_id_returns_error_toast():
+    r = Requirement(req_id="REQ-X-052", name="n", project="X", summary="s", creator="c")
+    app = _app_with_req(r, _cfg())
+    status, resp = app._handle_card_action_payload({
+        "action": {"value": {"action": "design_final_approve"}},
+        "operator": {},
+    })
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "error"
+
+
+def test_design_final_reject_handles_service_error():
+    r = Requirement(
+        req_id="REQ-X-053", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.DRAFTING,  # wrong state
+    )
+    app = _app_with_req(r, _cfg())
+    app.service.design_final_reject = MagicMock(
+        side_effect=ValueError("wrong state"),
+    )
+    status, resp = app._handle_card_action_payload({
+        "action": {"value": {"action": "design_final_reject", "req_id": "REQ-X-053"}},
+        "operator": {},
+    })
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "error"
