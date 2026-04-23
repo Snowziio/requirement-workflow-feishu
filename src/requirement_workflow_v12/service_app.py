@@ -1649,6 +1649,34 @@ class CoordinatorRuntimeApp:
         slug = re.sub(r"[^a-zA-Z0-9一-鿿\-]+", "-", name).strip("-").lower()[:30]
         return slug or "handoff"
 
+    def _write_design_rejected_marker(self, req_id: str, reason: str) -> None:
+        """Write design/archive/<req>_<slug>/REJECTED.md with the reject reason.
+        Best-effort; logs warning if archive dir doesn't exist."""
+        from datetime import datetime, timezone
+        # Find the archive dir matching {req_id}_*
+        if not self.archive_root.exists():
+            LOGGER.warning(
+                "archive_root %s does not exist; skipping REJECTED.md for %s",
+                self.archive_root, req_id,
+            )
+            return
+        candidates = list(self.archive_root.glob(f"{req_id}_*"))
+        if not candidates:
+            LOGGER.warning(
+                "no archive dir matching %s_* in %s; skipping REJECTED.md",
+                req_id, self.archive_root,
+            )
+            return
+        archive_dir = candidates[0]
+        rejected = archive_dir / "REJECTED.md"
+        content = (
+            f"# Design Rejected: {req_id}\n\n"
+            f"Rejected at: {datetime.now(timezone.utc).isoformat()}\n\n"
+            f"## Reason\n\n{reason or '(no reason given)'}\n"
+        )
+        rejected.write_text(content, encoding="utf-8")
+        LOGGER.info("Wrote REJECTED.md for %s at %s", req_id, rejected)
+
     def _handle_card_action_payload(self, payload: dict[str, object]) -> tuple[int, dict[str, object]]:
         LOGGER.info("Handling card payload: %s", payload)
 
@@ -1709,6 +1737,11 @@ class CoordinatorRuntimeApp:
             except Exception as exc:
                 LOGGER.exception("design_final_reject failed req=%s", req_id)
                 return 200, {"toast": {"type": "error", "content": f"打回失败：{exc}"}}
+            # Write REJECTED.md to the archive dir (best-effort; spec §2.6)
+            try:
+                self._write_design_rejected_marker(req_id, reason)
+            except Exception:
+                LOGGER.exception("write REJECTED.md failed req=%s", req_id)
             self._save_state()
             return 200, {"toast": {"type": "success", "content": "已打回设计。"}}
 

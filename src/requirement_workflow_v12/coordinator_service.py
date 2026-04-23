@@ -1053,6 +1053,13 @@ class CoordinatorService:
             raise ValueError(decision.message)
 
         r.design_status = None
+        r.design_doc_id = ""
+        r.design_doc_url = ""
+        r.design_archive_path = ""
+        r.design_github_revision = ""
+        r.design_precondition_met = False
+        r.pending_design_brief = None
+        r.pending_design_handoff = None
         if r.plan_status is not None:
             self.plan_restart(req_id)
         return r
@@ -1125,6 +1132,7 @@ class CoordinatorService:
         r.design_status = decision.next_status
         r.design_precondition_met = True
         r.pending_design_handoff = None    # cleared; now archived
+        r.pending_design_brief = None     # cleared; now archived in design/archive/<req>/BRIEF.md
         self._hooks.fire_enter(r.design_status, r)
         LOGGER.info(
             "design_final_approve req_id=%s approved_by=%s archive=%s",

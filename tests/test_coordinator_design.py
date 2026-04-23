@@ -219,3 +219,135 @@ def test_design_final_approve_without_pending_handoff_still_transitions():
     out = svc.design_final_approve(r.req_id, approved_by="x")
     assert out.design_status is DesignStatus.READY
     assert out.design_archive_path == ""
+
+
+def test_design_restart_clears_all_design_fields():
+    """Bug 23a: design_restart must reset ALL design-related fields, not just design_status."""
+    svc = _make_svc()
+    svc.project_configs = {}
+    svc._plan_tools = None
+    svc._plan_syncer = None
+    svc.spec_orchestrator = None
+    r = Requirement(
+        req_id="REQ-X-100", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.READY,
+        design_doc_id="stale-doc-id",
+        design_doc_url="https://feishu/d/stale",
+        design_archive_path="design/archive/REQ-X-100_old/",
+        design_github_revision="stale-sha",
+        design_precondition_met=True,
+        pending_design_brief={"stale": "brief"},
+        pending_design_handoff={"stale": "handoff"},
+    )
+    svc.requirements[r.req_id] = r
+
+    svc.design_restart(r.req_id)
+
+    assert r.design_status is None
+    # All design fields must be cleared
+    assert r.design_doc_id == ""
+    assert r.design_doc_url == ""
+    assert r.design_archive_path == ""
+    assert r.design_github_revision == ""
+    assert r.design_precondition_met is False
+    assert r.pending_design_brief is None
+    assert r.pending_design_handoff is None
+
+
+def test_design_final_approve_clears_pending_design_brief():
+    """Bug 23b: pending_design_brief must be cleared on READY (spec §10)."""
+    svc = _make_svc()
+    r = Requirement(
+        req_id="REQ-X-101", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.SUBMIT_PENDING_REVIEW,
+        pending_design_handoff={
+            "archive_path": "design/archive/REQ-X-101_x/",
+            "pages_touched": [],
+            "submitted_at": "t",
+        },
+        pending_design_brief={"brief_yaml_frontmatter": "should be cleared"},
+    )
+    svc.requirements[r.req_id] = r
+
+    svc.design_final_approve(r.req_id, approved_by="u")
+
+    assert r.design_status is DesignStatus.READY
+    assert r.pending_design_brief is None  # cleared
+    assert r.pending_design_handoff is None  # was already cleared
+
+
+def test_design_final_reject_card_writes_rejected_md(tmp_path: Path):
+    """Bug 23c: The reject card handler must write REJECTED.md to the archive dir."""
+    # Arrange: set up app + filesystem archive dir containing MANIFEST.md etc.
+    from requirement_workflow_v12.service_app import CoordinatorRuntimeApp
+    from unittest.mock import MagicMock
+
+    archive_dir = tmp_path / "design" / "archive" / "REQ-X-102_foo"
+    archive_dir.mkdir(parents=True)
+    (archive_dir / "MANIFEST.md").write_text("# mf\n")
+
+    r = Requirement(
+        req_id="REQ-X-102", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.SUBMIT_PENDING_REVIEW,
+        pending_design_handoff={
+            "archive_path": "design/archive/REQ-X-102_foo/",
+            "pages_touched": [],
+            "submitted_at": "t",
+        },
+    )
+    app = CoordinatorRuntimeApp.__new__(CoordinatorRuntimeApp)
+    app.service = MagicMock()
+    app.service.requirements = {r.req_id: r}
+    app.service.design_final_reject = MagicMock(return_value=r)
+    app.gateway = MagicMock()
+    app._save_state = MagicMock()
+    app.archive_root = tmp_path / "design" / "archive"
+
+    status, resp = app._handle_card_action_payload({
+        "action": {"value": {
+            "action": "design_final_reject",
+            "req_id": "REQ-X-102",
+            "reason": "配色不一致",
+        }},
+        "operator": {"operator_id": {"user_id": "u"}},
+    })
+
+    # REJECTED.md must be created in the archive dir with the reason inside
+    rejected_file = archive_dir / "REJECTED.md"
+    assert rejected_file.exists(), "REJECTED.md must be written"
+    content = rejected_file.read_text(encoding="utf-8")
+    assert "配色不一致" in content
+    assert "REQ-X-102" in content
+
+
+def test_design_final_reject_card_tolerates_missing_archive_dir(tmp_path: Path):
+    """Edge case: if archive dir doesn't exist locally, reject should still succeed (not crash)."""
+    from requirement_workflow_v12.service_app import CoordinatorRuntimeApp
+    from unittest.mock import MagicMock
+
+    r = Requirement(
+        req_id="REQ-X-103", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.SUBMIT_PENDING_REVIEW,
+    )
+    app = CoordinatorRuntimeApp.__new__(CoordinatorRuntimeApp)
+    app.service = MagicMock()
+    app.service.requirements = {r.req_id: r}
+    app.service.design_final_reject = MagicMock(return_value=r)
+    app.gateway = MagicMock()
+    app._save_state = MagicMock()
+    app.archive_root = tmp_path / "does" / "not" / "exist"
+
+    status, resp = app._handle_card_action_payload({
+        "action": {"value": {
+            "action": "design_final_reject",
+            "req_id": "REQ-X-103",
+            "reason": "something",
+        }},
+        "operator": {},
+    })
+    # Should not crash; toast may be success or warn but not error-on-REJECTED-write
+    assert status == 200
