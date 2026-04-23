@@ -94,11 +94,28 @@ def render_claude_md(*, project: str) -> str:
     pkg = derive_pkg(project)
     today = date.today().isoformat()
     return (
-        f"# CLAUDE.md — {project}\n\n"
-        f"项目包名：`{pkg}`\n\n"
-        f"创建于 Bootstrap：{today}\n\n"
-        "## Conventions\n\n"
+        f"# CLAUDE.md — {project}\n"
+        f"\n"
+        f"项目包名：`{pkg}`\n"
+        f"\n"
+        f"创建于 Bootstrap：{today}\n"
+        f"\n"
+        "## Conventions\n"
+        "\n"
         "（Bootstrap 占位；后续通过 REQ 的 project_context_change gate 演化）\n"
+        "\n"
+        "## Design Reference Rules\n"
+        "\n"
+        "本项目使用 Claude Design（https://claude.ai/design）作为 UI/UX 设计工具。\n"
+        "实施期（Spec / Impl）的 UI 代码工作必须遵循：\n"
+        "\n"
+        "1. **参考来源**：本 REQ 实施时，视觉规范以 `design/archive/<CURRENT_REQ_ID>_*/extracted/` 为准\n"
+        "2. **样式翻译原则**：handoff bundle 里的 JSX 是 React-via-CDN 原型，**不是生产代码**\n"
+        "   - 不要直接复制 JSX 结构；按视觉效果在前端栈中重新组织（见 docs/ARCHITECTURE.md 的 'UI Context' 节）\n"
+        "   - CSS tokens 来自 `extracted/*/assets/colors_and_type.css`，落到前端工程的 `src/<pkg>_webapp/src/lib/tokens.ts` + `tailwind.config.js`\n"
+        "3. **历史归档**：`design/archive/<其他 REQ>/` 是历史 handoff，仅用于追溯，不作为本 REQ 的规范\n"
+        "4. **Commit message 引用**：前端 UI 实施 commit 的 message 必须含 `design: <REQ-ID>_<slug>` tag\n"
+        "5. **不做的事**：不写 DRIFT-TRUTH.md；不做 file-level diff——每 REQ 是自包含快照\n"
     )
 
 
