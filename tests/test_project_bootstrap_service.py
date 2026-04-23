@@ -181,7 +181,9 @@ def test_create_repo_and_populate_renders_all_seven_files_and_records_sha():
     )
     call = repo_tools.bootstrap_project_repo.call_args
     populate_files = call.kwargs["populate_files"]
-    assert set(populate_files.keys()) == {
+    # Required legacy 7-file set must be present; additional design/frontend
+    # files added by Task 8 are allowed (additive — checked subset, not equality).
+    required_keys = {
         "docs/ARCHITECTURE.md",
         "project/README.md",
         "project/req-registry.yaml",
@@ -190,6 +192,7 @@ def test_create_repo_and_populate_renders_all_seven_files_and_records_sha():
         "CLAUDE.md",
         "SKILL.md",
     }
+    assert required_keys.issubset(populate_files.keys())
     assert populate_files["docs/ARCHITECTURE.md"] == rendered_arch
     assert "project: test3" in populate_files["project/req-registry.yaml"]
     assert cfg_after.github_repo_url == "https://github.com/Snowziio/test3"

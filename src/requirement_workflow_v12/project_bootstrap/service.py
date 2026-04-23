@@ -12,13 +12,22 @@ from dataclasses import replace
 
 from datetime import datetime, timezone
 
-from ..architecture_templates import available_categories, render_template
+from ..architecture_templates import (
+    available_categories,
+    derive_pkg,
+    parse_template_yaml,
+    render_template,
+)
 from ..project_config import ProjectConfig
 from .state import append_log_entry, last_completed_step
 from .static_content import (
     PROJECT_README_MD,
     render_claude_md,
+    render_design_index_md,
+    render_design_pages_yaml,
+    render_design_readme,
     render_environments_yaml,
+    render_gitattributes,
     render_req_registry_yaml,
     render_secrets_todo,
     render_skill_md,
@@ -133,6 +142,26 @@ class ProjectBootstrapService:
             )
             return cfg
 
+        pkg = derive_pkg(request.project)
+        # Parse YAML to extract frontend subpath & tech_stack for this category
+        try:
+            parsed_yaml = parse_template_yaml(request.category)
+        except Exception as exc:
+            _logger.warning(
+                "parse_template_yaml failed project=%s category=%s: %s; "
+                "continuing without frontend fields",
+                request.project, request.category, exc,
+            )
+            parsed_yaml = {}
+
+        frontend_block = parsed_yaml.get("frontend")  # may be None
+        frontend_subpath = ""
+        frontend_tech_stack: dict = {}
+        if isinstance(frontend_block, dict):
+            raw_subpath = frontend_block.get("subpath", "")
+            frontend_subpath = raw_subpath.replace("{pkg}", pkg)
+            frontend_tech_stack = frontend_block.get("tech_stack", {}) or {}
+
         populate_files = {
             "docs/ARCHITECTURE.md": rendered_architecture_md,
             "project/README.md": PROJECT_README_MD,
@@ -145,7 +174,16 @@ class ProjectBootstrapService:
             "project/SECRETS-TODO.md": render_secrets_todo(category=request.category),
             "CLAUDE.md": render_claude_md(project=request.project),
             "SKILL.md": render_skill_md(project=request.project),
+            # design-phase static files
+            "design/README.md": render_design_readme(),
+            "design/PAGES.yaml": render_design_pages_yaml(),
+            "design/INDEX.md": render_design_index_md(),
+            "design/system/.gitkeep": "",
+            "design/archive/.gitkeep": "",
+            ".gitattributes": render_gitattributes(),
         }
+        if frontend_subpath:
+            populate_files[f"{frontend_subpath}/.gitkeep"] = ""
         try:
             result = self._repo_tools.bootstrap_project_repo(
                 template_owner=self._template_owner,
@@ -180,6 +218,8 @@ class ProjectBootstrapService:
             github_repo_url=result.html_url,
             github_owner_username=request.github_username or "",
             bootstrap_log=log,
+            frontend_subpath=frontend_subpath,
+            frontend_tech_stack=frontend_tech_stack,
         )
         self._feishu.upsert_project_config(request.project, cfg)
         return cfg
