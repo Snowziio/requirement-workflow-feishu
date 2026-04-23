@@ -221,6 +221,23 @@ def _emit_binding_card_for_guard_failure(
         )
 
 
+def _build_design_brief_author_handoff_text(requirement) -> str:
+    """Handoff text the Coordinator DMs to the REQ creator after design_start.
+
+    The user forwards/pastes this text to the design-brief-author agent in IM,
+    which uses the trigger phrase and COORDINATOR_BASE_URL to start the skill.
+    """
+    base_url = os.environ.get("COORDINATOR_BASE_URL", "http://127.0.0.1:8004")
+    return (
+        f"请开始设计 Brief 生成 {requirement.req_id}\n"
+        f"\n"
+        f"COORDINATOR_BASE_URL={base_url}\n"
+        f"\n"
+        f"（请把本消息原样转发/粘贴给 design-brief-author agent，"
+        f"它会单轮完成 Brief 生成并写入飞书 design 文档。）"
+    )
+
+
 def _wire_design_hooks(*, service, github_tools, archive_root) -> None:
     """Instantiate ``DesignSyncer`` and register design hooks on the service.
 
