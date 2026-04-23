@@ -14,9 +14,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from requirement_workflow_v12.models import Requirement, WorkflowStatus
 from requirement_workflow_v12.plan_state_machine import DesignStatus
+from requirement_workflow_v12.project_config import ProjectConfig
 
 
 FIXTURE_ZIP = Path(__file__).parent / "fixtures" / "design" / "handoff_sample.zip"
+
+
+def _bound_cfg() -> ProjectConfig:
+    return ProjectConfig(
+        category="enterprise-app",
+        template_version="enterprise-app.v1",
+        architecture_doc_id="d",
+        architecture_doc_url="u",
+        claude_design_project_url="https://claude.ai/design/p/stub",
+    )
 
 
 def test_happy_path_draft_to_ready(tmp_path: Path) -> None:
@@ -35,6 +46,7 @@ def test_happy_path_draft_to_ready(tmp_path: Path) -> None:
         status=WorkflowStatus.APPROVED, needs_ui=True,
     )
     svc.requirements[r.req_id] = r
+    svc.project_configs[r.project] = _bound_cfg()
 
     # ── Step 1: design_start ──────────────────────────────────────────
     svc.design_start(
@@ -106,6 +118,7 @@ def test_e2e_reject_path_returns_to_drafting(tmp_path: Path) -> None:
         status=WorkflowStatus.APPROVED, needs_ui=True,
     )
     svc.requirements[r.req_id] = r
+    svc.project_configs[r.project] = _bound_cfg()
 
     svc.design_start(r.req_id, design_doc_id="d", design_doc_url="u")
 
@@ -150,6 +163,7 @@ def test_e2e_restart_from_submit_pending_cascades_to_plan_and_spec(tmp_path: Pat
         status=WorkflowStatus.APPROVED, needs_ui=True,
     )
     svc.requirements[r.req_id] = r
+    svc.project_configs[r.project] = _bound_cfg()
 
     svc.design_start(r.req_id, design_doc_id="d", design_doc_url="u")
     svc.design_submit(
