@@ -1080,6 +1080,12 @@ class CoordinatorService:
             )
         if not r.needs_ui:
             raise ValueError("design_start requires needs_ui=True")
+        cfg = self.project_configs.get(r.project)
+        if cfg is None or not getattr(cfg, "claude_design_project_url", ""):
+            raise ValueError(
+                f"Claude Design 未绑定（project={r.project}）。"
+                f"请先在项目创建群的绑定卡中填写 claude_design_project_url。"
+            )
         decision = apply_design_event(r.design_status, DesignEvent.DESIGN_START)
         if not decision.allowed:
             raise ValueError(decision.message)

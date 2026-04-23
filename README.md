@@ -109,6 +109,12 @@
 - Design 阶段产物归档：`design/archive/REQ-*_<slug>/` 含 `bundle.zip` + `extracted/` + `MANIFEST.md` + `BRIEF.md`
 - Plan 层 precondition：`design_precondition_met=True` 且 `needs_ui=true` 时解锁 PLAN_DRAFTING
 - READY hook 装配：`configure_design_hooks(syncer, design_root)` 注册 `on_enter(DesignStatus.READY)` 原子提交归档 + PAGES.yaml + INDEX.md
+- Bootstrap Step 4 (POPULATE_MAIN) 落地 8 个 design 样板文件：`design/README.md` / `design/PAGES.yaml` / `design/INDEX.md` / `design/system/.gitkeep` / `design/archive/.gitkeep` / `.gitattributes` (git-lfs) / `src/{pkg}_webapp/.gitkeep`（有前端的 category）/ `CLAUDE.md` 新增 "Design Reference Rules" 节
+- `docs/ARCHITECTURE.md` 自动含 "## UI Context" 节（来自 architecture_templates 的 frontend / design 字段）
+- ProjectConfig 新增 3 字段：`claude_design_project_url` / `frontend_subpath` / `frontend_tech_stack`
+- Bootstrap FINALIZE 成功后自动推送"Claude Design 绑定提醒卡"到创建群
+- 飞书卡片 `bind_claude_design_project` action：用户填 URL → 回写 ProjectConfig
+- `design_start` 懒检查 `claude_design_project_url`：未绑定时阻断并重新推送绑定卡
 
 私发启动指令约定：
 
@@ -126,6 +132,9 @@
 - 目标项目前端脚手架（Vite + React + TS + Tailwind + shadcn/ui）
 - `configure_design_hooks` 在生产 `CoordinatorRuntimeApp.__init__` 的接线（需要一个 `ProjectRepoGateway.project_repo_commit` 的实装）
 - OpenClaw `design-brief-author` skill 的 SKILL.md 与 OpenClaw 侧联调
+- DS 快照自动同步（当前只占位 `design/system/.gitkeep`；v2 补）
+- 前端脚手架代码 scaffold（当前只 `.gitkeep` 占位；需单独设计规格）
+- 既有 bootstrapped 项目的迁移（手工 PR 补齐 / 后续 REQ 级 `project_context_change` gate 补）
 
 ## 联调参考
 
@@ -145,6 +154,10 @@
   [2026-04-23-design-phase-design.md](docs/superpowers/specs/2026-04-23-design-phase-design.md)
 - Design 阶段实装计划：
   [2026-04-23-design-phase-plan.md](docs/superpowers/plans/2026-04-23-design-phase-plan.md)
+- Bootstrap 层 design 集成设计规格：
+  [2026-04-23-bootstrap-design-integration-design.md](docs/superpowers/specs/2026-04-23-bootstrap-design-integration-design.md)
+- Bootstrap 层 design 集成实装计划：
+  [2026-04-23-bootstrap-design-integration-plan.md](docs/superpowers/plans/2026-04-23-bootstrap-design-integration-plan.md)
 
 ## Bitable Schema 约定
 
