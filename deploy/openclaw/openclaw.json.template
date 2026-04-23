@@ -253,6 +253,18 @@
           "theme": "评审 spec-transformer 产出的四文件，按五维度判定 converged/reject",
           "emoji": "⚖️"
         }
+      },
+      {
+        "id": "design-brief-author",
+        "name": "设计 Brief 生成助手",
+        "workspace": "/home/admin/.openclaw/workspace/agents/design-brief-author",
+        "agentDir": "/home/admin/.openclaw/agents/design-brief-author/agent",
+        "model": "minimax/MiniMax-M2.7",
+        "identity": {
+          "name": "设计 Brief 生成助手",
+          "theme": "APPROVED + needs_ui=true REQ 进入 DESIGN_DRAFTING 时单轮生成 Brief，写入飞书 design docx",
+          "emoji": "🎨"
+        }
       }
     ]
   },
@@ -341,6 +353,13 @@
         "channel": "feishu",
         "accountId": "spec-transformer-reviewer"
       }
+    },
+    {
+      "agentId": "design-brief-author",
+      "match": {
+        "channel": "feishu",
+        "accountId": "design-brief-author"
+      }
     }
   ],
   "messages": {
@@ -427,6 +446,12 @@
         "spec-transformer-reviewer": {
           "appId": "cli_a96a0c9907b65bdf",
           "appSecret": "xb0fkD9PDzbshGsvXNcUzjMfzIXSzfMW",
+          "dmPolicy": "open",
+          "groupPolicy": "open"
+        },
+        "design-brief-author": {
+          "appId": "cli_a960a1ec9438dbc3",
+          "appSecret": "HkFShco4DlnYvp7aMRqepdgvMe8Xrnpf",
           "dmPolicy": "open",
           "groupPolicy": "open"
         }
