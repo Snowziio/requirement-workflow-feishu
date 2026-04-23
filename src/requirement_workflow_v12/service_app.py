@@ -167,6 +167,7 @@ def dispatch_design_start_if_needed(app, requirement) -> None:
             design_doc_id=created.document_id,
             design_doc_url=created.document_url,
         )
+        _send_design_brief_author_handoff(app, requirement)
     except ValueError as exc:
         msg = str(exc)
         if "Claude Design 未绑定" in msg:
@@ -236,6 +237,29 @@ def _build_design_brief_author_handoff_text(requirement) -> str:
         f"（请把本消息原样转发/粘贴给 design-brief-author agent，"
         f"它会单轮完成 Brief 生成并写入飞书 design 文档。）"
     )
+
+
+def _send_design_brief_author_handoff(app, requirement) -> None:
+    """Send the handoff DM to the REQ creator. Best-effort — never raises."""
+    user_id = getattr(requirement, "creator_user_id", "")
+    if not user_id:
+        LOGGER.info(
+            "skip design-brief-author handoff: no creator_user_id req_id=%s",
+            requirement.req_id,
+        )
+        return
+    try:
+        text = _build_design_brief_author_handoff_text(requirement)
+        app.gateway.send_text(user_id, text, receive_id_type="user_id")
+        LOGGER.info(
+            "sent design-brief-author handoff DM req_id=%s user_id=%s",
+            requirement.req_id, user_id,
+        )
+    except Exception as exc:
+        LOGGER.warning(
+            "design-brief-author handoff DM failed req_id=%s user_id=%s: %s",
+            requirement.req_id, user_id, exc,
+        )
 
 
 def _wire_design_hooks(*, service, github_tools, archive_root) -> None:
