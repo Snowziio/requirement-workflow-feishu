@@ -15,6 +15,24 @@ tech_stack:
   cdn: "CloudFront"
   deployment: "single-host Docker Compose"
 
+# ── UI / Design (by design-phase spec) ─────────
+frontend:
+  subpath: "src/{pkg}_webapp"
+  tech_stack:
+    framework: "React 18 + TypeScript"
+    build: "Vite 5.x"                # 若需 SSR 可覆盖为 Next.js 14
+    routing: "react-router 6"
+    styling: "Tailwind CSS 3.x"
+    component_library: "shadcn/ui"
+    icons: "lucide-react"
+    fonts: "IBM Plex (Sans/SC/Mono)"
+
+design:
+  claude_design_project_url: ""
+  design_system_snapshot_path: "design/system/"
+  pages_registry_path: "design/PAGES.yaml"
+  archive_path: "design/archive/"
+
 modules:
   - name: "{pkg}_web"
     description: "面向 C 端的 H5/SSR 前端页面。"

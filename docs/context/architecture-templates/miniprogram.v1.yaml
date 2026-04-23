@@ -14,6 +14,24 @@ tech_stack:
   database: "PostgreSQL"
   deployment: "single-host Docker Compose"
 
+# ── UI / Design (by design-phase spec) ─────────
+frontend:
+  subpath: "src/{pkg}_miniapp"
+  tech_stack:
+    framework: "Taro 4.x + React + TypeScript"
+    build: "Taro CLI"
+    routing: "Taro built-in"
+    styling: "Taro + SCSS"
+    component_library: "NutUI"
+    icons: "lucide-react"
+    fonts: "system-ui"
+
+design:
+  claude_design_project_url: ""
+  design_system_snapshot_path: "design/system/"
+  pages_registry_path: "design/PAGES.yaml"
+  archive_path: "design/archive/"
+
 modules:
   - name: "{pkg}_miniapp"
     description: "小程序端页面与业务逻辑。"

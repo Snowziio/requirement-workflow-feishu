@@ -107,3 +107,63 @@ design:
         assert "## UI Context" in text
         assert "src/stub_webapp" in text
         assert "React 18" in text
+
+
+def test_all_yamls_have_frontend_and_design_keys():
+    """After Task 5, every category YAML must have 'frontend' (may be null) and 'design' blocks."""
+    from requirement_workflow_v12.architecture_templates import (
+        available_categories, parse_template_yaml,
+    )
+    for cat in available_categories():
+        parsed = parse_template_yaml(cat)
+        assert "frontend" in parsed, f"{cat}: missing 'frontend' key"
+        assert "design" in parsed, f"{cat}: missing 'design' key"
+
+
+def test_enterprise_bot_has_frontend_null():
+    from requirement_workflow_v12.architecture_templates import parse_template_yaml
+    parsed = parse_template_yaml("enterprise-bot")
+    assert parsed["frontend"] is None
+
+
+def test_miniprogram_uses_taro_stack():
+    from requirement_workflow_v12.architecture_templates import parse_template_yaml
+    parsed = parse_template_yaml("miniprogram")
+    frontend = parsed["frontend"]
+    assert frontend is not None
+    assert "Taro" in frontend["tech_stack"].get("framework", "")
+    assert "miniapp" in frontend.get("subpath", "")
+
+
+def test_enterprise_app_uses_default_stack():
+    from requirement_workflow_v12.architecture_templates import parse_template_yaml
+    parsed = parse_template_yaml("enterprise-app")
+    frontend = parsed["frontend"]
+    assert frontend is not None
+    assert "React 18" in frontend["tech_stack"]["framework"]
+    assert frontend["subpath"] == "src/{pkg}_webapp"
+
+
+def test_design_block_has_standard_paths():
+    """All categories share the same design block structure."""
+    from requirement_workflow_v12.architecture_templates import (
+        available_categories, parse_template_yaml,
+    )
+    for cat in available_categories():
+        parsed = parse_template_yaml(cat)
+        design = parsed["design"]
+        assert design["claude_design_project_url"] == ""
+        assert design["design_system_snapshot_path"] == "design/system/"
+        assert design["pages_registry_path"] == "design/PAGES.yaml"
+        assert design["archive_path"] == "design/archive/"
+
+
+def test_render_enterprise_app_now_includes_ui_context():
+    """After Task 5, enterprise-app YAML has frontend/design, so render_template appends UI Context."""
+    from requirement_workflow_v12.architecture_templates import render_template
+    version, text = render_template("enterprise-app", project="myproj")
+    assert "## UI Context" in text
+    assert "React 18" in text
+    assert "design/PAGES.yaml" in text
+    # pkg substitution in subpath (myproj → myproj pkg)
+    assert "src/myproj_webapp" in text

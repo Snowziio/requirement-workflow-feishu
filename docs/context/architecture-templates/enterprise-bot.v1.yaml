@@ -14,6 +14,15 @@ tech_stack:
   database: "PostgreSQL"
   deployment: "single-host Docker Compose"
 
+# ── UI / Design (by design-phase spec) ─────────
+frontend: null                # 默认无前端；若需管理后台按 enterprise-app 栈补
+
+design:
+  claude_design_project_url: ""
+  design_system_snapshot_path: "design/system/"
+  pages_registry_path: "design/PAGES.yaml"
+  archive_path: "design/archive/"
+
 modules:
   - name: "{pkg}_bot_gateway"
     description: "IM 事件订阅与消息下发。"
