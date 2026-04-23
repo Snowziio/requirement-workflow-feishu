@@ -1029,24 +1029,38 @@ class CoordinatorRuntimeApp:
 
         self._sync_requirement_outputs(requirement)
 
-        # Create design system document for the first UI requirement that gets APPROVED
-        if approved and requirement.status == WorkflowStatus.APPROVED and requirement.needs_ui:
-            if self.service.should_create_design_system(requirement.project):
-                try:
-                    doc_id = self.gateway.create_design_system_document(requirement.project)
-                    self.service.set_design_system_doc(requirement.project, doc_id)
-                    LOGGER.info(
-                        "Design system document created project=%s doc_id=%s",
-                        requirement.project, doc_id,
-                    )
-                except Exception as exc:
-                    LOGGER.warning("Failed to create design system document: %s", exc)
-
-            dispatch_design_start_if_needed(self, requirement)
+        if approved:
+            self._on_final_review_approved(requirement)
 
         self._save_state()
         self._dispatch_transition_notifications(requirement, trigger="final_review_passed" if approved else "final_review_rejected")
         return [OutboundMessage(receive_id=context.chat_id, text=response_text)]
+
+    def _on_final_review_approved(self, requirement) -> None:
+        """Post-approval hook for requirements that just entered APPROVED.
+
+        For needs_ui requirements this creates the project-level design-system
+        doc (first-time only) and dispatches the design phase. Must be called
+        from BOTH final_review_pass paths (text reply + card button) — they
+        previously drifted and the card path skipped design dispatch, leaving
+        APPROVED+needs_ui reqs stuck when the user tried to start plan.
+        """
+        if not (
+            requirement.status == WorkflowStatus.APPROVED
+            and requirement.needs_ui
+        ):
+            return
+        if self.service.should_create_design_system(requirement.project):
+            try:
+                doc_id = self.gateway.create_design_system_document(requirement.project)
+                self.service.set_design_system_doc(requirement.project, doc_id)
+                LOGGER.info(
+                    "Design system document created project=%s doc_id=%s",
+                    requirement.project, doc_id,
+                )
+            except Exception as exc:
+                LOGGER.warning("Failed to create design system document: %s", exc)
+        dispatch_design_start_if_needed(self, requirement)
 
     def handle_card_callback(self, raw_body: bytes) -> tuple[int, dict[str, object]]:
         try:
@@ -2180,6 +2194,8 @@ class CoordinatorRuntimeApp:
             else:
                 requirement = self.service.request_changes_after_review(requirement)
             self._sync_requirement_outputs(requirement)
+            if approved:
+                self._on_final_review_approved(requirement)
             self._save_state()
             self._dispatch_transition_notifications(
                 requirement,
