@@ -141,7 +141,11 @@ class OutboundCard:
 
 def dispatch_design_start_if_needed(app, requirement) -> None:
     """Called from approve_requirement post-hook. Creates Feishu design docx and
-    calls service.design_start. No-op when needs_ui=False. Never raises."""
+    calls service.design_start. No-op when needs_ui=False. Never raises.
+
+    If design_start fails with a Claude Design binding error, emit a binding
+    reminder card to the project's creation group instead of silently logging.
+    """
     if not requirement.needs_ui:
         return
     try:
@@ -163,9 +167,57 @@ def dispatch_design_start_if_needed(app, requirement) -> None:
             design_doc_id=created.document_id,
             design_doc_url=created.document_url,
         )
+    except ValueError as exc:
+        msg = str(exc)
+        if "Claude Design 未绑定" in msg:
+            _emit_binding_card_for_guard_failure(app, requirement, error_context=msg)
+            return
+        LOGGER.warning(
+            "design_start ValueError req_id=%s: %s", requirement.req_id, exc,
+        )
     except Exception as exc:
         LOGGER.warning(
             "design_start failed req_id=%s: %s", requirement.req_id, exc,
+        )
+
+
+def _emit_binding_card_for_guard_failure(
+    app, requirement, *, error_context: str,
+) -> None:
+    """Send a binding reminder card (with error banner) to the project creation group.
+
+    Best-effort: logs warning on failure, never raises.
+    """
+    cfg = app.service.project_configs.get(requirement.project)
+    if cfg is None:
+        LOGGER.warning(
+            "binding card: no ProjectConfig for %s; cannot send card",
+            requirement.project,
+        )
+        return
+    chat_id = getattr(cfg, "feishu_chat_id", "") or getattr(requirement, "project_group_id", "")
+    if not chat_id:
+        LOGGER.warning(
+            "binding card: no chat_id for project=%s req_id=%s; cannot send",
+            requirement.project, requirement.req_id,
+        )
+        return
+    try:
+        from .project_bootstrap.service import build_design_binding_card
+        card = build_design_binding_card(
+            project=requirement.project,
+            github_repo_url=getattr(cfg, "github_repo_url", ""),
+            error_context=error_context,
+        )
+        app.gateway.send_card(chat_id, card)
+        LOGGER.info(
+            "binding reminder card sent after guard failure project=%s req_id=%s",
+            requirement.project, requirement.req_id,
+        )
+    except Exception as exc:
+        LOGGER.warning(
+            "binding card emission failed project=%s req_id=%s: %s",
+            requirement.project, requirement.req_id, exc,
         )
 
 
