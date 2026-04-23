@@ -101,6 +101,14 @@
   - `确认通过`
   - `需要修改`
 - 通过本地 JSON 快照恢复运行状态
+- design 阶段三态状态机：DRAFTING → SUBMIT_PENDING_REVIEW → READY（当 `needs_ui=true`）
+- OpenClaw skill `design-brief-author` 单轮上下文端点：`GET /queries/openclaw/design-context/<req>`
+- OpenClaw callback：`POST /openclaw/design-callback`（接收 `design_brief_submit` 事件）
+- Handoff bundle 上传入口：飞书卡片 `design_upload_bundle` action
+- Design 终审：`D-DESIGN-2` 终审卡 `design_final_approve` / `design_final_reject` card actions
+- Design 阶段产物归档：`design/archive/REQ-*_<slug>/` 含 `bundle.zip` + `extracted/` + `MANIFEST.md` + `BRIEF.md`
+- Plan 层 precondition：`design_precondition_met=True` 且 `needs_ui=true` 时解锁 PLAN_DRAFTING
+- READY hook 装配：`configure_design_hooks(syncer, design_root)` 注册 `on_enter(DesignStatus.READY)` 原子提交归档 + PAGES.yaml + INDEX.md
 
 私发启动指令约定：
 
@@ -113,6 +121,11 @@
 - OpenClaw author / reviewer skill 的真实 callback 联调
 - 更完整的正式审查记录与卡片化交互
 - 将卡片回调地址与飞书应用配置联通，并补上直接跳转需求构造助手的 deeplink
+- Bootstrap 层对 `design/` 目录样板文件的 populate（`design/README.md` / `design/PAGES.yaml` / `design/INDEX.md` / `design/system/`）——见 `docs/superpowers/specs/2026-04-23-design-phase-design.md` 附录 A
+- Claude Design → GitHub 仓库绑定子步骤（人工填 `claude_design_project_url` 回 ProjectConfig）
+- 目标项目前端脚手架（Vite + React + TS + Tailwind + shadcn/ui）
+- `configure_design_hooks` 在生产 `CoordinatorRuntimeApp.__init__` 的接线（需要一个 `ProjectRepoGateway.project_repo_commit` 的实装）
+- OpenClaw `design-brief-author` skill 的 SKILL.md 与 OpenClaw 侧联调
 
 ## 联调参考
 
@@ -128,6 +141,10 @@
   [send_openclaw_callback.py](scripts/send_openclaw_callback.py)
 - 最小闭环 smoke 脚本：
   [run_openclaw_smoke.py](scripts/run_openclaw_smoke.py)
+- Design 阶段设计规格：
+  [2026-04-23-design-phase-design.md](docs/superpowers/specs/2026-04-23-design-phase-design.md)
+- Design 阶段实装计划：
+  [2026-04-23-design-phase-plan.md](docs/superpowers/plans/2026-04-23-design-phase-plan.md)
 
 ## Bitable Schema 约定
 
