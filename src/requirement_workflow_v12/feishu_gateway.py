@@ -60,6 +60,9 @@ from .bitable_schema import (
     PROJECT_CONFIG_FIELD_PROJECT_STATUS,
     PROJECT_CONFIG_FIELD_TECH_STACK_JSON,
     PROJECT_CONFIG_FIELD_TEMPLATE_VERSION,
+    PROJECT_CONFIG_FIELD_CLAUDE_DESIGN_PROJECT_URL,
+    PROJECT_CONFIG_FIELD_FRONTEND_SUBPATH,
+    PROJECT_CONFIG_FIELD_FRONTEND_TECH_STACK_JSON,
     build_coordinator_record_fields,
 )
 from .models import Requirement
@@ -571,6 +574,11 @@ class FeishuGateway:
             PROJECT_CONFIG_FIELD_BOOTSTRAP_COMPLETED_AT: cfg.bootstrap_completed_at or "",
             PROJECT_CONFIG_FIELD_PROJECT_STATUS: cfg.project_status,
             PROJECT_CONFIG_FIELD_FEISHU_CHAT_ID: cfg.feishu_chat_id,
+            PROJECT_CONFIG_FIELD_CLAUDE_DESIGN_PROJECT_URL: cfg.claude_design_project_url,
+            PROJECT_CONFIG_FIELD_FRONTEND_SUBPATH: cfg.frontend_subpath,
+            PROJECT_CONFIG_FIELD_FRONTEND_TECH_STACK_JSON: json.dumps(
+                cfg.frontend_tech_stack or {}, ensure_ascii=False
+            ),
         }
 
     @staticmethod
@@ -658,6 +666,30 @@ class FeishuGateway:
                         item.record_id,
                     )
                     bootstrap_log = []
+                claude_design_project_url = self._extract_field_text(
+                    fields.get(PROJECT_CONFIG_FIELD_CLAUDE_DESIGN_PROJECT_URL)
+                ) or ""
+                frontend_subpath = self._extract_field_text(
+                    fields.get(PROJECT_CONFIG_FIELD_FRONTEND_SUBPATH)
+                ) or ""
+                frontend_tech_stack_raw = self._extract_field_text(
+                    fields.get(PROJECT_CONFIG_FIELD_FRONTEND_TECH_STACK_JSON)
+                )
+                try:
+                    frontend_tech_stack = (
+                        json.loads(frontend_tech_stack_raw)
+                        if frontend_tech_stack_raw
+                        else {}
+                    )
+                    if not isinstance(frontend_tech_stack, dict):
+                        frontend_tech_stack = {}
+                except json.JSONDecodeError:
+                    LOGGER.warning(
+                        "Invalid frontend_tech_stack JSON for project=%s record_id=%s; resetting to empty dict",
+                        project,
+                        item.record_id,
+                    )
+                    frontend_tech_stack = {}
                 configs[project] = ProjectConfig(
                     category=self._extract_field_text(fields.get(PROJECT_CONFIG_FIELD_CATEGORY)),
                     template_version=self._extract_field_text(
@@ -691,6 +723,9 @@ class FeishuGateway:
                     feishu_chat_id=self._extract_field_text(
                         fields.get(PROJECT_CONFIG_FIELD_FEISHU_CHAT_ID)
                     ),
+                    claude_design_project_url=claude_design_project_url,
+                    frontend_subpath=frontend_subpath,
+                    frontend_tech_stack=frontend_tech_stack,
                 )
             if not data.has_more:
                 break

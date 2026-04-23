@@ -86,6 +86,24 @@
       "field_type": "text",
       "required": false,
       "description": "Bootstrap 创建的项目群 chat_id(用于后续 needs_ui/通告等)。"
+    },
+    {
+      "name": "Claude设计项目URL",
+      "field_type": "text",
+      "required": false,
+      "description": "Claude Code design phase 的项目 URL;在 design bootstrap 阶段初始化。"
+    },
+    {
+      "name": "前端子路径",
+      "field_type": "text",
+      "required": false,
+      "description": "前端应用在仓库内的子路径(如 src/myproj_webapp)。"
+    },
+    {
+      "name": "前端技术栈JSON",
+      "field_type": "text",
+      "required": false,
+      "description": "frontend_tech_stack 字段的 JSON 字符串(dict),包含 framework / build 等关键信息。"
     }
   ]
 }
