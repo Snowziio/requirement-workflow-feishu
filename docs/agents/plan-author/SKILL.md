@@ -42,7 +42,12 @@ curl -s "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/queries/openclaw/plan-co
     "github_revision": "commit-sha",
     "feishu_brief_url": "https://.../docx/brief-id",
     "design_system_doc_url": "https://.../docx/ds-id",
-    "pages": [{"display_name": "DashboardPage", "action": "new"}]
+    "pages": [{"display_name": "DashboardPage", "action": "new"}],
+    "inline_files": [
+      {"path": "MANIFEST.md", "content": "<yaml frontmatter + hints>"},
+      {"path": "extracted/.../src/DashboardPage.jsx", "content": "<jsx>"},
+      {"path": "extracted/.../styles/tokens.css", "content": "<css>"}
+    ]
   }
 }
 ```
@@ -57,12 +62,11 @@ curl -s "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/queries/openclaw/plan-co
 
 进入 Phase A 骨架之前，**必须**读这三处设计产物：
 
-1. **Archive 归档（GitHub 冻结态）**——用 `design_artifact.github_revision` 钉到具体 commit 拉取：
-   - `<archive_path>MANIFEST.md`（页面清单 + 锚点元信息）
-   - `<archive_path>extracted/*/src/*.jsx`（视觉规范/布局/交互意图）
-   - `<archive_path>extracted/*/styles/tokens.css` 或 `assets/colors_and_type.css`（token 约束）
+1. **Archive 文件（从 plan-context 的 `design_artifact.inline_files` 直接读）**——Coordinator 已把 archive 里的文本文件（MANIFEST.md / JSX / CSS 等）内联在响应中。**不要尝试 git clone 或 curl raw.githubusercontent.com 拉取**——repo 可能是私仓，OpenClaw gateway 也没有 GitHub token，会失败。直接从 `inline_files` 列表里拿即可，列表结构是 `[{"path": "...", "content": "..."}]`
 2. **Design Brief 飞书文档**——`feishu_fetch_doc(design_artifact.feishu_brief_url 对应 doc_id)`，了解设计师的首轮 Prompt/目标
 3. **项目级 Design System**——`feishu_fetch_doc(design_artifact.design_system_doc_url 对应 doc_id)` 如非空，了解组件/token 规范
+
+`design_artifact.archive_path` 和 `design_artifact.github_revision` 仅作为追溯锚点（写入 plan.md YAML 的 `design_handoff_ref` 用），不是用来拉文件的——文件都在 `inline_files` 里。
 
 **决策识别规则**（违反 = 破坏 design/plan 对齐）：
 

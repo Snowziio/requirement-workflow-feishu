@@ -362,3 +362,185 @@ def test_design_restart_clears_design_pages():
 
     refreshed = svc.get_requirement(r.req_id)
     assert refreshed.design_pages == []
+
+
+# ── §6.2.8 inline_files: coordinator-side fileserver for design archive ──
+
+
+def _make_archive(archive_root, req_id, slug, files_dict):
+    """Create a fake archive dir at {archive_root}/{req_id}_{slug}/ with files_dict."""
+    d = archive_root / f"{req_id}_{slug}"
+    d.mkdir(parents=True)
+    for rel_path, content in files_dict.items():
+        f = d / rel_path
+        f.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(content, bytes):
+            f.write_bytes(content)
+        else:
+            f.write_text(content, encoding="utf-8")
+    return d
+
+
+def test_design_artifact_inline_files_reads_archive_contents(tmp_path):
+    """Plan-author runs without GitHub creds and can't clone private repos;
+    plan-context must inline the archive files so plan-author sees them."""
+    from requirement_workflow_v12.plan_state_machine import DesignStatus
+    svc = CoordinatorService()
+    r = Requirement(
+        req_id="REQ-Z-001", name="n", project="P", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.READY,
+        design_archive_path="design/archive/REQ-Z-001_foo/",
+    )
+    svc.requirements[r.req_id] = r
+    svc.project_configs["P"] = ProjectConfig(
+        category="web", template_version="v1",
+        architecture_doc_id="a", architecture_doc_url="u",
+        github_repo_url="owner/repo",
+    )
+
+    _make_archive(tmp_path, "REQ-Z-001", "foo", {
+        "MANIFEST.md": "# MANIFEST\npages_hint: [DashboardPage]\n",
+        "extracted/project/src/DashboardPage.jsx": "export function Dashboard() { return <div/>; }",
+        "extracted/project/styles/tokens.css": "--color-primary: #f00;\n",
+    })
+
+    ctx = PlanContextBuilder(
+        service=svc, archive_root=tmp_path,
+    ).build(r.req_id)
+
+    inline = ctx["design_artifact"]["inline_files"]
+    paths = sorted(f["path"] for f in inline)
+    assert paths == [
+        "MANIFEST.md",
+        "extracted/project/src/DashboardPage.jsx",
+        "extracted/project/styles/tokens.css",
+    ]
+    contents = {f["path"]: f["content"] for f in inline}
+    assert "pages_hint" in contents["MANIFEST.md"]
+    assert "Dashboard" in contents["extracted/project/src/DashboardPage.jsx"]
+    assert "--color-primary" in contents["extracted/project/styles/tokens.css"]
+
+
+def test_design_artifact_inline_files_skips_bundle_zip(tmp_path):
+    """bundle.zip is binary and opaque; no value to plan-author. Must skip."""
+    from requirement_workflow_v12.plan_state_machine import DesignStatus
+    svc = CoordinatorService()
+    r = Requirement(
+        req_id="REQ-Z-002", name="n", project="P", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.READY,
+        design_archive_path="design/archive/REQ-Z-002_foo/",
+    )
+    svc.requirements[r.req_id] = r
+    svc.project_configs["P"] = ProjectConfig(
+        category="web", template_version="v1",
+        architecture_doc_id="a", architecture_doc_url="u",
+    )
+    _make_archive(tmp_path, "REQ-Z-002", "foo", {
+        "MANIFEST.md": "# m",
+        "bundle.zip": b"\x00\x01\x02\x03PK\x03\x04",  # fake zip bytes
+    })
+
+    ctx = PlanContextBuilder(service=svc, archive_root=tmp_path).build(r.req_id)
+    paths = [f["path"] for f in ctx["design_artifact"]["inline_files"]]
+    assert "bundle.zip" not in paths
+    assert "MANIFEST.md" in paths
+
+
+def test_design_artifact_inline_files_skips_binary_files(tmp_path):
+    """logo.svg, .png, any file that doesn't decode as UTF-8 should be skipped."""
+    from requirement_workflow_v12.plan_state_machine import DesignStatus
+    svc = CoordinatorService()
+    r = Requirement(
+        req_id="REQ-Z-003", name="n", project="P", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.READY,
+        design_archive_path="design/archive/REQ-Z-003_foo/",
+    )
+    svc.requirements[r.req_id] = r
+    svc.project_configs["P"] = ProjectConfig(
+        category="web", template_version="v1",
+        architecture_doc_id="a", architecture_doc_url="u",
+    )
+    _make_archive(tmp_path, "REQ-Z-003", "foo", {
+        "MANIFEST.md": "text",
+        "extracted/logo.png": b"\x89PNG\r\n\x1a\n" + b"\xff" * 100,
+    })
+
+    ctx = PlanContextBuilder(service=svc, archive_root=tmp_path).build(r.req_id)
+    paths = [f["path"] for f in ctx["design_artifact"]["inline_files"]]
+    assert "extracted/logo.png" not in paths
+    assert "MANIFEST.md" in paths
+
+
+def test_design_artifact_inline_files_skips_files_over_size_cap(tmp_path):
+    """Individual files exceeding MAX_INLINE_FILE_BYTES (100KB) are skipped."""
+    from requirement_workflow_v12.plan_state_machine import DesignStatus
+    from requirement_workflow_v12.plan_context import MAX_INLINE_FILE_BYTES
+    svc = CoordinatorService()
+    r = Requirement(
+        req_id="REQ-Z-004", name="n", project="P", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.READY,
+        design_archive_path="design/archive/REQ-Z-004_foo/",
+    )
+    svc.requirements[r.req_id] = r
+    svc.project_configs["P"] = ProjectConfig(
+        category="web", template_version="v1",
+        architecture_doc_id="a", architecture_doc_url="u",
+    )
+    huge = "x" * (MAX_INLINE_FILE_BYTES + 100)
+    _make_archive(tmp_path, "REQ-Z-004", "foo", {
+        "MANIFEST.md": "small",
+        "extracted/huge.jsx": huge,
+    })
+
+    ctx = PlanContextBuilder(service=svc, archive_root=tmp_path).build(r.req_id)
+    paths = [f["path"] for f in ctx["design_artifact"]["inline_files"]]
+    assert "extracted/huge.jsx" not in paths
+    assert "MANIFEST.md" in paths
+
+
+def test_design_artifact_inline_files_empty_when_archive_missing_on_disk(tmp_path):
+    """Fresh coordinator container (pre-first-intake) or REQ without design:
+    no archive dir on disk → empty list, not error."""
+    svc = CoordinatorService()
+    r = Requirement(
+        req_id="REQ-Z-005", name="n", project="P", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=False,
+    )
+    svc.requirements[r.req_id] = r
+    svc.project_configs["P"] = ProjectConfig(
+        category="web", template_version="v1",
+        architecture_doc_id="a", architecture_doc_url="u",
+    )
+
+    ctx = PlanContextBuilder(service=svc, archive_root=tmp_path).build(r.req_id)
+    assert ctx["design_artifact"]["inline_files"] == []
+
+
+def test_design_artifact_inline_files_ordering_is_stable(tmp_path):
+    """Same archive → same file order across calls (sorted lexicographically)."""
+    from requirement_workflow_v12.plan_state_machine import DesignStatus
+    svc = CoordinatorService()
+    r = Requirement(
+        req_id="REQ-Z-006", name="n", project="P", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.READY,
+        design_archive_path="design/archive/REQ-Z-006_foo/",
+    )
+    svc.requirements[r.req_id] = r
+    svc.project_configs["P"] = ProjectConfig(
+        category="web", template_version="v1",
+        architecture_doc_id="a", architecture_doc_url="u",
+    )
+    _make_archive(tmp_path, "REQ-Z-006", "foo", {
+        "z.md": "z", "a.md": "a", "m.md": "m",
+    })
+
+    builder = PlanContextBuilder(service=svc, archive_root=tmp_path)
+    call1 = [f["path"] for f in builder.build(r.req_id)["design_artifact"]["inline_files"]]
+    call2 = [f["path"] for f in builder.build(r.req_id)["design_artifact"]["inline_files"]]
+    assert call1 == call2
+    assert call1 == ["a.md", "m.md", "z.md"]

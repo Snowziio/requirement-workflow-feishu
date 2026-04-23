@@ -10,14 +10,30 @@ identifying decisions, avoiding two failure modes:
 - decision omission: plan-author doesn't know the UI was designed, so
   plan-level UI-adjacent decisions (data source, routing, framework,
   token translation) never surface
+
+Archive file contents are inlined into the response rather than referenced
+by URL because plan-author runs in the OpenClaw gateway sandbox without
+GitHub credentials — project repos are typically private and unreachable.
+Coordinator has local disk access to the archive (mounted persistent volume)
+plus its own GitHub token, so serving the bytes through plan-context is the
+cheapest handoff.
 """
 from __future__ import annotations
+
+from pathlib import Path
 
 from .models import WorkflowStatus
 from .plan_state_machine import PlanStatus
 
 
 PLAN_CONTEXT_ALLOWED_STATUSES = {None, PlanStatus.DRAFTING}
+
+# Safety caps for design archive inlining. Individual files that exceed
+# MAX_INLINE_FILE_BYTES are skipped; once we cross MAX_INLINE_TOTAL_BYTES
+# we stop collecting. These limits are generous for Claude Design exports
+# (typical full bundle < 100KB) but prevent pathological payloads.
+MAX_INLINE_FILE_BYTES = 100 * 1024
+MAX_INLINE_TOTAL_BYTES = 400 * 1024
 
 
 class PlanContextGateError(Exception):
@@ -31,9 +47,21 @@ class PlanContextMisconfigured(Exception):
 
 
 class PlanContextBuilder:
-    def __init__(self, service, *, feishu_base_url: str = "https://my.feishu.cn") -> None:
+    def __init__(
+        self,
+        service,
+        *,
+        feishu_base_url: str = "https://my.feishu.cn",
+        archive_root: Path | str | None = None,
+    ) -> None:
         self._service = service
         self._feishu_base_url = feishu_base_url.rstrip("/")
+        # Directory on coordinator's local disk where design archives live.
+        # e.g. /app/design/archive on staging. Falls back to the relative
+        # default so test harnesses don't need to set it.
+        self._archive_root = (
+            Path(archive_root) if archive_root else Path("design/archive")
+        )
 
     def build(self, req_id: str) -> dict:
         r = self._service.requirements.get(req_id)
@@ -93,4 +121,51 @@ class PlanContextBuilder:
             "feishu_brief_url": getattr(r, "design_doc_url", "") or "",
             "design_system_doc_url": design_system_doc_url,
             "pages": list(getattr(r, "design_pages", []) or []),
+            "inline_files": self._read_archive_inline_files(r),
         }
+
+    def _read_archive_inline_files(self, r) -> list[dict]:
+        """Read text files from the REQ's on-disk archive for inlining.
+
+        Returns ``[{"path": rel_path, "content": text}, ...]`` where rel_path
+        is relative to the archive dir (e.g. "MANIFEST.md" or
+        "extracted/vc-assistant-test/project/src/DashboardPage.jsx").
+
+        Skips: binary files (including bundle.zip), individual files over
+        MAX_INLINE_FILE_BYTES, and stops when cumulative payload reaches
+        MAX_INLINE_TOTAL_BYTES. Order is lexicographic so output is stable
+        across calls.
+        """
+        arch_rel = getattr(r, "design_archive_path", "") or ""
+        if not arch_rel:
+            return []
+        arch_dir_name = Path(arch_rel.rstrip("/")).name
+        archive_dir = self._archive_root / arch_dir_name
+        if not archive_dir.is_dir():
+            return []
+        files: list[dict] = []
+        total = 0
+        for f in sorted(archive_dir.rglob("*")):
+            if not f.is_file():
+                continue
+            if f.name == "bundle.zip":
+                continue
+            try:
+                size = f.stat().st_size
+            except OSError:
+                continue
+            if size > MAX_INLINE_FILE_BYTES:
+                continue
+            try:
+                text = f.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            entry_bytes = len(text.encode("utf-8"))
+            if total + entry_bytes > MAX_INLINE_TOTAL_BYTES:
+                break
+            files.append({
+                "path": f.relative_to(archive_dir).as_posix(),
+                "content": text,
+            })
+            total += entry_bytes
+        return files
