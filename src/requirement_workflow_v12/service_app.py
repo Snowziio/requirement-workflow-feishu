@@ -248,17 +248,20 @@ def _send_design_brief_author_handoff(app, requirement) -> None:
             requirement.req_id,
         )
         return
+    # creator_user_id is whatever feishu_user_id_type is configured as (open_id
+    # by default in this deployment — matches how other handoffs route DMs).
+    receive_id_type = app.settings.feishu_user_id_type
     try:
         text = _build_design_brief_author_handoff_text(requirement)
-        app.gateway.send_text(user_id, text, receive_id_type="user_id")
+        app.gateway.send_text(user_id, text, receive_id_type=receive_id_type)
         LOGGER.info(
-            "sent design-brief-author handoff DM req_id=%s user_id=%s",
-            requirement.req_id, user_id,
+            "sent design-brief-author handoff DM req_id=%s user_id=%s type=%s",
+            requirement.req_id, user_id, receive_id_type,
         )
     except Exception as exc:
         LOGGER.warning(
-            "design-brief-author handoff DM failed req_id=%s user_id=%s: %s",
-            requirement.req_id, user_id, exc,
+            "design-brief-author handoff DM failed req_id=%s user_id=%s type=%s: %s",
+            requirement.req_id, user_id, receive_id_type, exc,
         )
 
 

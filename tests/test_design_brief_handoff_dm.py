@@ -61,15 +61,23 @@ def test_send_handoff_skips_when_creator_user_id_empty():
     from requirement_workflow_v12.service_app import _send_design_brief_author_handoff
     app = MagicMock()
     app.gateway = MagicMock()
+    app.settings.feishu_user_id_type = "open_id"
     r = _req(creator_user_id="")
     _send_design_brief_author_handoff(app, r)
     app.gateway.send_text.assert_not_called()
 
 
-def test_send_handoff_calls_send_text_when_creator_user_id_present():
+def test_send_handoff_uses_configured_feishu_user_id_type():
+    """creator_user_id stores whatever settings.feishu_user_id_type is (open_id
+    by default in this deployment). The handoff must pass that type through,
+    not hardcode "user_id" — otherwise Feishu rejects the DM with
+    "99991672 Access denied. One of the following scopes is required:
+    [contact:user.employee_id:readonly]".
+    """
     from requirement_workflow_v12.service_app import _send_design_brief_author_handoff
     app = MagicMock()
     app.gateway = MagicMock()
+    app.settings.feishu_user_id_type = "open_id"
     r = _req(creator_user_id="ou_designer_123")
     _send_design_brief_author_handoff(app, r)
     app.gateway.send_text.assert_called_once()
@@ -79,6 +87,17 @@ def test_send_handoff_calls_send_text_when_creator_user_id_present():
     assert receive_id == "ou_designer_123"
     text = args[1] if len(args) > 1 else kwargs.get("text")
     assert "REQ-PROJ-007" in text
+    assert kwargs.get("receive_id_type") == "open_id"
+
+
+def test_send_handoff_respects_user_id_type_when_configured_as_user_id():
+    from requirement_workflow_v12.service_app import _send_design_brief_author_handoff
+    app = MagicMock()
+    app.gateway = MagicMock()
+    app.settings.feishu_user_id_type = "user_id"
+    r = _req(creator_user_id="emp_12345")
+    _send_design_brief_author_handoff(app, r)
+    kwargs = app.gateway.send_text.call_args.kwargs
     assert kwargs.get("receive_id_type") == "user_id"
 
 
@@ -87,6 +106,7 @@ def test_send_handoff_swallows_gateway_failure():
     from requirement_workflow_v12.service_app import _send_design_brief_author_handoff
     app = MagicMock()
     app.gateway = MagicMock()
+    app.settings.feishu_user_id_type = "open_id"
     app.gateway.send_text.side_effect = RuntimeError("feishu 500")
     r = _req()
     # Must not raise
