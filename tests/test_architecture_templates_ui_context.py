@@ -69,3 +69,41 @@ def test_build_ui_context_section_without_frontend_or_design_returns_none():
     parsed = {"category": "something-else"}
     section = _build_ui_context_section(parsed)
     assert section is None
+
+
+def test_render_template_output_is_unchanged_when_yaml_has_no_frontend_or_design():
+    """Backward compat: render_template on a YAML without frontend/design keys
+    should produce identical output (no trailing UI Context section)."""
+    from requirement_workflow_v12.architecture_templates import render_template
+    # enterprise-app.v1.yaml currently has no frontend/design keys (pre-Task 5)
+    version, text = render_template("enterprise-app", project="myproj")
+    assert version == "enterprise-app.v1"
+    assert "myproj" in text
+
+
+def test_render_template_appends_ui_context_section_if_yaml_has_frontend_or_design(tmp_path):
+    """render_template must call _build_ui_context_section and append its output."""
+    from unittest.mock import patch
+    from requirement_workflow_v12.architecture_templates import render_template
+
+    stub_yaml = """
+category: stub-test
+frontend:
+  subpath: "src/stub_webapp"
+  tech_stack:
+    framework: "React 18"
+design:
+  design_system_snapshot_path: "design/system/"
+  pages_registry_path: "design/PAGES.yaml"
+"""
+    stub_path = tmp_path / "stub-test.v1.yaml"
+    stub_path.write_text(stub_yaml, encoding="utf-8")
+
+    with patch(
+        "requirement_workflow_v12.architecture_templates._latest_template_path",
+        return_value=("stub-test.v1", stub_path),
+    ):
+        version, text = render_template("stub-test", project="myproj")
+        assert "## UI Context" in text
+        assert "src/stub_webapp" in text
+        assert "React 18" in text

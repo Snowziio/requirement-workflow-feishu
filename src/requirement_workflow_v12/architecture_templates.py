@@ -56,6 +56,7 @@ def render_template(
     project: str,
     seed: dict[str, str] | None = None,
 ) -> tuple[str, str]:
+    import yaml
     version, path = _latest_template_path(category)
     raw = path.read_text(encoding="utf-8")
     pkg = derive_pkg(project)
@@ -69,6 +70,16 @@ def render_template(
            .replace("{{brief}}", seed.get("brief", ""))
            .replace("{{tech_stack}}", seed.get("tech_stack", ""))
     )
+    # Additionally: parse substituted YAML and append "## UI Context" section
+    # if the YAML has frontend/design keys (silent no-op otherwise).
+    try:
+        parsed = yaml.safe_load(text)
+    except yaml.YAMLError:
+        parsed = None
+    if isinstance(parsed, dict):
+        ui_context = _build_ui_context_section(parsed)
+        if ui_context:
+            text = text.rstrip() + "\n\n" + ui_context + "\n"
     return version, text
 
 
