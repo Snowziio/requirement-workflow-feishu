@@ -103,6 +103,17 @@ class JsonStateStore:
         plan_phase = PlanPhase(str(raw_plan_phase)) if raw_plan_phase else None
         raw_design_status = data.get("design_status")
         design_status = DesignStatus(str(raw_design_status)) if raw_design_status else None
+        design_doc_id = str(data.get("design_doc_id") or "")
+        design_doc_url = str(data.get("design_doc_url") or "")
+        design_archive_path = str(data.get("design_archive_path") or "")
+        design_github_revision = str(data.get("design_github_revision") or "")
+        design_precondition_met = bool(data.get("design_precondition_met", False))
+        pending_design_brief = data.get("pending_design_brief")
+        if pending_design_brief is not None and not isinstance(pending_design_brief, dict):
+            pending_design_brief = None
+        pending_design_handoff = data.get("pending_design_handoff")
+        if pending_design_handoff is not None and not isinstance(pending_design_handoff, dict):
+            pending_design_handoff = None
 
         requirement = Requirement(
             req_id=data["req_id"],
@@ -159,6 +170,13 @@ class JsonStateStore:
             spec_github_path=data.get("spec_github_path", ""),
             spec_github_revision=data.get("spec_github_revision", ""),
             design_status=design_status,
+            design_doc_id=design_doc_id,
+            design_doc_url=design_doc_url,
+            design_archive_path=design_archive_path,
+            design_github_revision=design_github_revision,
+            design_precondition_met=design_precondition_met,
+            pending_design_brief=pending_design_brief,
+            pending_design_handoff=pending_design_handoff,
             discussion_history=[self._discussion_turn_from_payload(item) for item in discussion_history_payload],
             review_history=[self._review_result_from_payload(item) for item in review_history_payload],
             human_review_history=[

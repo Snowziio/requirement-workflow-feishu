@@ -140,6 +140,13 @@ class Requirement:
     spec_github_path: str = ""
     spec_github_revision: str = ""
     design_status: "DesignStatus | None" = None
+    design_doc_id: str = ""
+    design_doc_url: str = ""
+    design_archive_path: str = ""
+    design_github_revision: str = ""
+    design_precondition_met: bool = False
+    pending_design_brief: dict | None = None
+    pending_design_handoff: dict | None = None
     updated_at: datetime = field(default_factory=utc_now)
 
     def touch(self) -> None:

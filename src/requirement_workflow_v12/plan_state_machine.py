@@ -38,14 +38,17 @@ class PlanPhase(str, Enum):
 
 
 class DesignStatus(str, Enum):
-    DRAFTING = "DESIGN_DRAFTING"
-    READY = "DESIGN_READY"
+    DRAFTING              = "DESIGN_DRAFTING"
+    SUBMIT_PENDING_REVIEW = "DESIGN_SUBMIT_PENDING_REVIEW"
+    READY                 = "DESIGN_READY"
 
 
 class DesignEvent(str, Enum):
-    DESIGN_START = "design_start"
-    DESIGN_SUBMIT = "design_submit"
-    DESIGN_RESTART = "design_restart"
+    DESIGN_START         = "design_start"
+    DESIGN_SUBMIT        = "design_submit"
+    DESIGN_FINAL_APPROVE = "design_final_approve"
+    DESIGN_FINAL_REJECT  = "design_final_reject"
+    DESIGN_RESTART       = "design_restart"
 
 
 @dataclass
@@ -117,7 +120,9 @@ def apply_plan_event(
 
 _DESIGN_TRANSITIONS: dict[tuple[Optional[DesignStatus], DesignEvent], DesignStatus] = {
     (None, DesignEvent.DESIGN_START): DesignStatus.DRAFTING,
-    (DesignStatus.DRAFTING, DesignEvent.DESIGN_SUBMIT): DesignStatus.READY,
+    (DesignStatus.DRAFTING, DesignEvent.DESIGN_SUBMIT): DesignStatus.SUBMIT_PENDING_REVIEW,
+    (DesignStatus.SUBMIT_PENDING_REVIEW, DesignEvent.DESIGN_FINAL_APPROVE): DesignStatus.READY,
+    (DesignStatus.SUBMIT_PENDING_REVIEW, DesignEvent.DESIGN_FINAL_REJECT): DesignStatus.DRAFTING,
 }
 
 

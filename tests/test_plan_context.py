@@ -113,3 +113,63 @@ def test_plan_context_plan_doc_fields_default_empty_string():
 
     assert ctx["plan_doc_id"] == ""
     assert ctx["plan_doc_url"] == ""
+
+
+def test_plan_context_includes_design_artifact():
+    """Plan context must include design_artifact slice for plan-author consumption."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+    from unittest.mock import MagicMock
+    from requirement_workflow_v12.models import Requirement, WorkflowStatus
+    from requirement_workflow_v12.plan_state_machine import DesignStatus
+    from requirement_workflow_v12.plan_context import PlanContextBuilder
+
+    r = Requirement(
+        req_id="REQ-X-001", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.READY,
+        design_archive_path="design/archive/REQ-X-001_foo/",
+    )
+    svc = MagicMock()
+    svc.requirements = {r.req_id: r}
+    cfg = MagicMock()
+    cfg.tech_stack = {}; cfg.category = "enterprise-app"
+    cfg.template_version = "v1"
+    cfg.architecture_doc_url = ""; cfg.github_repo_url = ""
+    svc.project_configs = {r.project: cfg}
+
+    ctx = PlanContextBuilder(svc).build("REQ-X-001")
+    assert "design_artifact" in ctx
+    assert ctx["design_artifact"]["archive_path"] == "design/archive/REQ-X-001_foo/"
+    assert ctx["design_artifact"]["needs_ui"] is True
+    assert ctx["design_artifact"]["design_status"] == "DESIGN_READY"
+
+
+def test_plan_context_design_artifact_when_needs_ui_false():
+    """Non-UI REQ still gets a design_artifact slice, but with empty/None fields."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+    from unittest.mock import MagicMock
+    from requirement_workflow_v12.models import Requirement, WorkflowStatus
+    from requirement_workflow_v12.plan_context import PlanContextBuilder
+
+    r = Requirement(
+        req_id="REQ-X-002", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=False,
+    )
+    svc = MagicMock()
+    svc.requirements = {r.req_id: r}
+    cfg = MagicMock()
+    cfg.tech_stack = {}; cfg.category = "enterprise-app"
+    cfg.template_version = "v1"
+    cfg.architecture_doc_url = ""; cfg.github_repo_url = ""
+    svc.project_configs = {r.project: cfg}
+
+    ctx = PlanContextBuilder(svc).build("REQ-X-002")
+    assert ctx["design_artifact"]["needs_ui"] is False
+    assert ctx["design_artifact"]["archive_path"] == ""
+    assert ctx["design_artifact"]["design_status"] is None

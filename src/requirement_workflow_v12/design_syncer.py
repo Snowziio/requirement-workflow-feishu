@@ -1,0 +1,134 @@
+"""Design READY → GitHub single-commit syncer.
+
+Atomic operation on `onEnter(DesignStatus.READY)`:
+  - commit the REQ's archive dir (recursive)
+  - update design/PAGES.yaml with pages_touched
+  - update design/INDEX.md (prepend entry)
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover
+    yaml = None  # type: ignore
+
+
+class DesignSyncError(Exception):
+    pass
+
+
+@dataclass
+class DesignSyncResult:
+    commit_sha: str
+
+
+class DesignSyncer:
+    def __init__(self, project_repo_gateway) -> None:
+        self._gw = project_repo_gateway
+
+    def sync(
+        self, *,
+        project_repo: str,
+        req_id: str,
+        slug: str,
+        archive_dir: Path,
+        pages_registry_path: Path,
+        index_path: Path,
+        pages_touched: list[dict],
+    ) -> DesignSyncResult:
+        self._update_pages_registry(pages_registry_path, req_id, slug, pages_touched)
+        self._update_index(index_path, req_id, slug, pages_touched)
+
+        files = self._collect_files(
+            archive_dir=archive_dir,
+            registry_path=pages_registry_path,
+            index_path=index_path,
+        )
+
+        try:
+            sha = self._gw.project_repo_commit(
+                project_repo=project_repo,
+                message=f"design: lock handoff for {req_id}",
+                files=files,
+            )
+        except Exception as exc:
+            raise DesignSyncError(f"github commit failed: {exc}") from exc
+
+        return DesignSyncResult(commit_sha=sha)
+
+    def _update_pages_registry(
+        self, registry_path: Path, req_id: str, slug: str,
+        pages_touched: list[dict],
+    ) -> None:
+        if yaml is None:
+            raise DesignSyncError("PyYAML not installed; required for PAGES.yaml update")
+        doc = yaml.safe_load(registry_path.read_text(encoding="utf-8")) or {}
+        pages = doc.setdefault("pages", [])
+        archive_ref = f"design/archive/{req_id}_{slug}"
+
+        index_by_name = {p["display_name"]: p for p in pages if "display_name" in p}
+        for touch in pages_touched:
+            name = touch["display_name"]
+            if name in index_by_name:
+                entry = index_by_name[name]
+                entry["last_modified_by_req"] = req_id
+                entry["latest_archive_ref"] = archive_ref
+            else:
+                pages.append({
+                    "display_name": name,
+                    "created_by_req": req_id,
+                    "last_modified_by_req": req_id,
+                    "latest_archive_ref": archive_ref,
+                    "target_component": "",
+                    "target_route": "",
+                    "bundle_src_hint": f"src/{name}.jsx",
+                })
+        registry_path.write_text(
+            yaml.safe_dump(doc, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+
+    def _update_index(
+        self, index_path: Path, req_id: str, slug: str,
+        pages_touched: list[dict],
+    ) -> None:
+        existing = index_path.read_text(encoding="utf-8")
+        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        pages_str = ", ".join(
+            f"{p['display_name']} ({p.get('action', 'new')})"
+            for p in pages_touched
+        ) or "(no pages declared)"
+        entry = (
+            f"\n## {date} | {req_id} | {slug}\n"
+            f"- Archive: [design/archive/{req_id}_{slug}/](./archive/{req_id}_{slug}/)\n"
+            f"- Pages touched: {pages_str}\n"
+        )
+        header_end = existing.find("\n", existing.find("# Design Handoff Index"))
+        if header_end == -1:
+            new = existing.rstrip() + entry
+        else:
+            new = existing[: header_end + 1] + entry + existing[header_end + 1 :]
+        index_path.write_text(new, encoding="utf-8")
+
+    def _collect_files(
+        self, *, archive_dir: Path, registry_path: Path, index_path: Path,
+    ) -> dict[str, bytes]:
+        """Return {relative_repo_path: content_bytes} for the commit.
+
+        Convention: design/ lives at <repo_root>/design/, so design_root.parent
+        is the repo root. All three path inputs must be under that root.
+        """
+        design_root = registry_path.parent
+        repo_root = design_root.parent
+        files: dict[str, bytes] = {}
+        for f in archive_dir.rglob("*"):
+            if f.is_file():
+                rel = f.relative_to(repo_root).as_posix()
+                files[rel] = f.read_bytes()
+        files[registry_path.relative_to(repo_root).as_posix()] = registry_path.read_bytes()
+        files[index_path.relative_to(repo_root).as_posix()] = index_path.read_bytes()
+        return files

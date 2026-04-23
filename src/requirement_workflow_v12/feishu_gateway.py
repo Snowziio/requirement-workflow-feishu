@@ -296,6 +296,101 @@ class FeishuGateway:
             document_url=f"{self.settings.feishu_base_url}/docx/{document.document_id}",
         )
 
+    def create_design_document(self, requirement: Requirement) -> CreatedDocument | None:
+        if not self.settings.feishu_doc_folder_token:
+            return None
+        title = f"{requirement.req_id} {requirement.name} — Design Brief"
+        LOGGER.info("Feishu create_design_document req_id=%s title=%s", requirement.req_id, title)
+        request = (
+            CreateDocumentRequest.builder()
+            .request_body(
+                CreateDocumentRequestBody.builder()
+                .folder_token(self.settings.feishu_doc_folder_token)
+                .title(title)
+                .build()
+            )
+            .build()
+        )
+        response = self.client.docx.v1.document.create(request)
+        self._ensure_success(response, "create design document")
+        document = response.data.document
+        LOGGER.info(
+            "Feishu created design document req_id=%s document_id=%s",
+            requirement.req_id,
+            document.document_id,
+        )
+        return CreatedDocument(
+            document_id=document.document_id,
+            document_url=f"{self.settings.feishu_base_url}/docx/{document.document_id}",
+        )
+
+    def download_card_attachment(
+        self,
+        *,
+        file_key: str,
+        message_id: str,
+        dest_path,
+    ):
+        """Download a card-uploaded file attachment to dest_path.
+
+        The Feishu card callback payload includes `file_key` (SDK identifier) and
+        `message_id` (the card action message). Both are required by lark's IM
+        resource API.
+
+        Returns the `Path` the file was written to.
+        """
+        from pathlib import Path
+        dest = Path(dest_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        data = self._download_file_bytes(file_key=file_key, message_id=message_id)
+        dest.write_bytes(data)
+        LOGGER.info(
+            "Feishu download_card_attachment file_key=%s -> %s bytes=%d",
+            file_key, dest, len(data),
+        )
+        return dest
+
+    def _download_file_bytes(self, *, file_key: str, message_id: str) -> bytes:
+        """Thin wrapper over the lark SDK file-resource call.
+
+        Separated so tests can patch this method without mocking the full SDK chain.
+
+        The actual lark SDK call (based on im.v1):
+          request = GetMessageResourceRequest.builder()
+              .message_id(message_id).file_key(file_key).type("file").build()
+          response = self.client.im.v1.message_resource.get(request)
+          return response.file.read()
+
+        If the SDK path / method is different in the installed lark_oapi version,
+        adapt the internals — but keep the method signature stable.
+        """
+        try:
+            from lark_oapi.api.im.v1 import GetMessageResourceRequest
+            request = (
+                GetMessageResourceRequest.builder()
+                .message_id(message_id)
+                .file_key(file_key)
+                .type("file")
+                .build()
+            )
+            response = self.client.im.v1.message_resource.get(request)
+            self._ensure_success(response, "download card attachment")
+            # response.file is usually an io.BytesIO-like handle
+            if hasattr(response, "file") and response.file is not None:
+                file_handle = response.file
+                if hasattr(file_handle, "read"):
+                    return file_handle.read()
+                if isinstance(file_handle, (bytes, bytearray)):
+                    return bytes(file_handle)
+            # Fallback for different SDK shapes
+            if hasattr(response, "data") and hasattr(response.data, "file"):
+                return response.data.file.read()
+            raise RuntimeError("unexpected lark SDK response shape for file download")
+        except ImportError as exc:
+            raise RuntimeError(
+                f"lark_oapi.api.im.v1.GetMessageResourceRequest not available: {exc}"
+            ) from exc
+
     def create_architecture_document(self, project: str) -> CreatedDocument | None:
         if not self.settings.feishu_doc_folder_token:
             return None

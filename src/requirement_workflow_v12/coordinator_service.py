@@ -17,7 +17,7 @@ from .protocols import (
     CreationResponse,
 )
 from .plan_state_machine import (
-    DesignEvent, PlanEvent, PlanPhase, PlanStatus,
+    DesignEvent, DesignStatus, PlanEvent, PlanPhase, PlanStatus,
     apply_design_event, apply_plan_event,
 )
 from .project_repo import PlanArtifacts
@@ -818,6 +818,13 @@ class CoordinatorService:
             raise ValueError(
                 f"plan_start requires workflow_status=APPROVED, got {r.status.value}"
             )
+        if r.needs_ui and not r.design_precondition_met:
+            design_status_label = r.design_status.value if r.design_status else "None"
+            raise ValueError(
+                f"plan_start blocked: needs_ui=True but design phase not READY "
+                f"(design_status={design_status_label}, design_precondition_met={r.design_precondition_met}). "
+                f"等设计阶段完成后再启动 Plan。"
+            )
         decision = apply_plan_event(r.plan_status, PlanEvent.PLAN_START)
         if not decision.allowed:
             raise ValueError(decision.message)
@@ -960,6 +967,64 @@ class CoordinatorService:
             r.plan_pr_url = result.commit_sha
         r.pending_plan_draft = None
 
+    def configure_design_hooks(self, *, syncer, design_root) -> None:
+        """Register DESIGN-layer hooks. Idempotent.
+
+        ``syncer`` is a ``DesignSyncer`` instance with an injected project-repo gateway.
+        ``design_root`` is the local Path where ``design/`` lives (absolute or relative).
+        """
+        from pathlib import Path
+        self._design_syncer = syncer
+        self._design_root = Path(design_root)
+        if not getattr(self, "_design_hook_registered", False):
+            self._hooks.on_enter(DesignStatus.READY, self._sync_design_on_ready)
+            self._design_hook_registered = True
+
+    def _sync_design_on_ready(self, r: "Requirement") -> None:
+        """``on_enter(DesignStatus.READY)`` hook: atomic commit of archive + PAGES.yaml + INDEX.md."""
+        if getattr(self, "_design_syncer", None) is None:
+            LOGGER.warning("design_syncer not configured; skipping READY sync req=%s", r.req_id)
+            return
+        from pathlib import Path
+        # archive_path in the requirement is a repo-relative posix path like
+        # "design/archive/REQ-X_foo/"; strip trailing slash and split off the dir name.
+        archive_rel = r.design_archive_path.rstrip("/")
+        # e.g. "design/archive/REQ-X_foo" -> slug = "foo"
+        last_segment = archive_rel.split("/")[-1]
+        # last_segment is "REQ-X_foo"; slug = portion after first underscore
+        if "_" in last_segment:
+            slug = last_segment.split("_", 1)[1]
+        else:
+            slug = "handoff"
+        design_root = self._design_root
+        archive_dir = design_root / "archive" / last_segment
+        registry_path = design_root / "PAGES.yaml"
+        index_path = design_root / "INDEX.md"
+
+        handoff = r.pending_design_handoff or {}
+        pages_touched = handoff.get("pages_touched") or []
+
+        project_repo = self._project_repo_for(r.req_id)
+
+        try:
+            result = self._design_syncer.sync(
+                project_repo=project_repo,
+                req_id=r.req_id,
+                slug=slug,
+                archive_dir=archive_dir,
+                pages_registry_path=registry_path,
+                index_path=index_path,
+                pages_touched=pages_touched,
+            )
+            r.design_github_revision = result.commit_sha
+            LOGGER.info(
+                "design READY sync success req=%s commit=%s",
+                r.req_id, result.commit_sha,
+            )
+        except Exception:
+            LOGGER.exception("design READY sync failed req=%s", r.req_id)
+            raise
+
     def _fetch_plan_md(self, req_id: str) -> str:
         """Default stub; override in production to pull plan.md from GitHub."""
         return ""
@@ -988,8 +1053,111 @@ class CoordinatorService:
             raise ValueError(decision.message)
 
         r.design_status = None
+        r.design_doc_id = ""
+        r.design_doc_url = ""
+        r.design_archive_path = ""
+        r.design_github_revision = ""
+        r.design_precondition_met = False
+        r.pending_design_brief = None
+        r.pending_design_handoff = None
         if r.plan_status is not None:
             self.plan_restart(req_id)
+        return r
+
+    # ── DESIGN layer ────────────────────────────────────────────────────
+
+    def design_start(
+        self,
+        req_id: str,
+        *,
+        design_doc_id: str = "",
+        design_doc_url: str = "",
+    ) -> "Requirement":
+        r = self.requirements[req_id]
+        if r.status != WorkflowStatus.APPROVED:
+            raise ValueError(
+                f"design_start requires workflow_status=APPROVED, got {r.status.value}"
+            )
+        if not r.needs_ui:
+            raise ValueError("design_start requires needs_ui=True")
+        decision = apply_design_event(r.design_status, DesignEvent.DESIGN_START)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        prev = r.design_status
+        self._hooks.fire_exit(prev, r)
+        r.design_status = decision.next_status
+        r.design_doc_id = design_doc_id
+        r.design_doc_url = design_doc_url
+        self._hooks.fire_enter(r.design_status, r)
+        return r
+
+    def design_submit(
+        self,
+        req_id: str,
+        *,
+        archive_path: str,
+        pages_touched: list[dict],
+    ) -> "Requirement":
+        r = self.requirements[req_id]
+        decision = apply_design_event(r.design_status, DesignEvent.DESIGN_SUBMIT)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        r.pending_design_handoff = {
+            "archive_path": archive_path,
+            "pages_touched": list(pages_touched),
+            "submitted_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        prev = r.design_status
+        self._hooks.fire_exit(prev, r)
+        r.design_status = decision.next_status
+        self._hooks.fire_enter(r.design_status, r)
+        return r
+
+    def design_final_approve(
+        self, req_id: str, *, approved_by: str = "",
+    ) -> "Requirement":
+        r = self.requirements[req_id]
+        decision = apply_design_event(r.design_status, DesignEvent.DESIGN_FINAL_APPROVE)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        handoff = r.pending_design_handoff or {}
+        r.design_archive_path = handoff.get("archive_path", "")
+
+        prev = r.design_status
+        self._hooks.fire_exit(prev, r)
+        r.design_status = decision.next_status
+        r.design_precondition_met = True
+        r.pending_design_handoff = None    # cleared; now archived
+        r.pending_design_brief = None     # cleared; now archived in design/archive/<req>/BRIEF.md
+        self._hooks.fire_enter(r.design_status, r)
+        LOGGER.info(
+            "design_final_approve req_id=%s approved_by=%s archive=%s",
+            req_id, approved_by, r.design_archive_path,
+        )
+        return r
+
+    def design_final_reject(
+        self, req_id: str, *, reason: str = "",
+    ) -> "Requirement":
+        r = self.requirements[req_id]
+        decision = apply_design_event(r.design_status, DesignEvent.DESIGN_FINAL_REJECT)
+        if not decision.allowed:
+            raise ValueError(decision.message)
+
+        handoff = r.pending_design_handoff or {}
+        handoff["reject_reason"] = reason
+        r.pending_design_handoff = handoff
+
+        prev = r.design_status
+        self._hooks.fire_exit(prev, r)
+        r.design_status = decision.next_status
+        r.design_precondition_met = False
+        self._hooks.fire_enter(r.design_status, r)
+        LOGGER.info("design_final_reject req_id=%s reason=%s", req_id, reason)
         return r
 
     def _cascade_reset_spec(self, r: Requirement) -> None:

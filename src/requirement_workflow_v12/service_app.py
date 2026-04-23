@@ -6,18 +6,20 @@ import hmac
 import hashlib
 import json
 import logging
+import os
 import re
 import threading
 import time
 from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Any
 
 from .config import Settings, load_settings
 from .coordinator_service import CoordinatorService
 from .feishu_gateway import FeishuGateway
 from .models import DISCUSSION_FIELDS, Requirement, ReviewFinding, ReviewResult, WorkflowStatus, utc_now
-from .plan_state_machine import PlanPhase, PlanStatus
+from .plan_state_machine import DesignStatus, PlanPhase, PlanStatus
 from .spec_state_machine import SpecStatus
 from .project_config import ProjectConfig
 from .protocols import (
@@ -137,6 +139,50 @@ class OutboundCard:
     receive_id_type: str = "chat_id"
 
 
+def dispatch_design_start_if_needed(app, requirement) -> None:
+    """Called from approve_requirement post-hook. Creates Feishu design docx and
+    calls service.design_start. No-op when needs_ui=False. Never raises."""
+    if not requirement.needs_ui:
+        return
+    try:
+        created = app.gateway.create_design_document(requirement)
+    except Exception as exc:
+        LOGGER.warning(
+            "create_design_document failed req_id=%s: %s", requirement.req_id, exc,
+        )
+        return
+    if created is None:
+        LOGGER.info(
+            "create_design_document returned None (folder token empty?) req_id=%s",
+            requirement.req_id,
+        )
+        return
+    try:
+        app.service.design_start(
+            requirement.req_id,
+            design_doc_id=created.document_id,
+            design_doc_url=created.document_url,
+        )
+    except Exception as exc:
+        LOGGER.warning(
+            "design_start failed req_id=%s: %s", requirement.req_id, exc,
+        )
+
+
+def _wire_design_hooks(*, service, github_tools, archive_root) -> None:
+    """Instantiate ``DesignSyncer`` and register design hooks on the service.
+
+    ``archive_root`` is the path to ``design/archive/`` (Task 15 intake root);
+    ``design_root`` is its parent (``design/``). The design READY hook needs
+    ``design_root`` to locate ``PAGES.yaml`` / ``INDEX.md`` at sync time.
+    """
+    from .design_syncer import DesignSyncer
+    archive_root_path = Path(archive_root)
+    design_root = archive_root_path.parent
+    syncer = DesignSyncer(github_tools)
+    service.configure_design_hooks(syncer=syncer, design_root=design_root)
+
+
 class CoordinatorRuntimeApp:
     """Harness-style runtime for the coordinator service."""
 
@@ -185,8 +231,15 @@ class CoordinatorRuntimeApp:
         self._seen_card_action_ids: collections.OrderedDict[tuple[str, str], None] = collections.OrderedDict()
         self._seen_card_action_ids_max = 1024
 
+        # Design handoff archive root (for Task 15 intake). Initialized here
+        # so downstream wiring (design hooks) can reference ``self.archive_root``.
+        self.archive_root = Path(os.environ.get("DESIGN_ARCHIVE_ROOT", "design/archive"))
+        try:
+            self.archive_root.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            LOGGER.warning("archive_root mkdir failed: %s", exc)
+
         if settings.github_token:
-            from pathlib import Path
             from .github_gateway import GitHubGateway
             from .project_repo import GitHubProjectRepoTools
             from .feishu_to_github_syncer import FeishuToGitHubSyncer
@@ -205,6 +258,11 @@ class CoordinatorRuntimeApp:
                 syncer=plan_syncer,
             )
             self.service.configure_plan_hooks(tools=tools, syncer=plan_syncer)
+            _wire_design_hooks(
+                service=self.service,
+                github_tools=tools,
+                archive_root=self.archive_root,
+            )
             if self._project_bootstrap_service is None:
                 from .project_bootstrap.service import ProjectBootstrapService
                 self._project_bootstrap_service = ProjectBootstrapService(
@@ -224,6 +282,8 @@ class CoordinatorRuntimeApp:
         )
         from .plan_context import PlanContextBuilder
         self._plan_context_builder = PlanContextBuilder(service=self.service)
+        from .design_context import DesignContextBuilder
+        self._design_context_builder = DesignContextBuilder(self.service)
 
     def build_event_dispatcher(self):
         self._require_lark()
@@ -262,6 +322,9 @@ class CoordinatorRuntimeApp:
                 if self.path.startswith("/queries/openclaw/plan-context/"):
                     req_id = self.path.rsplit("/", 1)[-1]
                     status, payload = app.handle_openclaw_plan_context_query(req_id)
+                elif self.path.startswith("/queries/openclaw/design-context/"):
+                    req_id = self.path.rsplit("/", 1)[-1]
+                    status, payload = app.handle_openclaw_design_context_query(req_id)
                 else:
                     status, payload = 200, {"status": "ok", "service": service_name}
                 body = json.dumps(payload, ensure_ascii=False).encode()
@@ -294,6 +357,9 @@ class CoordinatorRuntimeApp:
                 elif self.path == "/openclaw/plan-callback":
                     body_json = json.loads(raw_body.decode("utf-8") or "{}")
                     status, payload = app.handle_openclaw_plan_callback(body_json)
+                elif self.path == "/openclaw/design-callback":
+                    body_json = json.loads(raw_body.decode("utf-8") or "{}")
+                    status, payload = app.handle_openclaw_design_callback(body_json)
                 else:
                     status, payload = 404, {"error": "not_found"}
                 body = json.dumps(payload, ensure_ascii=False).encode()
@@ -881,6 +947,8 @@ class CoordinatorRuntimeApp:
                 except Exception as exc:
                     LOGGER.warning("Failed to create design system document: %s", exc)
 
+            dispatch_design_start_if_needed(self, requirement)
+
         self._save_state()
         self._dispatch_transition_notifications(requirement, trigger="final_review_passed" if approved else "final_review_rejected")
         return [OutboundMessage(receive_id=context.chat_id, text=response_text)]
@@ -1191,6 +1259,26 @@ class CoordinatorRuntimeApp:
             LOGGER.exception("plan-context failed req_id=%s", req_id)
             return 500, {"error": "plan_context_failed", "message": str(exc)}
 
+    def handle_openclaw_design_context_query(
+        self, req_id: str,
+    ) -> tuple[int, dict]:
+        from .design_context import (
+            DesignContextGateError, DesignContextMisconfigured,
+        )
+        r = self.service.requirements.get(req_id)
+        if r is None:
+            return 404, {"error": "not_found", "req_id": req_id}
+        try:
+            ctx = self._design_context_builder.build(req_id)
+            return 200, ctx
+        except DesignContextGateError as exc:
+            return 409, {"error": "gate_failed", "message": str(exc)}
+        except DesignContextMisconfigured as exc:
+            return 409, {"error": "misconfigured", "message": str(exc)}
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.exception("design-context failed req_id=%s", req_id)
+            return 500, {"error": "design_context_failed", "message": str(exc)}
+
     def handle_slash_command(self, text: str) -> str | None:
         """Return human-readable reply, or None if no match."""
         m = PLAN_RESTART_RE.match(text.strip())
@@ -1274,6 +1362,56 @@ class CoordinatorRuntimeApp:
         except Exception as exc:  # pragma: no cover
             LOGGER.exception("plan-callback failed req_id=%s event=%s", req_id, event)
             return 500, {"error": "plan_callback_failed", "message": str(exc)}
+
+    def handle_openclaw_design_callback(
+        self, body: dict,
+    ) -> tuple[int, dict]:
+        req_id = body.get("req_id", "")
+        event = body.get("event", "")
+        payload = body.get("payload") or {}
+
+        r = self.service.requirements.get(req_id)
+        if r is None:
+            return 404, {"error": "not_found", "req_id": req_id}
+
+        try:
+            if event == "design_brief_submit":
+                if r.design_status != DesignStatus.DRAFTING:
+                    current = r.design_status.value if r.design_status else "None"
+                    return 409, {
+                        "error": "invalid_state",
+                        "message": f"design_brief_submit requires design_status=DRAFTING, got {current}",
+                    }
+                r.pending_design_brief = {
+                    "brief_yaml_frontmatter": payload.get("brief_yaml_frontmatter", ""),
+                    "brief_markdown_body": payload.get("brief_markdown_body", ""),
+                    "submitted_at": utc_now().isoformat(),
+                }
+                self._save_state()
+                # Optional: mirror Brief into Feishu design docx (best-effort)
+                brief_body = payload.get("brief_markdown_body", "")
+                if r.design_doc_id and brief_body:
+                    try:
+                        self.gateway.write_document_text(r.design_doc_id, brief_body)
+                    except Exception as exc:
+                        LOGGER.warning(
+                            "mirror design brief to feishu failed req=%s: %s", req_id, exc,
+                        )
+                # Push "设计启动卡" (best-effort)
+                try:
+                    self._dispatch_transition_notifications(
+                        r, trigger="design_brief_ready",
+                    )
+                except Exception:
+                    LOGGER.exception("design brief card dispatch failed req=%s", req_id)
+                return 200, {
+                    "req_id": req_id,
+                    "design_status": r.design_status.value,
+                }
+            return 400, {"error": "unknown_event", "event": event}
+        except Exception as exc:  # pragma: no cover
+            LOGGER.exception("design-callback failed req_id=%s event=%s", req_id, event)
+            return 500, {"error": "design_callback_failed", "message": str(exc)}
 
     def handle_openclaw_spec_turn_callback(
         self,
@@ -1440,6 +1578,105 @@ class CoordinatorRuntimeApp:
 
         return 200, {"ok": True, "req_id": req_id, "next_action": action}
 
+    def _handle_design_upload_bundle_action(
+        self, value: dict, operator: dict,
+    ) -> tuple[int, dict]:
+        import tempfile
+        from .design_intake import DesignIntake, IntakeError
+
+        req_id = value.get("req_id", "")
+        file_key = value.get("file_key", "")
+        message_id = value.get("message_id", "")
+        if not (req_id and file_key and message_id):
+            return 200, {"toast": {"type": "error", "content": "缺少上传参数。"}}
+
+        r = self.service.requirements.get(req_id)
+        if r is None:
+            return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
+        if r.design_status != DesignStatus.DRAFTING:
+            current = r.design_status.value if r.design_status else "None"
+            return 200, {"toast": {
+                "type": "error",
+                "content": f"当前设计状态不允许上传：{current}",
+            }}
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix="design-handoff-"))
+        zip_tmp = tmp_dir / f"{req_id}.zip"
+        try:
+            self.gateway.download_card_attachment(
+                file_key=file_key, message_id=message_id, dest_path=zip_tmp,
+            )
+        except Exception as exc:
+            LOGGER.warning("download_card_attachment failed req=%s: %s", req_id, exc)
+            return 200, {"toast": {"type": "error", "content": "下载附件失败。"}}
+
+        slug = self._build_design_slug(r)
+        try:
+            result = DesignIntake().intake(
+                zip_path=zip_tmp,
+                req_id=req_id,
+                slug=slug,
+                archive_root=self.archive_root,
+            )
+        except IntakeError as exc:
+            LOGGER.warning("design intake failed req=%s: %s", req_id, exc)
+            return 200, {"toast": {"type": "error", "content": f"解析 handoff 失败：{exc}"}}
+
+        pages_touched = [{"display_name": p, "action": "new"} for p in result.pages_hint]
+
+        try:
+            self.service.design_submit(
+                req_id,
+                archive_path=f"design/archive/{result.archive_dir.name}/",
+                pages_touched=pages_touched,
+            )
+        except Exception as exc:
+            LOGGER.exception("design_submit failed req=%s", req_id)
+            return 200, {"toast": {"type": "error", "content": f"状态机提交失败：{exc}"}}
+
+        self._save_state()
+        try:
+            self._dispatch_transition_notifications(r, trigger="design_submit_pending_review")
+        except Exception:
+            LOGGER.exception("design submit card dispatch failed req=%s", req_id)
+
+        return 200, {"toast": {"type": "success", "content": "Handoff 已接收，等待终审。"}}
+
+    def _build_design_slug(self, requirement) -> str:
+        """Derive a slug from requirement name for use in archive dir naming."""
+        import re
+        name = requirement.name or "handoff"
+        slug = re.sub(r"[^a-zA-Z0-9一-鿿\-]+", "-", name).strip("-").lower()[:30]
+        return slug or "handoff"
+
+    def _write_design_rejected_marker(self, req_id: str, reason: str) -> None:
+        """Write design/archive/<req>_<slug>/REJECTED.md with the reject reason.
+        Best-effort; logs warning if archive dir doesn't exist."""
+        from datetime import datetime, timezone
+        # Find the archive dir matching {req_id}_*
+        if not self.archive_root.exists():
+            LOGGER.warning(
+                "archive_root %s does not exist; skipping REJECTED.md for %s",
+                self.archive_root, req_id,
+            )
+            return
+        candidates = list(self.archive_root.glob(f"{req_id}_*"))
+        if not candidates:
+            LOGGER.warning(
+                "no archive dir matching %s_* in %s; skipping REJECTED.md",
+                req_id, self.archive_root,
+            )
+            return
+        archive_dir = candidates[0]
+        rejected = archive_dir / "REJECTED.md"
+        content = (
+            f"# Design Rejected: {req_id}\n\n"
+            f"Rejected at: {datetime.now(timezone.utc).isoformat()}\n\n"
+            f"## Reason\n\n{reason or '(no reason given)'}\n"
+        )
+        rejected.write_text(content, encoding="utf-8")
+        LOGGER.info("Wrote REJECTED.md for %s at %s", req_id, rejected)
+
     def _handle_card_action_payload(self, payload: dict[str, object]) -> tuple[int, dict[str, object]]:
         LOGGER.info("Handling card payload: %s", payload)
 
@@ -1463,6 +1700,50 @@ class CoordinatorRuntimeApp:
                 open_message_id, action_name,
             )
             return 200, {"toast": {"type": "info", "content": "已处理，跳过重复回调。"}}
+
+        if action_name == "design_upload_bundle":
+            return self._handle_design_upload_bundle_action(value, operator)
+
+        if action_name == "design_final_approve":
+            req_id = value.get("req_id", "")
+            if not req_id:
+                return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            user_id = operator.get("operator_id", {}).get("user_id", "") if isinstance(operator, dict) else ""
+            try:
+                self.service.design_final_approve(req_id, approved_by=user_id)
+            except ValueError as exc:
+                return 200, {"toast": {"type": "error", "content": str(exc)}}
+            except Exception as exc:
+                LOGGER.exception("design_final_approve failed req=%s", req_id)
+                return 200, {"toast": {"type": "error", "content": f"提交失败：{exc}"}}
+            self._save_state()
+            try:
+                r = self.service.requirements.get(req_id)
+                if r is not None:
+                    self._dispatch_transition_notifications(r, trigger="design_ready")
+            except Exception:
+                LOGGER.exception("design ready card dispatch failed req=%s", req_id)
+            return 200, {"toast": {"type": "success", "content": "设计通过，Plan 阶段已解锁。"}}
+
+        if action_name == "design_final_reject":
+            req_id = value.get("req_id", "")
+            reason = value.get("reason", "")
+            if not req_id:
+                return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            try:
+                self.service.design_final_reject(req_id, reason=reason)
+            except ValueError as exc:
+                return 200, {"toast": {"type": "error", "content": str(exc)}}
+            except Exception as exc:
+                LOGGER.exception("design_final_reject failed req=%s", req_id)
+                return 200, {"toast": {"type": "error", "content": f"打回失败：{exc}"}}
+            # Write REJECTED.md to the archive dir (best-effort; spec §2.6)
+            try:
+                self._write_design_rejected_marker(req_id, reason)
+            except Exception:
+                LOGGER.exception("write REJECTED.md failed req=%s", req_id)
+            self._save_state()
+            return 200, {"toast": {"type": "success", "content": "已打回设计。"}}
 
         if action_name == "submit_create_project":
             form = self._extract_project_form_payload(
@@ -1582,6 +1863,19 @@ class CoordinatorRuntimeApp:
                 return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
             if requirement.status != WorkflowStatus.APPROVED:
                 return 200, {"toast": {"type": "error", "content": f"当前需求不处于 APPROVED 阶段（status={requirement.status.value}），不能启动 Plan 撰写。"}}
+            if requirement.needs_ui and not requirement.design_precondition_met:
+                design_label = (
+                    requirement.design_status.value
+                    if requirement.design_status
+                    else "尚未进入"
+                )
+                return 200, {"toast": {
+                    "type": "error",
+                    "content": (
+                        f"需求标记了 needs_ui=true，设计阶段未完成（design_status={design_label}）。"
+                        " 请先完成 Design 阶段再启动 Plan 撰写。"
+                    ),
+                }}
             plan_doc_id = ""
             plan_doc_url = ""
             try:
@@ -2683,6 +2977,31 @@ class CoordinatorRuntimeApp:
                     "value": {"action": "send_spec_author_start", "req_id": requirement.req_id},
                 },
             ]
+        if trigger == "design_submit_pending_review":
+            return [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "通过（D-DESIGN-2）"},
+                    "type": "primary",
+                    "value": {"action": "design_final_approve", "req_id": requirement.req_id},
+                },
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "打回"},
+                    "type": "default",
+                    "value": {"action": "design_final_reject", "req_id": requirement.req_id},
+                },
+            ]
+        if trigger == "design_ready":
+            return [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "开始 Plan 撰写"},
+                    "type": "primary",
+                    "value": {"action": "send_plan_author_start", "req_id": requirement.req_id},
+                },
+            ]
+        # design_brief_ready has no buttons (informational only); falls through to default []
         return []
 
     def _transition_notification_content(self, requirement: Requirement, *, trigger: str) -> tuple[str, str, str, str, str]:
@@ -2796,6 +3115,40 @@ class CoordinatorRuntimeApp:
                 f"Plan PR：{requirement.plan_pr_url or '（创建中）'}",
                 "Plan 已合并至项目仓库，需求进入 Spec 撰写阶段。",
                 f"请点击「开始 Spec 撰写」，将启动指令私发给自己后转发给 {spec_agent_name}。",
+            )
+        if trigger == "design_brief_ready":
+            doc_url = requirement.design_doc_url or "待同步"
+            return (
+                "indigo",
+                f"{requirement.req_id} 设计 Brief 已就绪",
+                "design-brief-author 已生成首轮 Prompt，设计师可以前往 Claude Design 作业。",
+                f"飞书 Brief：{doc_url}\n提示：进 Claude Design 后先点 Sync now 拉取最新代码。",
+                "完成 Handoff 导出后，点击本卡片的「上传 Handoff」按钮回流产物。",
+            )
+        if trigger == "design_submit_pending_review":
+            archive_path = requirement.design_archive_path or "（未解析）"
+            pages: list[str] = []
+            if requirement.pending_design_handoff:
+                pages = [
+                    p.get("display_name", "")
+                    for p in requirement.pending_design_handoff.get("pages_touched") or []
+                    if p.get("display_name")
+                ]
+            pages_str = "、".join(pages) if pages else "（无页面声明）"
+            return (
+                "orange",
+                f"{requirement.req_id} 设计终审待处理（D-DESIGN-2）",
+                f"设计师已提交 handoff bundle，归档路径：{archive_path}\n本次涉及页面：{pages_str}",
+                "终审人可查看归档内容并决定通过或打回。",
+                "请终审人完成 D-DESIGN-2 审查：通过后 Plan 阶段将解锁；打回则退回 DRAFTING。",
+            )
+        if trigger == "design_ready":
+            return (
+                "green",
+                f"{requirement.req_id} 设计阶段完成",
+                "D-DESIGN-2 终审通过，设计归档已冻结。",
+                f"归档：{requirement.design_archive_path or '（同步中）'}\n提交 SHA：{requirement.design_github_revision or '（待同步）'}",
+                "Plan 阶段已解锁，点击「开始 Plan 撰写」继续。",
             )
         return ("grey", "", "", "", "")
 

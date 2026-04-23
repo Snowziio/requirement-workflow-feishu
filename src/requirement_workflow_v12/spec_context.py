@@ -103,6 +103,7 @@ class SpecContextBuilder:
             "spec_document_url": requirement.spec_document_url,
             "spec_document_id": requirement.spec_document_id,
             "latest_review_summary": requirement.latest_review_summary,
+            "design_artifact": self._design_artifact_slice(requirement),
         }
         plan_md = self._service._fetch_plan_md(req_id) if hasattr(
             self._service, "_fetch_plan_md",
@@ -114,6 +115,13 @@ class SpecContextBuilder:
     @staticmethod
     def _mint_token(req_id: str) -> str:
         return f"spec_ctx_{req_id}_{int(time.time())}_{secrets.token_hex(4)}"
+
+    def _design_artifact_slice(self, r) -> dict:
+        return {
+            "archive_path": getattr(r, "design_archive_path", "") or "",
+            "needs_ui": getattr(r, "needs_ui", False),
+            "design_status": r.design_status.value if getattr(r, "design_status", None) else None,
+        }
 
 
 def _extract_decision_ids(plan_md_text: str) -> list[str]:
