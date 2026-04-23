@@ -108,3 +108,96 @@ def test_sync_raises_when_gateway_fails(tmp_path: Path) -> None:
             archive_dir=archive, pages_registry_path=registry, index_path=index,
             pages_touched=[],
         )
+
+
+def test_sync_hydrates_missing_registry_from_github(tmp_path: Path) -> None:
+    """On a fresh coordinator container, PAGES.yaml + INDEX.md don't exist
+    locally — they were only written to the GitHub repo by Bootstrap. The
+    syncer must pull them from GitHub before appending the new entry.
+
+    Before the fix: FileNotFoundError raised in _update_pages_registry.
+    """
+    archive = _mk_archive_dir(tmp_path, "REQ-X-005", "fresh")
+    registry = tmp_path / "design" / "PAGES.yaml"  # does NOT exist
+    index = tmp_path / "design" / "INDEX.md"       # does NOT exist
+    assert not registry.exists()
+    assert not index.exists()
+
+    gateway = MagicMock()
+    # GitHub returns the Bootstrap-written initial content
+    def fake_read(project_repo, path, *, branch="main", default=None):
+        if path == "design/PAGES.yaml":
+            return 'schema_version: "1.0"\npages: []\n'
+        if path == "design/INDEX.md":
+            return "# Design Handoff Index\n\n<!-- ... -->\n"
+        raise AssertionError(f"unexpected read: {path}")
+    gateway.read_project_file.side_effect = fake_read
+    gateway.project_repo_commit.return_value = "commit-sha-fresh"
+
+    result = DesignSyncer(gateway).sync(
+        project_repo="org/repo", req_id="REQ-X-005", slug="fresh",
+        archive_dir=archive, pages_registry_path=registry, index_path=index,
+        pages_touched=[{"display_name": "NewPage", "action": "new"}],
+    )
+    assert result.commit_sha == "commit-sha-fresh"
+    # Both files should now exist locally (hydrated + then appended)
+    assert registry.exists()
+    assert index.exists()
+    # Registry must have the new page appended
+    import yaml
+    doc = yaml.safe_load(registry.read_text())
+    names = [p["display_name"] for p in doc["pages"]]
+    assert "NewPage" in names
+    # Index must have the new entry
+    assert "REQ-X-005" in index.read_text()
+    # The gateway read_project_file was called for both paths
+    assert gateway.read_project_file.call_count == 2
+
+
+def test_sync_falls_back_to_default_when_registry_missing_on_remote(tmp_path: Path) -> None:
+    """If GitHub genuinely has no PAGES.yaml/INDEX.md (unusual — Bootstrap
+    writes them), the syncer should fall back to empty defaults rather than
+    crash. Defensive behavior.
+    """
+    archive = _mk_archive_dir(tmp_path, "REQ-X-006", "noremote")
+    registry = tmp_path / "design" / "PAGES.yaml"
+    index = tmp_path / "design" / "INDEX.md"
+
+    gateway = MagicMock()
+    # Simulate: read_project_file honors the default= kwarg on remote-404
+    def fake_read(project_repo, path, *, branch="main", default=None):
+        return default  # pretend remote returned 404; method falls back
+    gateway.read_project_file.side_effect = fake_read
+    gateway.project_repo_commit.return_value = "commit-sha-default"
+
+    result = DesignSyncer(gateway).sync(
+        project_repo="org/repo", req_id="REQ-X-006", slug="noremote",
+        archive_dir=archive, pages_registry_path=registry, index_path=index,
+        pages_touched=[],
+    )
+    assert result.commit_sha == "commit-sha-default"
+    assert registry.exists()
+    assert index.exists()
+
+
+def test_sync_skips_hydrate_when_local_files_already_exist(tmp_path: Path) -> None:
+    """If local files exist (subsequent READY syncs within same container
+    lifetime), don't re-fetch from GitHub — respect the local cache.
+    """
+    archive = _mk_archive_dir(tmp_path, "REQ-X-007", "cached")
+    registry = tmp_path / "design" / "PAGES.yaml"
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text("schema_version: '1.0'\npages:\n  - display_name: Existing\n", encoding="utf-8")
+    index = tmp_path / "design" / "INDEX.md"
+    index.write_text("# Design Handoff Index\n", encoding="utf-8")
+
+    gateway = MagicMock()
+    gateway.project_repo_commit.return_value = "commit-sha-cached"
+
+    DesignSyncer(gateway).sync(
+        project_repo="org/repo", req_id="REQ-X-007", slug="cached",
+        archive_dir=archive, pages_registry_path=registry, index_path=index,
+        pages_touched=[{"display_name": "Dashboard", "action": "new"}],
+    )
+    # Must not have called read_project_file — local files sufficed
+    gateway.read_project_file.assert_not_called()

@@ -100,6 +100,15 @@ class ProjectRepoTools(Protocol):
         self, *, project_repo: str, message: str, files: dict,
     ) -> str: ...
 
+    def read_project_file(
+        self,
+        project_repo: str,
+        path: str,
+        *,
+        branch: str = "main",
+        default: str | None = None,
+    ) -> str: ...
+
 
 class GitHubProjectRepoTools:
     """Default implementation; delegates to ``GitHubGateway``."""
@@ -300,6 +309,42 @@ class GitHubProjectRepoTools:
                 recoverable=False,
             ) from exc
         return sha
+
+    def read_project_file(
+        self,
+        project_repo: str,
+        path: str,
+        *,
+        branch: str = "main",
+        default: str | None = None,
+    ) -> str:
+        """Read a file's text content from a project repo.
+
+        If the file is missing on the remote:
+        - returns ``default`` when provided
+        - raises ``ProjectRepoError`` otherwise
+
+        Used by DesignSyncer to hydrate design/PAGES.yaml + design/INDEX.md on
+        fresh coordinator containers — those files exist in the GitHub repo
+        (written by Bootstrap at project creation) but not on the coordinator's
+        local filesystem, since coordinator doesn't clone the project repo.
+        """
+        owner, name = _parse_repo(project_repo)
+        short = f"{owner}/{name}"
+        try:
+            _sha, text = self._gw.fetch_file_sha(short, branch, path)
+            return text
+        except GitHubGatewayError as exc:
+            if default is not None:
+                _logger.info(
+                    "read_project_file: %s:%s not found on %s; using default",
+                    short, path, branch,
+                )
+                return default
+            raise ProjectRepoError(
+                f"read_project_file failed for {short}:{path}: {exc}",
+                recoverable=False,
+            ) from exc
 
     def bootstrap_project_repo(
         self,
