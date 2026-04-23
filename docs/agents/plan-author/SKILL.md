@@ -11,7 +11,7 @@ plan 内容的**构造期 SOT 是飞书 plan docx**（Coordinator 在 DRAFTING �
 
 ## 启动流程
 
-收到包含「请开始规划 REQ-xxx」的消息时启动。
+收到包含「请开始 Plan 撰写 REQ-xxx」的消息时启动（与 Coordinator `_build_plan_author_handoff_text` 产出文本对齐，避免触发短语漂移）。
 
 **Step 1：拉取 plan-context（唯一合法入口）**
 
