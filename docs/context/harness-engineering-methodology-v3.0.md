@@ -811,6 +811,7 @@ CREATED → DRAFTING → AI_REVIEW → HUMAN_CONFIRM → FINAL_REVIEW → APPROV
 | Tech Stack | Project-level Guide | 技术选型约束 |
 | Design System | Project-level Guide | UI 组件规范，`needs_ui = true` 时 design-author 参考 |
 | Requirement Doc | REQ-level Guide | 8 字段结构化需求文档（§6.1 产出），只读 |
+| Design Artifact | REQ-level Guide | 本 REQ 的 design 产物（archive 目录 + `github_revision` + pages 列表 + Brief doc URL）；`needs_ui=true` 且 `DesignStatus=READY` 时是 plan-author **决策识别的前提**，详见 §6.2.8 |
 
 **B. 决策点（本层触发）**
 
@@ -898,6 +899,58 @@ SpecStatus：  null → DRAFTING → TRANSFORMING → LOCKED
 **Plan 文件格式**：YAML frontmatter + Decisions 正文（结构化多决策）+ 可选 `project_context_change` 块。完整 schema 见 `layers/planning-harness-layer.md §三`。
 
 **三阶段交互模式**：骨架（OUTLINE）→ 深入（DECISIONS_IN_PROGRESS）→ 定稿（FINAL）。骨架阶段先对齐 decision 清单范围，避免直接写细节的浪费；深入阶段逐个 decision 多轮对话产出 alternatives + rationale；定稿阶段一次性产出完整 plan 供人 final approve（即 D-PLAN-2 Plan Final Approval）。
+
+#### §6.2.8 Design → Plan 对齐契约
+
+`needs_ui = true` 的 REQ 在进入规划层时，design 产物已在 §6.x（设计层）冻结至 GitHub。规划层**必须**把 design 产物作为决策识别与编排的输入，否则会出现**决策重复/冲突**（plan-author 提出设计师已经拍板的事，让人二次决策或造成永久漂移）与**决策遗漏**（真正需要 plan 级拍板的 UI-相关决策——数据源、路由、token→framework 映射——因为 plan-author 对 design 无感而从未被提出）。
+
+**触发条件**：
+
+- `needs_ui == true` AND `DesignStatus == READY`（未满足不触发本契约）
+
+**Coordinator 义务（契约层）**：
+
+Coordinator 在返回 plan-context 时，`design_artifact` 字段必须提供足以定位产物的指针，至少包含：
+
+| 字段 | 含义 | 来源 |
+|---|---|---|
+| `archive_path` | 归档目录 repo-relative 路径 | `Requirement.design_archive_path` |
+| `github_revision` | design 产物固化的具体 commit SHA（钉死版本） | `Requirement.design_github_revision` |
+| `feishu_brief_url` | Design Brief 飞书文档 URL（人类阅读用） | `Requirement.design_doc_url` |
+| `design_system_doc_url` | 项目级 Design System 飞书文档 URL | `ProjectConfig.design_system_doc_id` 渲染而来 |
+| `pages` | 本 REQ 设计的页面清单（含 display_name 与 src_hint） | 从 archive 的 MANIFEST.md / PAGES.yaml 解析 |
+| `design_status` | 冗余字段，便于 agent 幂等校验 | `Requirement.design_status` |
+
+仅有 `archive_path` 不足以支撑 agent 行为——它需要知道**去哪个 commit 拉文件、哪些页面在这一轮里被设计、DS 在哪里**。
+
+**plan-author 义务（技能层）**：
+
+Phase A（骨架）开始前，若 `design_artifact.design_status == READY`，plan-author **必须**：
+
+1. **读 archive**——至少读 `MANIFEST.md`（确认 pages_hint）与 `<archive_path>/extracted/*/src/*.jsx`（理解布局/交互意图）与 `<archive_path>/extracted/*/styles/tokens.css`（了解 token 约束），使用 `github_revision` 钉版本拉取
+2. **读 Design System**——通过 `feishu_fetch_doc(design_system_doc_url)` 加载组件规范
+3. **按下述规则识别决策**：
+   - **design 已决定的事 → 不提**：layout、配色、排版、组件视觉、交互动效等设计师已拍板的事项不进入 plan outline。违反示例：❌"Dashboard 采用几列布局"（设计师已决，plan 不该回放）
+   - **design 开放的事 → 必须提**：跨 design/plan 边界的决策必须在 plan outline 中覆盖，不得默认沉默。典型边界决策包括：
+     - 页面数据源（mock / 真实 API / 混合）
+     - 路由结构与导航策略
+     - 前端框架 / 组件库选型（Vite+React / Next.js / shadcn/ui…）
+     - token → framework 映射策略（tokens.css → Tailwind theme extend / CSS Variables / styled-components…）
+     - 视觉参考 JSX 的"翻译口径"（按像素还原 / 按语义重搭 / 按组件库替换）
+
+**追溯义务（产物层）**：
+
+Plan-author 在 Phase C 组装 plan.md 时，YAML frontmatter **必须**声明：
+
+```yaml
+design_handoff_ref: "{archive_path}@{github_revision}"
+```
+
+这一行把 plan 与具体 design 冻结态绑定，后续实施期产物可通过 plan → design 链路追溯到原始视觉规范。缺失该字段的 `needs_ui=true` plan 视为 schema 违规，Coordinator 在 `plan_submit` 时校验并拒绝。
+
+**Cascading Reset 语义扩展**：
+
+`/design restart` 触发时级联清空 plan.md 中的 `design_handoff_ref`（连同 Plan/Spec 级联）；下一轮规划时 plan-author 按新的 design 冻结态重新建立 ref。
 
 ---
 
