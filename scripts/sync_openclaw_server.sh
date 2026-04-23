@@ -26,7 +26,7 @@ fi
 REMOTE="${OPENCLAW_REMOTE:-admin@47.251.81.45}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="${REPO_ROOT}/deploy/openclaw"
-AGENTS=(ai-founder-brief ai-meeting-closeout plan-author spec-author spec-reviewer spec-transformer spec-transformer-reviewer)
+AGENTS=(ai-founder-brief ai-meeting-closeout plan-author spec-author spec-reviewer spec-transformer spec-transformer-reviewer design-brief-author)
 
 # Agent id → skill name (see reference_openclaw_skill_dual_sync.md).
 # Using a case fallback rather than declare -A to stay compatible with bash 3.2
@@ -40,6 +40,7 @@ skill_for_agent() {
     spec-reviewer) echo spec-reviewer ;;
     spec-transformer) echo spec-transformer ;;
     spec-transformer-reviewer) echo spec-transformer-reviewer ;;
+    design-brief-author) echo design-brief-author ;;
     *) echo "[error] no skill mapping for agent $1" >&2; exit 1 ;;
   esac
 }

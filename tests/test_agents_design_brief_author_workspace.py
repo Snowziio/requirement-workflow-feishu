@@ -35,3 +35,26 @@ def test_boilerplate_files_exist():
         path = WORKSPACE / name
         assert path.is_file(), f"{name} missing from workspace"
         assert len(path.read_text(encoding="utf-8")) > 100, f"{name} too small"
+
+
+def test_models_json_template_exists():
+    path = REPO_ROOT / "deploy" / "openclaw" / "agents" / "design-brief-author" / "models.json.template"
+    assert path.is_file()
+    import json
+    content = json.loads(path.read_text(encoding="utf-8"))
+    assert "providers" in content
+
+
+def test_sync_script_registers_design_brief_author():
+    script = REPO_ROOT / "scripts" / "sync_openclaw_server.sh"
+    assert script.is_file()
+    text = script.read_text(encoding="utf-8")
+    assert "design-brief-author" in text
+    assert "design-brief-author) echo design-brief-author" in text
+
+
+def test_deploy_readme_lists_design_brief_author():
+    readme = REPO_ROOT / "deploy" / "openclaw" / "README.md"
+    assert readme.is_file()
+    text = readme.read_text(encoding="utf-8")
+    assert "design-brief-author" in text
