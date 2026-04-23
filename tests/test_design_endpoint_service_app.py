@@ -147,3 +147,86 @@ def test_design_callback_unknown_event_returns_400():
     })
     assert status == 400
     assert resp["error"] == "unknown_event"
+
+
+def test_design_upload_bundle_action_intakes_and_submits(tmp_path: Path):
+    from pathlib import Path as _P
+    FIXTURE_ZIP = _P(__file__).parent / "fixtures" / "design" / "handoff_sample.zip"
+
+    r = Requirement(
+        req_id="REQ-X-040", name="头像审核", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.DRAFTING,
+    )
+    app = _app_with_req(r, _cfg())
+    app.archive_root = tmp_path / "design" / "archive"
+    app.archive_root.mkdir(parents=True)
+    app._save_state = MagicMock()
+    app._dispatch_transition_notifications = MagicMock()
+
+    # Fake download: copy fixture bytes to dest_path
+    def fake_download(*, file_key, message_id, dest_path):
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        dest_path.write_bytes(FIXTURE_ZIP.read_bytes())
+        return dest_path
+    app.gateway.download_card_attachment = MagicMock(side_effect=fake_download)
+
+    # Stub service.design_submit to report success (returns the requirement)
+    app.service.design_submit = MagicMock(return_value=r)
+
+    value = {
+        "action": "design_upload_bundle",
+        "req_id": "REQ-X-040",
+        "file_key": "fk-1",
+        "message_id": "mid-1",
+    }
+    operator = {"operator_id": {"user_id": "u1"}}
+    status, resp = app._handle_design_upload_bundle_action(value, operator)
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "success"
+    app.gateway.download_card_attachment.assert_called_once()
+    app.service.design_submit.assert_called_once()
+    kwargs = app.service.design_submit.call_args.kwargs
+    assert kwargs["archive_path"].startswith("design/archive/REQ-X-040_")
+
+
+def test_design_upload_bundle_action_rejects_unknown_req():
+    r = Requirement(
+        req_id="REQ-X-041", name="n", project="X", summary="s", creator="c",
+    )
+    app = _app_with_req(r, _cfg())
+    app.archive_root = Path("/tmp/nonexistent_archive_root_041")
+    value = {"action": "design_upload_bundle", "req_id": "REQ-UNKNOWN",
+             "file_key": "fk", "message_id": "mid"}
+    status, resp = app._handle_design_upload_bundle_action(value, {})
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "error"
+
+
+def test_design_upload_bundle_action_rejects_non_drafting_state():
+    r = Requirement(
+        req_id="REQ-X-042", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.READY,
+    )
+    app = _app_with_req(r, _cfg())
+    app.archive_root = Path("/tmp/nonexistent_archive_root_042")
+    value = {"action": "design_upload_bundle", "req_id": "REQ-X-042",
+             "file_key": "fk", "message_id": "mid"}
+    status, resp = app._handle_design_upload_bundle_action(value, {})
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "error"
+
+
+def test_design_upload_bundle_action_rejects_missing_params():
+    r = Requirement(
+        req_id="REQ-X-043", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.DRAFTING,
+    )
+    app = _app_with_req(r, _cfg())
+    app.archive_root = Path("/tmp/nonexistent_archive_root_043")
+    value = {"action": "design_upload_bundle", "req_id": "REQ-X-043"}
+    status, resp = app._handle_design_upload_bundle_action(value, {})
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "error"

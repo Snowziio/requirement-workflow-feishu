@@ -6,11 +6,13 @@ import hmac
 import hashlib
 import json
 import logging
+import os
 import re
 import threading
 import time
 from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Any
 
 from .config import Settings, load_settings
@@ -216,7 +218,6 @@ class CoordinatorRuntimeApp:
         self._seen_card_action_ids_max = 1024
 
         if settings.github_token:
-            from pathlib import Path
             from .github_gateway import GitHubGateway
             from .project_repo import GitHubProjectRepoTools
             from .feishu_to_github_syncer import FeishuToGitHubSyncer
@@ -256,6 +257,13 @@ class CoordinatorRuntimeApp:
         self._plan_context_builder = PlanContextBuilder(service=self.service)
         from .design_context import DesignContextBuilder
         self._design_context_builder = DesignContextBuilder(self.service)
+
+        # Design handoff archive root (for Task 15 intake)
+        self.archive_root = Path(os.environ.get("DESIGN_ARCHIVE_ROOT", "design/archive"))
+        try:
+            self.archive_root.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            LOGGER.warning("archive_root mkdir failed: %s", exc)
 
     def build_event_dispatcher(self):
         self._require_lark()
@@ -1550,6 +1558,77 @@ class CoordinatorRuntimeApp:
 
         return 200, {"ok": True, "req_id": req_id, "next_action": action}
 
+    def _handle_design_upload_bundle_action(
+        self, value: dict, operator: dict,
+    ) -> tuple[int, dict]:
+        import tempfile
+        from .design_intake import DesignIntake, IntakeError
+
+        req_id = value.get("req_id", "")
+        file_key = value.get("file_key", "")
+        message_id = value.get("message_id", "")
+        if not (req_id and file_key and message_id):
+            return 200, {"toast": {"type": "error", "content": "缺少上传参数。"}}
+
+        r = self.service.requirements.get(req_id)
+        if r is None:
+            return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
+        if r.design_status != DesignStatus.DRAFTING:
+            current = r.design_status.value if r.design_status else "None"
+            return 200, {"toast": {
+                "type": "error",
+                "content": f"当前设计状态不允许上传：{current}",
+            }}
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix="design-handoff-"))
+        zip_tmp = tmp_dir / f"{req_id}.zip"
+        try:
+            self.gateway.download_card_attachment(
+                file_key=file_key, message_id=message_id, dest_path=zip_tmp,
+            )
+        except Exception as exc:
+            LOGGER.warning("download_card_attachment failed req=%s: %s", req_id, exc)
+            return 200, {"toast": {"type": "error", "content": "下载附件失败。"}}
+
+        slug = self._build_design_slug(r)
+        try:
+            result = DesignIntake().intake(
+                zip_path=zip_tmp,
+                req_id=req_id,
+                slug=slug,
+                archive_root=self.archive_root,
+            )
+        except IntakeError as exc:
+            LOGGER.warning("design intake failed req=%s: %s", req_id, exc)
+            return 200, {"toast": {"type": "error", "content": f"解析 handoff 失败：{exc}"}}
+
+        pages_touched = [{"display_name": p, "action": "new"} for p in result.pages_hint]
+
+        try:
+            self.service.design_submit(
+                req_id,
+                archive_path=f"design/archive/{result.archive_dir.name}/",
+                pages_touched=pages_touched,
+            )
+        except Exception as exc:
+            LOGGER.exception("design_submit failed req=%s", req_id)
+            return 200, {"toast": {"type": "error", "content": f"状态机提交失败：{exc}"}}
+
+        self._save_state()
+        try:
+            self._dispatch_transition_notifications(r, trigger="design_submit_pending_review")
+        except Exception:
+            LOGGER.exception("design submit card dispatch failed req=%s", req_id)
+
+        return 200, {"toast": {"type": "success", "content": "Handoff 已接收，等待终审。"}}
+
+    def _build_design_slug(self, requirement) -> str:
+        """Derive a slug from requirement name for use in archive dir naming."""
+        import re
+        name = requirement.name or "handoff"
+        slug = re.sub(r"[^a-zA-Z0-9一-鿿\-]+", "-", name).strip("-").lower()[:30]
+        return slug or "handoff"
+
     def _handle_card_action_payload(self, payload: dict[str, object]) -> tuple[int, dict[str, object]]:
         LOGGER.info("Handling card payload: %s", payload)
 
@@ -1573,6 +1652,9 @@ class CoordinatorRuntimeApp:
                 open_message_id, action_name,
             )
             return 200, {"toast": {"type": "info", "content": "已处理，跳过重复回调。"}}
+
+        if action_name == "design_upload_bundle":
+            return self._handle_design_upload_bundle_action(value, operator)
 
         if action_name == "submit_create_project":
             form = self._extract_project_form_payload(
