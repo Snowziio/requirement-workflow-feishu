@@ -180,6 +180,64 @@ def test_sync_falls_back_to_default_when_registry_missing_on_remote(tmp_path: Pa
     assert index.exists()
 
 
+def test_sync_raises_when_archive_dir_missing(tmp_path: Path) -> None:
+    """Observed 2026-04-24: coordinator container was redeployed between
+    SUBMIT_PENDING_REVIEW and READY. /app/design/archive/<REQ>/ (not in a
+    volume) was wiped. On approve, rglob returned 0 files silently and the
+    syncer committed only PAGES.yaml + INDEX.md — a hollow 'design lock'
+    commit with no artifacts. Must raise instead.
+    """
+    registry = tmp_path / "design" / "PAGES.yaml"
+    registry.parent.mkdir(parents=True)
+    registry.write_text("schema_version: '1.0'\npages: []\n", encoding="utf-8")
+    index = tmp_path / "design" / "INDEX.md"
+    index.write_text("# Design Handoff Index\n", encoding="utf-8")
+
+    missing_archive = tmp_path / "design" / "archive" / "REQ-X-008_missing"
+    # DO NOT mkdir the archive dir
+    assert not missing_archive.exists()
+
+    gateway = MagicMock()
+    gateway.project_repo_commit.return_value = "should-not-happen"
+
+    import pytest
+    with pytest.raises(DesignSyncError, match="archive_dir does not exist"):
+        DesignSyncer(gateway).sync(
+            project_repo="org/repo", req_id="REQ-X-008", slug="missing",
+            archive_dir=missing_archive,
+            pages_registry_path=registry, index_path=index,
+            pages_touched=[{"display_name": "Dashboard", "action": "new"}],
+        )
+    gateway.project_repo_commit.assert_not_called()
+
+
+def test_sync_raises_when_archive_dir_empty(tmp_path: Path) -> None:
+    """Defensive: if archive_dir exists but contains no files (empty dir or
+    only nested empty subdirs), bail rather than commit a 2-file hollow."""
+    registry = tmp_path / "design" / "PAGES.yaml"
+    registry.parent.mkdir(parents=True)
+    registry.write_text("schema_version: '1.0'\npages: []\n", encoding="utf-8")
+    index = tmp_path / "design" / "INDEX.md"
+    index.write_text("# Design Handoff Index\n", encoding="utf-8")
+
+    empty_archive = tmp_path / "design" / "archive" / "REQ-X-009_empty"
+    empty_archive.mkdir(parents=True)
+    # No files in archive_dir
+
+    gateway = MagicMock()
+    gateway.project_repo_commit.return_value = "should-not-happen"
+
+    import pytest
+    with pytest.raises(DesignSyncError, match="archive_dir is empty"):
+        DesignSyncer(gateway).sync(
+            project_repo="org/repo", req_id="REQ-X-009", slug="empty",
+            archive_dir=empty_archive,
+            pages_registry_path=registry, index_path=index,
+            pages_touched=[],
+        )
+    gateway.project_repo_commit.assert_not_called()
+
+
 def test_sync_skips_hydrate_when_local_files_already_exist(tmp_path: Path) -> None:
     """If local files exist (subsequent READY syncs within same container
     lifetime), don't re-fetch from GitHub — respect the local cache.

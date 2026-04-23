@@ -34,7 +34,12 @@ services:
       - OPENCLAW_SPEC_TRANSFORMER_REVIEWER_AGENT_NAME=${OPENCLAW_SPEC_TRANSFORMER_REVIEWER_AGENT_NAME:-Spec 转化审查助手}
     volumes:
       - coordinator-service-staging-state:/app/state
+      # /app/design holds pending handoff bundles between SUBMIT_PENDING_REVIEW
+      # and READY — without a volume, every deploy wipes them and the subsequent
+      # DesignSyncer commit silently writes only registry updates (no archive).
+      - coordinator-service-staging-design:/app/design
     restart: unless-stopped
 
 volumes:
   coordinator-service-staging-state:
+  coordinator-service-staging-design:

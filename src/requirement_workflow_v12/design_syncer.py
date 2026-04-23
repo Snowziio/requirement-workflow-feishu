@@ -161,7 +161,20 @@ class DesignSyncer:
 
         Convention: design/ lives at <repo_root>/design/, so design_root.parent
         is the repo root. All three path inputs must be under that root.
+
+        Raises ``DesignSyncError`` if ``archive_dir`` is missing or empty —
+        previously rglob silently returned zero entries when the directory had
+        been wiped (e.g. by a container redeploy between SUBMIT_PENDING_REVIEW
+        and READY), and the syncer would happily commit only the registry
+        updates, producing a hollow "design lock" commit with no artifacts.
         """
+        if not archive_dir.is_dir():
+            raise DesignSyncError(
+                f"archive_dir does not exist: {archive_dir}. "
+                "The handoff bundle was not found on disk — likely the coordinator "
+                "container was redeployed between SUBMIT_PENDING_REVIEW and READY. "
+                "Run /design restart <REQ-ID> and re-upload the handoff zip."
+            )
         design_root = registry_path.parent
         repo_root = design_root.parent
         files: dict[str, bytes] = {}
@@ -169,6 +182,10 @@ class DesignSyncer:
             if f.is_file():
                 rel = f.relative_to(repo_root).as_posix()
                 files[rel] = f.read_bytes()
+        if not files:
+            raise DesignSyncError(
+                f"archive_dir is empty: {archive_dir}. Handoff bundle missing."
+            )
         files[registry_path.relative_to(repo_root).as_posix()] = registry_path.read_bytes()
         files[index_path.relative_to(repo_root).as_posix()] = index_path.read_bytes()
         return files
