@@ -3033,16 +3033,49 @@ class CoordinatorRuntimeApp:
             except Exception as exc:
                 LOGGER.warning("Failed to backfill bitable record for %s: %s", requirement.req_id, exc)
 
+    # Per-trigger target assignment. Previously every trigger blasted to both
+    # the project group and the creator DM, creating noise and redundant
+    # clickable buttons that could be pressed from either place. This table
+    # routes each transition to the audience that actually needs it:
+    #
+    # - "group"   : project group chat (stakeholder visibility / collective decisions)
+    # - "dm"      : creator DM (personal action items)
+    # - "group,dm": milestone + the creator has a next-step action
+    #
+    # Unlisted triggers default to DM-only (safer than broadcasting).
+    _CARD_TARGETS: dict[str, tuple[str, ...]] = {
+        # Milestone-only announcements (stakeholders watch, no action by creator)
+        "author_submit":                ("group",),
+        "human_confirmed":              ("group",),
+        "spec_locked":                  ("group",),
+        "design_submit_pending_review": ("group",),
+        # Creator-owned action items
+        "ai_review_pass":               ("dm",),
+        "ai_review_reject":             ("dm",),
+        "human_rejected":               ("dm",),
+        "final_review_rejected":        ("dm",),
+        "spec_submitted":               ("dm",),
+        "spec_review_reject":           ("dm",),
+        "plan_submitted_pending_review": ("dm",),
+        "design_brief_ready":           ("dm",),
+        "handoff_to_author":            ("dm",),
+        # Milestone + creator has next-phase action
+        "final_review_passed":          ("dm", "group"),
+        "plan_ready":                   ("dm", "group"),
+        "design_ready":                 ("dm", "group"),
+    }
+
     def _dispatch_transition_notifications(self, requirement: Requirement, *, trigger: str) -> None:
         card = self._build_transition_notification_card(requirement, trigger=trigger)
         text = self._build_transition_notification_text(requirement, trigger=trigger)
         if card is None and not text:
             return
 
+        target_kinds = self._CARD_TARGETS.get(trigger, ("dm",))
         targets: list[tuple[str, str]] = []
-        if self._is_feishu_chat_id(requirement.project_group_id):
+        if "group" in target_kinds and self._is_feishu_chat_id(requirement.project_group_id):
             targets.append((requirement.project_group_id, "chat_id"))
-        if requirement.creator_user_id:
+        if "dm" in target_kinds and requirement.creator_user_id:
             targets.append((requirement.creator_user_id, self.settings.feishu_user_id_type))
 
         for receive_id, receive_id_type in targets:
@@ -3087,10 +3120,23 @@ class CoordinatorRuntimeApp:
         bitable_url = self.gateway.bitable_url() if hasattr(self.gateway, "bitable_url") else ""
         if bitable_url:
             links.append(f"[查看多维表格]({bitable_url})")
-        if hasattr(requirement, "spec_document_url") and requirement.spec_document_url and trigger == "spec_locked":
-            links.append(f"[查看 Spec 文档]({requirement.spec_document_url})")
+        # Spec 文档 link: needed both when Spec is submitted for review AND when locked.
+        # Previously only surfaced on spec_locked, hiding it from the reviewer exactly
+        # when they most needed it (on receipt of the "待审查" card).
+        spec_document_url = getattr(requirement, "spec_document_url", "")
+        if spec_document_url and trigger in {"spec_submitted", "spec_locked", "spec_review_reject"}:
+            links.append(f"[查看 Spec 文档]({spec_document_url})")
         if trigger in {"plan_submitted_pending_review", "plan_ready"} and requirement.plan_doc_url:
             links.append(f"[查看 Plan 文档]({requirement.plan_doc_url})")
+        # Design Brief link: surface on any design-phase card so reviewer / plan-author
+        # can open the source visual context in one click.
+        design_doc_url = getattr(requirement, "design_doc_url", "")
+        if design_doc_url and trigger in {
+            "design_brief_ready",
+            "design_submit_pending_review",
+            "design_ready",
+        }:
+            links.append(f"[查看设计 Brief]({design_doc_url})")
         if links:
             elements.append({"tag": "markdown", "content": " | ".join(links)})
 
@@ -3321,11 +3367,18 @@ class CoordinatorRuntimeApp:
                 f"请需求提出者继续与 {author_name} 私聊完成多轮需求构造。",
             )
         if trigger == "spec_submitted":
-            spec_reviewer_name = self.settings.openclaw_spec_agent_name
+            # Surface the author-provided summary (stored in spec_review_summary
+            # at submit time) as the "reason" — lets the reviewer see what was
+            # actually produced before clicking through. Falls back to a generic
+            # line only if summary wasn't passed.
+            reason = (
+                requirement.spec_review_summary
+                or "Spec Agent 已完成 9 节 Spec 文档撰写。"
+            )
             return (
                 "indigo",
                 f"{requirement.req_id} Spec 已提交，待审查",
-                "Spec Agent 已完成 9 节 Spec 文档撰写。",
+                reason,
                 "Spec 文档已提交，等待 Spec Reviewer 按 6+2+1 维度审查。",
                 f"请点击「开始 Spec 审查」，将审查启动指令私发给自己后转发给 Spec Reviewer。",
             )
@@ -3364,12 +3417,17 @@ class CoordinatorRuntimeApp:
             )
         if trigger == "design_brief_ready":
             doc_url = requirement.design_doc_url or "待同步"
+            # Do not claim an "上传 Handoff" button — the button isn't wired on
+            # this card. Until Feishu v2 input_file is implemented or DM file
+            # messages are routed to the upload handler, handoff upload goes
+            # through the localhost-only admin endpoint. The card mentions
+            # the ops-assisted path rather than lying about a button.
             return (
                 "indigo",
                 f"{requirement.req_id} 设计 Brief 已就绪",
                 "design-brief-author 已生成首轮 Prompt，设计师可以前往 Claude Design 作业。",
                 f"飞书 Brief：{doc_url}\n提示：进 Claude Design 后先点 Sync now 拉取最新代码。",
-                "完成 Handoff 导出后，点击本卡片的「上传 Handoff」按钮回流产物。",
+                "完成 Handoff 导出后，把产物 zip 交给运维（coordinator /admin 端点入库），intake 成功后会收到 D-DESIGN-2 终审卡。",
             )
         if trigger == "design_submit_pending_review":
             archive_path = requirement.design_archive_path or "（未解析）"
