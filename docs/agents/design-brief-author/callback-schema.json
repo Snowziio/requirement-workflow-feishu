@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "design-brief-author callback payload",
+  "type": "object",
+  "required": ["req_id", "event", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "req_id": {
+      "type": "string",
+      "pattern": "^REQ-"
+    },
+    "event": {
+      "const": "design_brief_submit"
+    },
+    "payload": {
+      "type": "object",
+      "required": ["brief_yaml_frontmatter", "brief_markdown_body"],
+      "additionalProperties": false,
+      "properties": {
+        "brief_yaml_frontmatter": {
+          "type": "string",
+          "minLength": 1
+        },
+        "brief_markdown_body": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}
