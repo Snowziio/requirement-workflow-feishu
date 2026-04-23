@@ -299,16 +299,23 @@ def test_on_enter_ready_hook_propagates_recoverable_error():
     assert exc_info.value.recoverable is True
 
 
-def test_plan_start_does_not_require_design_ready_when_needs_ui_true():
-    """needs_ui coupling dropped 2026-04-21 — design flow does not exist yet."""
+def test_plan_start_requires_design_ready_when_needs_ui_true():
+    """needs_ui=True couples Plan to Design readiness (re-enabled 2026-04-22
+    when the design flow landed). plan_start must refuse without precondition,
+    and succeed once design_precondition_met=True."""
     svc = CoordinatorService()
     r = Requirement(req_id="R-UI", name="n", project="P", summary="s", creator="c")
     r.status = WorkflowStatus.APPROVED
     r.needs_ui = True
     r.design_status = None
+    r.design_precondition_met = False
     svc.requirements["R-UI"] = r
 
-    result = svc.plan_start("R-UI")
+    with pytest.raises(ValueError, match="design"):
+        svc.plan_start("R-UI")
 
+    # Once design precondition is met, plan_start proceeds.
+    r.design_precondition_met = True
+    result = svc.plan_start("R-UI")
     assert result.plan_status == PlanStatus.DRAFTING
     assert result.plan_phase == PlanPhase.OUTLINE_PENDING

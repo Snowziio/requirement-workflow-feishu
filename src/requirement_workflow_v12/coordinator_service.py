@@ -818,6 +818,13 @@ class CoordinatorService:
             raise ValueError(
                 f"plan_start requires workflow_status=APPROVED, got {r.status.value}"
             )
+        if r.needs_ui and not r.design_precondition_met:
+            design_status_label = r.design_status.value if r.design_status else "None"
+            raise ValueError(
+                f"plan_start blocked: needs_ui=True but design phase not READY "
+                f"(design_status={design_status_label}, design_precondition_met={r.design_precondition_met}). "
+                f"等设计阶段完成后再启动 Plan。"
+            )
         decision = apply_plan_event(r.plan_status, PlanEvent.PLAN_START)
         if not decision.allowed:
             raise ValueError(decision.message)

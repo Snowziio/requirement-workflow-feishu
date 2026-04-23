@@ -1830,6 +1830,19 @@ class CoordinatorRuntimeApp:
                 return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
             if requirement.status != WorkflowStatus.APPROVED:
                 return 200, {"toast": {"type": "error", "content": f"当前需求不处于 APPROVED 阶段（status={requirement.status.value}），不能启动 Plan 撰写。"}}
+            if requirement.needs_ui and not requirement.design_precondition_met:
+                design_label = (
+                    requirement.design_status.value
+                    if requirement.design_status
+                    else "尚未进入"
+                )
+                return 200, {"toast": {
+                    "type": "error",
+                    "content": (
+                        f"需求标记了 needs_ui=true，设计阶段未完成（design_status={design_label}）。"
+                        " 请先完成 Design 阶段再启动 Plan 撰写。"
+                    ),
+                }}
             plan_doc_id = ""
             plan_doc_url = ""
             try:
