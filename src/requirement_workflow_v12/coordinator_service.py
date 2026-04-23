@@ -17,7 +17,7 @@ from .protocols import (
     CreationResponse,
 )
 from .plan_state_machine import (
-    DesignEvent, PlanEvent, PlanPhase, PlanStatus,
+    DesignEvent, DesignStatus, PlanEvent, PlanPhase, PlanStatus,
     apply_design_event, apply_plan_event,
 )
 from .project_repo import PlanArtifacts
@@ -959,6 +959,64 @@ class CoordinatorService:
             result = self._plan_tools.commit_plan_artifacts(artifacts)
             r.plan_pr_url = result.commit_sha
         r.pending_plan_draft = None
+
+    def configure_design_hooks(self, *, syncer, design_root) -> None:
+        """Register DESIGN-layer hooks. Idempotent.
+
+        ``syncer`` is a ``DesignSyncer`` instance with an injected project-repo gateway.
+        ``design_root`` is the local Path where ``design/`` lives (absolute or relative).
+        """
+        from pathlib import Path
+        self._design_syncer = syncer
+        self._design_root = Path(design_root)
+        if not getattr(self, "_design_hook_registered", False):
+            self._hooks.on_enter(DesignStatus.READY, self._sync_design_on_ready)
+            self._design_hook_registered = True
+
+    def _sync_design_on_ready(self, r: "Requirement") -> None:
+        """``on_enter(DesignStatus.READY)`` hook: atomic commit of archive + PAGES.yaml + INDEX.md."""
+        if getattr(self, "_design_syncer", None) is None:
+            LOGGER.warning("design_syncer not configured; skipping READY sync req=%s", r.req_id)
+            return
+        from pathlib import Path
+        # archive_path in the requirement is a repo-relative posix path like
+        # "design/archive/REQ-X_foo/"; strip trailing slash and split off the dir name.
+        archive_rel = r.design_archive_path.rstrip("/")
+        # e.g. "design/archive/REQ-X_foo" -> slug = "foo"
+        last_segment = archive_rel.split("/")[-1]
+        # last_segment is "REQ-X_foo"; slug = portion after first underscore
+        if "_" in last_segment:
+            slug = last_segment.split("_", 1)[1]
+        else:
+            slug = "handoff"
+        design_root = self._design_root
+        archive_dir = design_root / "archive" / last_segment
+        registry_path = design_root / "PAGES.yaml"
+        index_path = design_root / "INDEX.md"
+
+        handoff = r.pending_design_handoff or {}
+        pages_touched = handoff.get("pages_touched") or []
+
+        project_repo = self._project_repo_for(r.req_id)
+
+        try:
+            result = self._design_syncer.sync(
+                project_repo=project_repo,
+                req_id=r.req_id,
+                slug=slug,
+                archive_dir=archive_dir,
+                pages_registry_path=registry_path,
+                index_path=index_path,
+                pages_touched=pages_touched,
+            )
+            r.design_github_revision = result.commit_sha
+            LOGGER.info(
+                "design READY sync success req=%s commit=%s",
+                r.req_id, result.commit_sha,
+            )
+        except Exception:
+            LOGGER.exception("design READY sync failed req=%s", r.req_id)
+            raise
 
     def _fetch_plan_md(self, req_id: str) -> str:
         """Default stub; override in production to pull plan.md from GitHub."""
