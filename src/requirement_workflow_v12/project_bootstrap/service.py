@@ -80,32 +80,43 @@ def build_design_binding_card(
                     f"1. 访问 https://claude.ai/design，登录后新建 Project\n"
                     f"2. 在 Project 中 **Import GitHub repo**：{github_repo_url}\n"
                     f"3. 搭建组织级 Design System（配色 / 字体 / 组件）\n"
-                    f"4. 回到本卡片，粘贴 Claude Design Project URL\n"
-                    f"（形如 `https://claude.ai/design/p/xxx`）\n"
+                    f"4. 回到本卡片，把 Claude Design Project URL 粘贴到下方输入框\n"
+                    f"   示例：https://claude.ai/design/p/xxx\n"
                     f"5. 点「保存 URL」"
                 ),
             },
         },
         {
-            "tag": "input",
-            "name": "claude_design_project_url",
-            "placeholder": {
-                "tag": "plain_text",
-                "content": "https://claude.ai/design/p/xxx",
-            },
-        },
-        {
-            "tag": "action",
-            "actions": [
+            "tag": "form",
+            "name": "design_binding_form",
+            "elements": [
+                {
+                    "tag": "input",
+                    "name": "claude_design_project_url",
+                    "required": True,
+                    "width": "fill",
+                    "label": {"tag": "plain_text", "content": "Claude Design Project URL"},
+                    "placeholder": {
+                        "tag": "plain_text",
+                        "content": "https://claude.ai/design/p/xxx",
+                    },
+                },
                 {
                     "tag": "button",
+                    "name": "bind_claude_design_project",
                     "text": {"tag": "plain_text", "content": "保存 URL"},
-                    "type": "primary",
-                    "value": {
-                        "action": "bind_claude_design_project",
-                        "project": project,
-                    },
-                }
+                    "type": "primary_filled",
+                    "form_action_type": "submit",
+                    "behaviors": [
+                        {
+                            "type": "callback",
+                            "value": {
+                                "action": "bind_claude_design_project",
+                                "project": project,
+                            },
+                        }
+                    ],
+                },
             ],
         },
         {

@@ -51,15 +51,49 @@ def test_build_design_binding_card_with_error_context_shows_message_and_orange()
     assert "未绑定" in text or "触发" in text
 
 
-def test_build_design_binding_card_has_input_and_action_elements():
+def test_build_design_binding_card_has_input_and_submit_button_inside_form():
+    """Input + submit button must be wrapped in a form element.
+
+    Feishu v1 schema only renders input elements inside forms, and only
+    form-submit buttons carry the input's value into form_value on callback.
+    """
     from requirement_workflow_v12.project_bootstrap.service import build_design_binding_card
     card = build_design_binding_card(
         project="testp",
         github_repo_url="https://github.com/org/testp",
     )
-    tags = [elem.get("tag") for elem in card["elements"]]
-    assert "input" in tags
-    assert "action" in tags
+    forms = [elem for elem in card["elements"] if elem.get("tag") == "form"]
+    assert len(forms) == 1, "expected exactly one form wrapping input+button"
+    form_children = forms[0]["elements"]
+    child_tags = [e.get("tag") for e in form_children]
+    assert "input" in child_tags, f"input missing from form children: {child_tags}"
+    assert "button" in child_tags, f"button missing from form children: {child_tags}"
+    # Input must target the field name the handler reads.
+    input_elem = next(e for e in form_children if e.get("tag") == "input")
+    assert input_elem["name"] == "claude_design_project_url"
+    # Submit button must declare form_action_type=submit so form_value is sent.
+    button_elem = next(e for e in form_children if e.get("tag") == "button")
+    assert button_elem.get("form_action_type") == "submit"
+    # Callback value must carry action + project.
+    callback = next(
+        b for b in button_elem.get("behaviors", []) if b.get("type") == "callback"
+    )
+    assert callback["value"]["action"] == "bind_claude_design_project"
+    assert callback["value"]["project"] == "testp"
+
+
+def test_build_design_binding_card_url_example_renders_literally():
+    """Avoid backtick-wrapped URLs in lark_md — Feishu's renderer blanks them out."""
+    import json
+    from requirement_workflow_v12.project_bootstrap.service import build_design_binding_card
+    card = build_design_binding_card(
+        project="testp",
+        github_repo_url="https://github.com/org/testp",
+    )
+    text = json.dumps(card, ensure_ascii=False)
+    assert "https://claude.ai/design/p/xxx" in text
+    # Specifically, the example URL must not be wrapped in backticks.
+    assert "`https://claude.ai/design/p/xxx`" not in text
 
 
 def test_emit_design_binding_reminder_card_skips_when_no_feishu_chat_id():
