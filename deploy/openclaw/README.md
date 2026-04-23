@@ -31,6 +31,7 @@ Agent id ↔ skill name:
 | `ai-meeting-closeout` | `requirement-reviewer`|
 | `spec-author`         | `spec-author`         |
 | `spec-reviewer`       | `spec-reviewer`       |
+| `design-brief-author` | `design-brief-author` |
 
 The sync script dereferences the symlink on push and writes the same content
 to **both** remote paths:

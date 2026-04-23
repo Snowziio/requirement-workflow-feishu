@@ -1,0 +1,1 @@
+../../../../../docs/agents/design-brief-author/SKILL.md

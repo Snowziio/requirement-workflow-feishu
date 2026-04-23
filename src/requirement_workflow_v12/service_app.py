@@ -167,6 +167,7 @@ def dispatch_design_start_if_needed(app, requirement) -> None:
             design_doc_id=created.document_id,
             design_doc_url=created.document_url,
         )
+        _send_design_brief_author_handoff(app, requirement)
     except ValueError as exc:
         msg = str(exc)
         if "Claude Design 未绑定" in msg:
@@ -218,6 +219,46 @@ def _emit_binding_card_for_guard_failure(
         LOGGER.warning(
             "binding card emission failed project=%s req_id=%s: %s",
             requirement.project, requirement.req_id, exc,
+        )
+
+
+def _build_design_brief_author_handoff_text(requirement) -> str:
+    """Handoff text the Coordinator DMs to the REQ creator after design_start.
+
+    The user forwards/pastes this text to the design-brief-author agent in IM,
+    which uses the trigger phrase and COORDINATOR_BASE_URL to start the skill.
+    """
+    base_url = os.environ.get("COORDINATOR_BASE_URL", "http://127.0.0.1:8004")
+    return (
+        f"请开始设计 Brief 生成 {requirement.req_id}\n"
+        f"\n"
+        f"COORDINATOR_BASE_URL={base_url}\n"
+        f"\n"
+        f"（请把本消息原样转发/粘贴给 design-brief-author agent，"
+        f"它会单轮完成 Brief 生成并写入飞书 design 文档。）"
+    )
+
+
+def _send_design_brief_author_handoff(app, requirement) -> None:
+    """Send the handoff DM to the REQ creator. Best-effort — never raises."""
+    user_id = getattr(requirement, "creator_user_id", "")
+    if not user_id:
+        LOGGER.info(
+            "skip design-brief-author handoff: no creator_user_id req_id=%s",
+            requirement.req_id,
+        )
+        return
+    try:
+        text = _build_design_brief_author_handoff_text(requirement)
+        app.gateway.send_text(user_id, text, receive_id_type="user_id")
+        LOGGER.info(
+            "sent design-brief-author handoff DM req_id=%s user_id=%s",
+            requirement.req_id, user_id,
+        )
+    except Exception as exc:
+        LOGGER.warning(
+            "design-brief-author handoff DM failed req_id=%s user_id=%s: %s",
+            requirement.req_id, user_id, exc,
         )
 
 
