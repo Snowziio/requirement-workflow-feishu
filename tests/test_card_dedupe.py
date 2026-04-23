@@ -1,4 +1,4 @@
-"""Tests for card-action callback dedupe (_seen_card_action_ids)."""
+"""Tests for card-event dedupe (_seen_event_ids)."""
 from __future__ import annotations
 
 import sys
@@ -44,33 +44,34 @@ def _make_app(tmp_path):
     return app, bootstrap_svc
 
 
-def test_mark_card_action_seen_returns_true_then_false():
+def test_mark_event_seen_returns_true_then_false():
     from requirement_workflow_v12.service_app import CoordinatorRuntimeApp
     app = CoordinatorRuntimeApp.__new__(CoordinatorRuntimeApp)
     import collections
-    app._seen_card_action_ids = collections.OrderedDict()
-    app._seen_card_action_ids_max = 3
-    assert app._mark_card_action_seen("om_1", "submit_create_project") is True
-    assert app._mark_card_action_seen("om_1", "submit_create_project") is False
-    assert app._mark_card_action_seen("om_2", "submit_create_project") is True
-    assert app._mark_card_action_seen("om_1", "human_confirm_yes") is True
+    app._seen_event_ids = collections.OrderedDict()
+    app._seen_event_ids_max = 3
+    assert app._mark_event_seen("evt_1") is True
+    assert app._mark_event_seen("evt_1") is False
+    assert app._mark_event_seen("evt_2") is True
 
 
-def test_mark_card_action_seen_bounded_lru():
+def test_mark_event_seen_bounded_lru():
     from requirement_workflow_v12.service_app import CoordinatorRuntimeApp
     import collections
     app = CoordinatorRuntimeApp.__new__(CoordinatorRuntimeApp)
-    app._seen_card_action_ids = collections.OrderedDict()
-    app._seen_card_action_ids_max = 2
-    app._mark_card_action_seen("a", "x")
-    app._mark_card_action_seen("b", "x")
-    app._mark_card_action_seen("c", "x")
-    assert app._mark_card_action_seen("a", "x") is True
+    app._seen_event_ids = collections.OrderedDict()
+    app._seen_event_ids_max = 2
+    app._mark_event_seen("a")
+    app._mark_event_seen("b")
+    app._mark_event_seen("c")
+    assert app._mark_event_seen("a") is True
 
 
-def test_handle_card_action_dedupes_same_payload_twice(tmp_path):
+def test_handle_card_action_dedupes_same_event_id_twice(tmp_path):
+    """Feishu at-least-once redelivery: same event_id → second call is dropped."""
     app, bootstrap_svc = _make_app(tmp_path)
     payload = {
+        "header": {"event_id": "evt_abc"},
         "operator": {"open_id": "ou_alice", "name": "Alice"},
         "context": {"open_chat_id": "oc_x", "open_message_id": "om_card_99"},
         "action": {
@@ -84,4 +85,49 @@ def test_handle_card_action_dedupes_same_payload_twice(tmp_path):
     }
     app._handle_card_action_payload(payload)
     app._handle_card_action_payload(payload)
+    bootstrap_svc.run.assert_called_once()
+
+
+def test_handle_card_action_allows_retry_after_validation_error(tmp_path):
+    """Regression: user resubmits the same card with a corrected form_value.
+
+    Different event_id (real user click, not Feishu replay) must be processed,
+    even when open_message_id/action_name are identical to the first attempt.
+    """
+    app, bootstrap_svc = _make_app(tmp_path)
+    base_context = {"open_chat_id": "oc_x", "open_message_id": "om_same_card"}
+    base_action_value = {"action": "submit_create_project", "creator_chat_id": "oc_x"}
+
+    # First submit — invalid project name (uppercase)
+    first_payload = {
+        "header": {"event_id": "evt_first_click"},
+        "operator": {"open_id": "ou_alice", "name": "Alice"},
+        "context": base_context,
+        "action": {
+            "value": base_action_value,
+            "form_value": {
+                "project": "Bad-Name",
+                "category": "saas-ai-automation",
+                "display_name": "", "brief": "", "github_username": "", "tech_stack": "",
+            },
+        },
+    }
+    app._handle_card_action_payload(first_payload)
+    bootstrap_svc.run.assert_not_called()  # validation failed before run
+
+    # Second submit — same card, corrected input, NEW event_id
+    second_payload = {
+        "header": {"event_id": "evt_second_click"},
+        "operator": {"open_id": "ou_alice", "name": "Alice"},
+        "context": base_context,
+        "action": {
+            "value": base_action_value,
+            "form_value": {
+                "project": "good-name",
+                "category": "saas-ai-automation",
+                "display_name": "", "brief": "", "github_username": "", "tech_stack": "",
+            },
+        },
+    }
+    app._handle_card_action_payload(second_payload)
     bootstrap_svc.run.assert_called_once()

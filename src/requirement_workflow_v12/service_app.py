@@ -320,9 +320,12 @@ class CoordinatorRuntimeApp:
         # Dedupe by message_id; bounded so we don't grow unbounded.
         self._seen_message_ids: collections.OrderedDict[str, None] = collections.OrderedDict()
         self._seen_message_ids_max = 1024
-        # Feishu also re-delivers card actions; dedupe by (open_message_id, action_name).
-        self._seen_card_action_ids: collections.OrderedDict[tuple[str, str], None] = collections.OrderedDict()
-        self._seen_card_action_ids_max = 1024
+        # Feishu also re-delivers card actions; dedupe by event_id from the
+        # p2 event header. event_id is stable across re-deliveries of the same
+        # event but differs between distinct user clicks — so a user retrying
+        # after a validation error generates a new event_id and is NOT dropped.
+        self._seen_event_ids: collections.OrderedDict[str, None] = collections.OrderedDict()
+        self._seen_event_ids_max = 1024
 
         # Design handoff archive root (for Task 15 intake). Initialized here
         # so downstream wiring (design hooks) can reference ``self.archive_root``.
@@ -523,14 +526,13 @@ class CoordinatorRuntimeApp:
             self._seen_message_ids.popitem(last=False)
         return True
 
-    def _mark_card_action_seen(self, open_message_id: str, action_name: str) -> bool:
-        """Returns True if (open_message_id, action_name) is new; False if already seen."""
-        key = (open_message_id, action_name)
-        if key in self._seen_card_action_ids:
+    def _mark_event_seen(self, event_id: str) -> bool:
+        """Returns True if event_id is new; False if already seen."""
+        if event_id in self._seen_event_ids:
             return False
-        self._seen_card_action_ids[key] = None
-        while len(self._seen_card_action_ids) > self._seen_card_action_ids_max:
-            self._seen_card_action_ids.popitem(last=False)
+        self._seen_event_ids[event_id] = None
+        while len(self._seen_event_ids) > self._seen_event_ids_max:
+            self._seen_event_ids.popitem(last=False)
         return True
 
     def _on_card_action_trigger(self, data: P2CardActionTrigger):
@@ -1784,13 +1786,12 @@ class CoordinatorRuntimeApp:
         user_name = operator.get("name", "")
 
         context = payload.get("context", {}) or {}
-        open_message_id = context.get("open_message_id", "") or ""
-        if open_message_id and action_name and not self._mark_card_action_seen(
-            open_message_id, str(action_name)
-        ):
+        header = payload.get("header", {}) or {}
+        event_id = header.get("event_id", "") or ""
+        if event_id and not self._mark_event_seen(event_id):
             LOGGER.info(
-                "Dropping duplicate card action open_message_id=%s action=%s",
-                open_message_id, action_name,
+                "Dropping duplicate card event event_id=%s action=%s",
+                event_id, action_name,
             )
             return 200, {"toast": {"type": "info", "content": "已处理，跳过重复回调。"}}
 
@@ -2297,10 +2298,14 @@ class CoordinatorRuntimeApp:
 
     def _card_event_to_payload(self, data: P2CardActionTrigger) -> dict[str, object]:
         event = getattr(data, "event", None)
+        header = getattr(data, "header", None)
         operator = getattr(event, "operator", None)
         action = getattr(event, "action", None)
         context = getattr(event, "context", None)
         return {
+            "header": {
+                "event_id": getattr(header, "event_id", "") if header else "",
+            },
             "operator": {
                 "open_id": getattr(operator, "open_id", "") if operator else "",
                 "user_id": getattr(operator, "user_id", "") if operator else "",
