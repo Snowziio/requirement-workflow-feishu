@@ -38,6 +38,29 @@
 - 仅对 bootstrap_log 中 `POPULATE_MAIN` 之前未 ok 的 project 生效（`--resume` 语义）
 - 已完成 Bootstrap 的项目不被触发
 
+### 1.4 `claude_design_project_url` 的角色（important）
+
+**URL 本身只是导航字符串 + 身份断言，不是 API 端点**。Claude Design 不开放公开 API；我方不解析、不请求该 URL，只存储 + 分发。
+
+**保障的唯一 invariant**：**跨 REQ 的 Claude Design Project 一致性**——所有 needs_ui REQ 的设计师都在**同一个** Claude Design Project 里工作，共享同一套 DS、同一个 canvas、同一段历史 screens、同一条 repo link。
+
+**消费路径**（URL 被谁读 / 读来干啥）：
+
+| 消费者 | 时机 | 用途 |
+|---|---|---|
+| `design-brief-author` skill | `design_start` 后拉 design-context | 嵌入 Brief 首轮 Prompt，告诉设计师"去这个 Project 工作，不要另建" |
+| 设计师（人） | 收到 Brief 飞书 docx 后 | 点击 URL 跳 Claude Design 正确 Project |
+| `plan-author` / `spec-author` skill | 通过 plan/spec context 的 `design_artifact` 字段间接消费 | 决策/Spec 阶段跳去查看视觉决策（非强制） |
+| 实施期 Claude Code | CLAUDE.md 的 Design Reference Rules 可选引用 | 视觉参照（当 handoff bundle 信息不足时） |
+
+**不保障的事**（避免误解）：
+
+- **不校验 URL 是否真实指向有效 Project**（Claude Design 无 API，无法验证）
+- **不抓取该 Project 的数据**（canvas / screens / DS 内容都在 Claude Design 后端）
+- **不做项目级别的 URL migration**（绑定一次后修改 URL 需人工重新评估影响）
+
+**Lazy check 的必要性**：若允许 URL 为空时仍能进 `design_start`，则设计师在 Claude Design 侧会各自新建 Project，跨 REQ 一致性失守（DS 手工对齐、historical screens 不可见、repo link 不统一），等于架构层放弃了 Claude Design 的项目级能力。所以 lazy check 是必要的，不是可选优化。
+
 ---
 
 ## 二、Bootstrap 流程（现有 7 步 + 新增 post-FINALIZE 动作）
