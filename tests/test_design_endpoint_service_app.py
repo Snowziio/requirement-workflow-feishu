@@ -77,3 +77,73 @@ def test_design_context_endpoint_returns_409_when_misconfigured():
     status, body = app.handle_openclaw_design_context_query("REQ-X-003")
     assert status == 409
     assert body["error"] == "misconfigured"
+
+
+def test_design_callback_design_brief_submit_caches_on_requirement():
+    r = Requirement(
+        req_id="REQ-X-030", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.DRAFTING,
+    )
+    app = _app_with_req(r, _cfg())
+    # Stub _save_state + _dispatch_transition_notifications + gateway.write_document_text
+    app._save_state = MagicMock()
+    app._dispatch_transition_notifications = MagicMock()
+
+    body = {
+        "req_id": "REQ-X-030",
+        "event": "design_brief_submit",
+        "payload": {
+            "brief_yaml_frontmatter": "schema_version: '1.0'\nreq_id: REQ-X-030\n",
+            "brief_markdown_body": "# Brief\n...",
+        },
+    }
+    status, resp = app.handle_openclaw_design_callback(body)
+    assert status == 200
+    assert resp["design_status"] == DesignStatus.DRAFTING.value
+    assert r.pending_design_brief is not None
+    assert r.pending_design_brief["brief_yaml_frontmatter"].startswith("schema_version")
+    assert r.pending_design_brief["brief_markdown_body"] == "# Brief\n..."
+    assert "submitted_at" in r.pending_design_brief
+    app._save_state.assert_called_once()
+
+
+def test_design_callback_returns_404_for_unknown_req():
+    r = Requirement(
+        req_id="REQ-X-999", name="n", project="X", summary="s", creator="c",
+    )
+    app = _app_with_req(r, _cfg())
+    status, resp = app.handle_openclaw_design_callback({
+        "req_id": "REQ-NOT-EXIST", "event": "design_brief_submit", "payload": {},
+    })
+    assert status == 404
+
+
+def test_design_callback_returns_409_when_not_drafting():
+    r = Requirement(
+        req_id="REQ-X-031", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.READY,
+    )
+    app = _app_with_req(r, _cfg())
+    app._save_state = MagicMock()
+    status, resp = app.handle_openclaw_design_callback({
+        "req_id": "REQ-X-031", "event": "design_brief_submit", "payload": {},
+    })
+    assert status == 409
+    assert resp["error"] == "invalid_state"
+
+
+def test_design_callback_unknown_event_returns_400():
+    r = Requirement(
+        req_id="REQ-X-032", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.DRAFTING,
+    )
+    app = _app_with_req(r, _cfg())
+    app._save_state = MagicMock()
+    status, resp = app.handle_openclaw_design_callback({
+        "req_id": "REQ-X-032", "event": "unknown_foo", "payload": {},
+    })
+    assert status == 400
+    assert resp["error"] == "unknown_event"

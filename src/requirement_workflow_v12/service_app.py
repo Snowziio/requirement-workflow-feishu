@@ -17,7 +17,7 @@ from .config import Settings, load_settings
 from .coordinator_service import CoordinatorService
 from .feishu_gateway import FeishuGateway
 from .models import DISCUSSION_FIELDS, Requirement, ReviewFinding, ReviewResult, WorkflowStatus, utc_now
-from .plan_state_machine import PlanPhase, PlanStatus
+from .plan_state_machine import DesignStatus, PlanPhase, PlanStatus
 from .spec_state_machine import SpecStatus
 from .project_config import ProjectConfig
 from .protocols import (
@@ -329,6 +329,9 @@ class CoordinatorRuntimeApp:
                 elif self.path == "/openclaw/plan-callback":
                     body_json = json.loads(raw_body.decode("utf-8") or "{}")
                     status, payload = app.handle_openclaw_plan_callback(body_json)
+                elif self.path == "/openclaw/design-callback":
+                    body_json = json.loads(raw_body.decode("utf-8") or "{}")
+                    status, payload = app.handle_openclaw_design_callback(body_json)
                 else:
                     status, payload = 404, {"error": "not_found"}
                 body = json.dumps(payload, ensure_ascii=False).encode()
@@ -1331,6 +1334,56 @@ class CoordinatorRuntimeApp:
         except Exception as exc:  # pragma: no cover
             LOGGER.exception("plan-callback failed req_id=%s event=%s", req_id, event)
             return 500, {"error": "plan_callback_failed", "message": str(exc)}
+
+    def handle_openclaw_design_callback(
+        self, body: dict,
+    ) -> tuple[int, dict]:
+        req_id = body.get("req_id", "")
+        event = body.get("event", "")
+        payload = body.get("payload") or {}
+
+        r = self.service.requirements.get(req_id)
+        if r is None:
+            return 404, {"error": "not_found", "req_id": req_id}
+
+        try:
+            if event == "design_brief_submit":
+                if r.design_status != DesignStatus.DRAFTING:
+                    current = r.design_status.value if r.design_status else "None"
+                    return 409, {
+                        "error": "invalid_state",
+                        "message": f"design_brief_submit requires design_status=DRAFTING, got {current}",
+                    }
+                r.pending_design_brief = {
+                    "brief_yaml_frontmatter": payload.get("brief_yaml_frontmatter", ""),
+                    "brief_markdown_body": payload.get("brief_markdown_body", ""),
+                    "submitted_at": utc_now().isoformat(),
+                }
+                self._save_state()
+                # Optional: mirror Brief into Feishu design docx (best-effort)
+                brief_body = payload.get("brief_markdown_body", "")
+                if r.design_doc_id and brief_body:
+                    try:
+                        self.gateway.write_document_text(r.design_doc_id, brief_body)
+                    except Exception as exc:
+                        LOGGER.warning(
+                            "mirror design brief to feishu failed req=%s: %s", req_id, exc,
+                        )
+                # Push "设计启动卡" (best-effort)
+                try:
+                    self._dispatch_transition_notifications(
+                        r, trigger="design_brief_ready",
+                    )
+                except Exception:
+                    LOGGER.exception("design brief card dispatch failed req=%s", req_id)
+                return 200, {
+                    "req_id": req_id,
+                    "design_status": r.design_status.value,
+                }
+            return 400, {"error": "unknown_event", "event": event}
+        except Exception as exc:  # pragma: no cover
+            LOGGER.exception("design-callback failed req_id=%s event=%s", req_id, event)
+            return 500, {"error": "design_callback_failed", "message": str(exc)}
 
     def handle_openclaw_spec_turn_callback(
         self,
