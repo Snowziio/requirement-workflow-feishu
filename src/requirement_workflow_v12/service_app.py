@@ -1745,6 +1745,43 @@ class CoordinatorRuntimeApp:
             self._save_state()
             return 200, {"toast": {"type": "success", "content": "已打回设计。"}}
 
+        if action_name == "bind_claude_design_project":
+            project = value.get("project", "")
+            form_value = payload.get("action", {}).get("form_value", {}) or {}
+            url = str(form_value.get("claude_design_project_url", "")).strip()
+            if not project:
+                return 200, {"toast": {"type": "error", "content": "缺少 project 参数。"}}
+            if not url:
+                return 200, {"toast": {"type": "error", "content": "URL 不能为空。"}}
+            if not url.startswith("https://claude.ai/design/"):
+                return 200, {"toast": {
+                    "type": "error",
+                    "content": "URL 必须以 https://claude.ai/design/ 开头，确认后重试。",
+                }}
+            cfg = self.service.project_configs.get(project)
+            if cfg is None:
+                return 200, {"toast": {
+                    "type": "error",
+                    "content": f"未知项目：{project}。",
+                }}
+            from dataclasses import replace
+            new_cfg = replace(cfg, claude_design_project_url=url)
+            self.service.project_configs[project] = new_cfg
+            try:
+                self.gateway.upsert_project_config(project, new_cfg)
+            except Exception as exc:
+                LOGGER.exception("upsert project config failed project=%s", project)
+                # Rollback in-memory update so retry is consistent
+                self.service.project_configs[project] = cfg
+                return 200, {"toast": {
+                    "type": "error",
+                    "content": f"保存失败：{exc}",
+                }}
+            return 200, {"toast": {
+                "type": "success",
+                "content": "已保存。本项目现在可以接收 needs_ui=true 的需求。",
+            }}
+
         if action_name == "submit_create_project":
             form = self._extract_project_form_payload(
                 payload, user_id=user_id, user_name=user_name,
