@@ -55,3 +55,21 @@ def test_render_claude_md_preserves_existing_conventions_section():
     # Existing content should still be there
     assert "testproj" in text
     assert "Conventions" in text
+
+
+def test_render_claude_md_has_claude_design_boundary_section():
+    """When Claude Design reads CLAUDE.md, it must see an explicit 'do not touch'
+    list for paths coordinator manages (design/archive, PAGES.yaml, INDEX.md,
+    design/system, src/**) so it stops offering to manually arrange bundles or
+    scaffold frontend projects.
+    """
+    from requirement_workflow_v12.project_bootstrap.static_content import render_claude_md
+    text = render_claude_md(project="testproj")
+    assert "Claude Design 的边界" in text
+    # Must name each coordinator-managed path as off-limits
+    for path in ["design/archive/", "design/PAGES.yaml", "design/INDEX.md", "design/system/", "src/"]:
+        assert path in text
+    # Must explicitly reject the manual-bundling anti-pattern observed with
+    # Claude Design (2026-04-24: offered to build archive dir + pre-zip it)
+    assert "Export" in text
+    assert "双层嵌套" in text or "nested" in text.lower()

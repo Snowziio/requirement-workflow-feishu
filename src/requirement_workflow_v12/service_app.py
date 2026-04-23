@@ -459,6 +459,11 @@ class CoordinatorRuntimeApp:
                 elif self.path == "/openclaw/design-callback":
                     body_json = json.loads(raw_body.decode("utf-8") or "{}")
                     status, payload = app.handle_openclaw_design_callback(body_json)
+                elif self.path == "/admin/design-handoff-upload":
+                    client_ip = self.client_address[0] if self.client_address else ""
+                    status, payload = app.handle_admin_design_handoff_upload(
+                        raw_body, client_ip=client_ip,
+                    )
                 else:
                     status, payload = 404, {"error": "not_found"}
                 body = json.dumps(payload, ensure_ascii=False).encode()
@@ -1694,23 +1699,12 @@ class CoordinatorRuntimeApp:
         self, value: dict, operator: dict,
     ) -> tuple[int, dict]:
         import tempfile
-        from .design_intake import DesignIntake, IntakeError
 
         req_id = value.get("req_id", "")
         file_key = value.get("file_key", "")
         message_id = value.get("message_id", "")
         if not (req_id and file_key and message_id):
             return 200, {"toast": {"type": "error", "content": "缺少上传参数。"}}
-
-        r = self.service.requirements.get(req_id)
-        if r is None:
-            return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
-        if r.design_status != DesignStatus.DRAFTING:
-            current = r.design_status.value if r.design_status else "None"
-            return 200, {"toast": {
-                "type": "error",
-                "content": f"当前设计状态不允许上传：{current}",
-            }}
 
         tmp_dir = Path(tempfile.mkdtemp(prefix="design-handoff-"))
         zip_tmp = tmp_dir / f"{req_id}.zip"
@@ -1722,20 +1716,50 @@ class CoordinatorRuntimeApp:
             LOGGER.warning("download_card_attachment failed req=%s: %s", req_id, exc)
             return 200, {"toast": {"type": "error", "content": "下载附件失败。"}}
 
+        result = self._ingest_design_handoff_local_zip(req_id=req_id, zip_path=zip_tmp)
+        if not result.get("ok"):
+            err = result.get("error", "unknown")
+            return 200, {"toast": {"type": "error", "content": f"接收 handoff 失败：{err}"}}
+        return 200, {"toast": {"type": "success", "content": "Handoff 已接收，等待终审。"}}
+
+    def _ingest_design_handoff_local_zip(
+        self, *, req_id: str, zip_path: Path,
+    ) -> dict:
+        """Shared intake path for both the Feishu card action and the admin
+        endpoint. Given a req_id and a locally-accessible zip, runs
+        DesignIntake + CoordinatorService.design_submit + dispatches the
+        D-DESIGN-2 review card.
+
+        Returns a dict with ``{"ok": True, ...}`` on success or
+        ``{"ok": False, "error": "<reason>"}`` otherwise. Never raises.
+        Callers wrap the response for their medium (toast / JSON body).
+        """
+        from .design_intake import DesignIntake, IntakeError
+
+        r = self.service.requirements.get(req_id)
+        if r is None:
+            return {"ok": False, "error": f"unknown_req_id: {req_id}"}
+        if r.design_status != DesignStatus.DRAFTING:
+            current = r.design_status.value if r.design_status else "None"
+            return {
+                "ok": False,
+                "error": "not_in_drafting",
+                "current_design_status": current,
+            }
+
         slug = self._build_design_slug(r)
         try:
             result = DesignIntake().intake(
-                zip_path=zip_tmp,
+                zip_path=zip_path,
                 req_id=req_id,
                 slug=slug,
                 archive_root=self.archive_root,
             )
         except IntakeError as exc:
             LOGGER.warning("design intake failed req=%s: %s", req_id, exc)
-            return 200, {"toast": {"type": "error", "content": f"解析 handoff 失败：{exc}"}}
+            return {"ok": False, "error": f"intake_failed: {exc}"}
 
         pages_touched = [{"display_name": p, "action": "new"} for p in result.pages_hint]
-
         try:
             self.service.design_submit(
                 req_id,
@@ -1744,7 +1768,7 @@ class CoordinatorRuntimeApp:
             )
         except Exception as exc:
             LOGGER.exception("design_submit failed req=%s", req_id)
-            return 200, {"toast": {"type": "error", "content": f"状态机提交失败：{exc}"}}
+            return {"ok": False, "error": f"design_submit_failed: {exc}"}
 
         self._save_state()
         try:
@@ -1752,7 +1776,49 @@ class CoordinatorRuntimeApp:
         except Exception:
             LOGGER.exception("design submit card dispatch failed req=%s", req_id)
 
-        return 200, {"toast": {"type": "success", "content": "Handoff 已接收，等待终审。"}}
+        return {
+            "ok": True,
+            "req_id": req_id,
+            "archive_path": f"design/archive/{result.archive_dir.name}/",
+            "pages_hint": result.pages_hint,
+        }
+
+    def handle_admin_design_handoff_upload(
+        self, raw_body: bytes, *, client_ip: str,
+    ) -> tuple[int, dict]:
+        """Admin-only endpoint: accept a base64-encoded zip directly, skipping
+        Feishu attachment download. Gated to localhost — external requests hit
+        the docker-mapped port and arrive with the docker bridge IP as source,
+        which is rejected. Intended for ops interventions when the Feishu
+        upload path is unavailable or a one-off REQ needs manual ingestion.
+        """
+        if client_ip not in ("127.0.0.1", "::1"):
+            return 403, {"error": "admin endpoint is localhost-only"}
+        try:
+            body = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return 400, {"error": "invalid_json"}
+        req_id = body.get("req_id", "")
+        zip_b64 = body.get("zip_b64", "")
+        if not req_id or not zip_b64:
+            return 400, {"error": "missing req_id or zip_b64"}
+        import base64, tempfile
+        try:
+            zip_bytes = base64.b64decode(zip_b64)
+        except Exception as exc:
+            return 400, {"error": f"invalid_base64: {exc}"}
+        tmp_dir = Path(tempfile.mkdtemp(prefix="design-handoff-admin-"))
+        zip_tmp = tmp_dir / f"{req_id}.zip"
+        zip_tmp.write_bytes(zip_bytes)
+        LOGGER.info(
+            "admin design handoff upload req_id=%s zip_bytes=%d",
+            req_id, len(zip_bytes),
+        )
+        result = self._ingest_design_handoff_local_zip(
+            req_id=req_id, zip_path=zip_tmp,
+        )
+        status = 200 if result.get("ok") else 400
+        return status, result
 
     def _build_design_slug(self, requirement) -> str:
         """Derive a slug from requirement name for use in archive dir naming."""

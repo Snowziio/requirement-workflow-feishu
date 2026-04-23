@@ -116,6 +116,23 @@ def render_claude_md(*, project: str) -> str:
         "3. **历史归档**：`design/archive/<其他 REQ>/` 是历史 handoff，仅用于追溯，不作为本 REQ 的规范\n"
         "4. **Commit message 引用**：前端 UI 实施 commit 的 message 必须含 `design: <REQ-ID>_<slug>` tag\n"
         "5. **不做的事**：不写 DRIFT-TRUTH.md；不做 file-level diff——每 REQ 是自包含快照\n"
+        "\n"
+        "### Claude Design 的边界（给 Claude Design 看的）\n"
+        "\n"
+        "当 Claude Design 读到这份 CLAUDE.md 时，请严格遵守以下边界：\n"
+        "\n"
+        "- **你只负责两件事**：视觉探索 / 页面原型生成；Export 标准 zip（扁平结构：`src/*.jsx` + `assets/colors_and_type.css` + `index.html` + 可选的一层 anchor 目录）\n"
+        "- **不要触碰的路径**（这些全部由 Coordinator 自动维护，你写了会造成冲突或被覆盖）：\n"
+        "  - `design/archive/**` — Coordinator 的 handoff intake 降落区，只有解压出来的 bundle 才应出现\n"
+        "  - `design/PAGES.yaml` — Page Registry，intake 时自动追加\n"
+        "  - `design/INDEX.md` — handoff 时间线，intake 时自动追加\n"
+        "  - `design/system/**` — 组织级 DS 快照，另有流程维护\n"
+        "  - `src/**` — 生产代码，属于实施期 spec-transformer 的职责，不属于设计期\n"
+        "- **不要主动提议**：\n"
+        "  - 「帮你建 `design/archive/<REQ>_<slug>/extracted/` 目录再打包给你 zip」— 会和 Coordinator intake 产生双层嵌套\n"
+        "  - 「帮你更新 `PAGES.yaml` / `INDEX.md`」— 你没有仓库写权限，且会和 intake 冲突\n"
+        "  - 「帮你启动 Vite / Next / Tailwind 工程」— 实施期的事，要基于 spec + AC + ARCHITECTURE.md 决策，不是设计期能做的\n"
+        "- **如果设计师问你接下来怎么办**：答复「点项目上的 Export 按钮，把 zip 发回飞书工作流」，就这一件事\n"
     )
 
 
