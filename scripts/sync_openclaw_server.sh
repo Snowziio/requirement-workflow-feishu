@@ -27,6 +27,7 @@ REMOTE="${OPENCLAW_REMOTE:-admin@47.251.81.45}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="${REPO_ROOT}/deploy/openclaw"
 AGENTS=(ai-founder-brief ai-meeting-closeout plan-author spec-author spec-reviewer spec-transformer spec-transformer-reviewer design-brief-author)
+SSH_OPTS=(-o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
 
 # Agent id → skill name (see reference_openclaw_skill_dual_sync.md).
 # Using a case fallback rather than declare -A to stay compatible with bash 3.2
@@ -87,6 +88,11 @@ with open(dst, "w", encoding="utf-8") as f:
 PY
 }
 
+push_file() {
+  local src="$1" dst="$2"
+  ssh "${SSH_OPTS[@]}" "${REMOTE}" "cat > ${dst}" < "$src"
+}
+
 render_template "${SRC}/openclaw.json.template" "${STAGING}/openclaw.json"
 
 # 2) Per-agent: render models.json and copy workspace md files.
@@ -128,33 +134,33 @@ fi
 #    We extract into separate subtrees so unrelated agents on the server are
 #    not touched.
 echo "[info] pushing openclaw.json"
-scp -q "${STAGING}/openclaw.json" "${REMOTE}:~/.openclaw/openclaw.json.new"
-ssh "${REMOTE}" "mv ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.bak-\$(date +%Y%m%d-%H%M%S) && mv ~/.openclaw/openclaw.json.new ~/.openclaw/openclaw.json"
+push_file "${STAGING}/openclaw.json" "~/.openclaw/openclaw.json.new"
+ssh "${SSH_OPTS[@]}" "${REMOTE}" "mv ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.bak-\$(date +%Y%m%d-%H%M%S) && mv ~/.openclaw/openclaw.json.new ~/.openclaw/openclaw.json"
 
 for agent in "${AGENTS[@]}"; do
   echo "[info] pushing agents/${agent}/agent/models.json"
-  ssh "${REMOTE}" "mkdir -p ~/.openclaw/agents/${agent}/agent"
-  scp -q "${STAGING}/agents/${agent}/models.json" "${REMOTE}:~/.openclaw/agents/${agent}/agent/models.json"
+  ssh "${SSH_OPTS[@]}" "${REMOTE}" "mkdir -p ~/.openclaw/agents/${agent}/agent"
+  push_file "${STAGING}/agents/${agent}/models.json" "~/.openclaw/agents/${agent}/agent/models.json"
 
   echo "[info] pushing workspace/agents/${agent}/*.md"
-  ssh "${REMOTE}" "mkdir -p ~/.openclaw/workspace/agents/${agent}"
+  ssh "${SSH_OPTS[@]}" "${REMOTE}" "mkdir -p ~/.openclaw/workspace/agents/${agent}"
   (cd "${STAGING}/workspace/agents/${agent}" && tar -cf - *.md) | \
-    ssh "${REMOTE}" "cd ~/.openclaw/workspace/agents/${agent} && tar -xf -"
+    ssh "${SSH_OPTS[@]}" "${REMOTE}" "cd ~/.openclaw/workspace/agents/${agent} && tar -xf -"
 
   skill="$(skill_for_agent "$agent")"
   echo "[info] pushing skills/${skill}/SKILL.md (mirror of workspace SKILL.md)"
-  ssh "${REMOTE}" "mkdir -p ~/.openclaw/skills/${skill}"
-  scp -q "${STAGING}/skills/${skill}/SKILL.md" "${REMOTE}:~/.openclaw/skills/${skill}/SKILL.md"
+  ssh "${SSH_OPTS[@]}" "${REMOTE}" "mkdir -p ~/.openclaw/skills/${skill}"
+  push_file "${STAGING}/skills/${skill}/SKILL.md" "~/.openclaw/skills/${skill}/SKILL.md"
 
   # Safety net: models occasionally hallucinate the script path into the
   # agent's own workspace dir (observed with MiniMax-M2.7, 2026-04-24).
   # The canonical copy lives at ~/.openclaw/bin/send_openclaw_callback.py;
   # a symlink in the workspace dir makes both paths work.
   echo "[info] symlinking send_openclaw_callback.py into workspace/agents/${agent}/"
-  ssh "${REMOTE}" "ln -sfn /home/admin/.openclaw/bin/send_openclaw_callback.py /home/admin/.openclaw/workspace/agents/${agent}/send_openclaw_callback.py"
+  ssh "${SSH_OPTS[@]}" "${REMOTE}" "ln -sfn /home/admin/.openclaw/bin/send_openclaw_callback.py /home/admin/.openclaw/workspace/agents/${agent}/send_openclaw_callback.py"
 done
 
 echo "[info] restarting openclaw-gateway.service"
-ssh "${REMOTE}" "systemctl --user restart openclaw-gateway.service && sleep 2 && systemctl --user is-active openclaw-gateway.service"
+ssh "${SSH_OPTS[@]}" "${REMOTE}" "systemctl --user restart openclaw-gateway.service && sleep 2 && systemctl --user is-active openclaw-gateway.service"
 
 echo "[done] sync complete"
