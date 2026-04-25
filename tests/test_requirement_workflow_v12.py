@@ -55,6 +55,28 @@ class RequirementWorkflowV12Test(unittest.TestCase):
         self.assertIn("问题描述", req.completed_fields)
         self.assertNotIn("问题描述", req.pending_fields)
 
+    def test_requirement_context_includes_document_id_and_project_config(self) -> None:
+        from requirement_workflow_v12.project_config import ProjectConfig
+        from requirement_workflow_v12.protocols import AgentRequirementContextQuery
+        self.requirement.document_id = "doc-req-1"
+        self.service.project_configs["HARNESS"] = ProjectConfig(
+            category="enterprise-app",
+            template_version="enterprise-app.v1",
+            architecture_doc_id="doc-arch-1",
+            architecture_doc_url="https://feishu/docx/doc-arch-1",
+            tech_stack={"backend": "FastAPI"},
+            frontend_subpath="src/harness_webapp",
+            frontend_tech_stack={"framework": "React"},
+        )
+
+        ctx = self.service.get_agent_requirement_context(
+            AgentRequirementContextQuery(req_id=self.req_id)
+        )
+
+        self.assertEqual(ctx["document_id"], "doc-req-1")
+        self.assertEqual(ctx["project_config"]["tech_stack"], {"backend": "FastAPI"})
+        self.assertEqual(ctx["project_config"]["frontend_tech_stack"], {"framework": "React"})
+
     def test_human_review_history_records_dual_review(self) -> None:
         from requirement_workflow_v12.protocols import AgentReviewEventPayload
         # Author submits → AI_REVIEWING

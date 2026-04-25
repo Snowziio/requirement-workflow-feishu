@@ -460,11 +460,13 @@ class CoordinatorRuntimeApp:
                 elif self.path == "/callbacks/openclaw/spec-transform":
                     status, payload = app.handle_openclaw_spec_transform_callback(raw_body, headers=headers)
                 elif self.path == "/openclaw/plan-callback":
-                    body_json = json.loads(raw_body.decode("utf-8") or "{}")
-                    status, payload = app.handle_openclaw_plan_callback(body_json)
+                    status, payload = app.handle_openclaw_plan_callback_raw(
+                        raw_body, headers=headers,
+                    )
                 elif self.path == "/openclaw/design-callback":
-                    body_json = json.loads(raw_body.decode("utf-8") or "{}")
-                    status, payload = app.handle_openclaw_design_callback(body_json)
+                    status, payload = app.handle_openclaw_design_callback_raw(
+                        raw_body, headers=headers,
+                    )
                 elif self.path == "/admin/design-handoff-upload":
                     client_ip = self.client_address[0] if self.client_address else ""
                     status, payload = app.handle_admin_design_handoff_upload(
@@ -873,7 +875,10 @@ class CoordinatorRuntimeApp:
                     "card" if isinstance(outbound, OutboundCard) else "text",
                     exc,
                 )
-        self._save_state()
+        try:
+            self._save_state()
+        except Exception as exc:
+            LOGGER.warning("Failed to persist state after provisioning req_id=%s: %s", req_id, exc)
 
     def _handle_author_private_message(self, context: MessageContext) -> list[OutboundMessage]:
         text = context.text.strip()
@@ -1377,7 +1382,7 @@ class CoordinatorRuntimeApp:
             return 404, {"error": "not_found", "req_id": req_id}
         try:
             ctx = self._plan_context_builder.build(req_id)
-            return 200, ctx
+            return 200, {"ok": True, "context": ctx, **ctx}
         except PlanContextGateError as exc:
             return 409, {"error": "gate_failed", "message": str(exc)}
         except PlanContextMisconfigured as exc:
@@ -1480,8 +1485,10 @@ class CoordinatorRuntimeApp:
                 )
                 return 200, {
                     "req_id": req_id,
-                    "plan_status": r.plan_status.value,
+                    "plan_status": "pending_human_review",
+                    "raw_plan_status": r.plan_status.value,
                     "plan_phase": r.plan_phase.value,
+                    "next_human_gate": "plan_final_approval",
                 }
             return 400, {"error": "unknown_event", "event": event}
         except ValueError as exc:
@@ -1489,6 +1496,21 @@ class CoordinatorRuntimeApp:
         except Exception as exc:  # pragma: no cover
             LOGGER.exception("plan-callback failed req_id=%s event=%s", req_id, event)
             return 500, {"error": "plan_callback_failed", "message": str(exc)}
+
+    def handle_openclaw_plan_callback_raw(
+        self,
+        raw_body: bytes,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict]:
+        auth_error = self._validate_openclaw_callback_auth(raw_body, headers=headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            body = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return 400, {"error": "invalid_json"}
+        return self.handle_openclaw_plan_callback(body)
 
     def handle_openclaw_design_callback(
         self, body: dict,
@@ -1540,6 +1562,21 @@ class CoordinatorRuntimeApp:
             LOGGER.exception("design-callback failed req_id=%s event=%s", req_id, event)
             return 500, {"error": "design_callback_failed", "message": str(exc)}
 
+    def handle_openclaw_design_callback_raw(
+        self,
+        raw_body: bytes,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict]:
+        auth_error = self._validate_openclaw_callback_auth(raw_body, headers=headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            body = json.loads(raw_body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return 400, {"error": "invalid_json"}
+        return self.handle_openclaw_design_callback(body)
+
     def handle_openclaw_spec_turn_callback(
         self,
         raw_body: bytes,
@@ -1557,6 +1594,7 @@ class CoordinatorRuntimeApp:
         req_id = str(payload.get("req_id", "")).strip()
         event = str(payload.get("event", "")).strip()
         summary = str(payload.get("summary", "")).strip()
+        context_token = str(payload.get("context_token", "")).strip()
         spec_document_url_from_payload = str(payload.get("spec_document_url", "")).strip()
         architecture_doc_revision = str(payload.get("architecture_doc_revision", "")).strip()
 
@@ -1572,6 +1610,9 @@ class CoordinatorRuntimeApp:
         requirement = self.service.get_requirement(req_id)
         if requirement is None:
             return 404, {"error": "not_found", "message": f"未知需求：{req_id}"}
+        token_error = self._validate_spec_context_token(requirement, context_token)
+        if token_error is not None:
+            return token_error
 
         if event == "spec_start":
             if requirement.status != WorkflowStatus.APPROVED:
@@ -1646,6 +1687,7 @@ class CoordinatorRuntimeApp:
 
             self._save_state()
             self._dispatch_transition_notifications(requirement, trigger="spec_submitted")
+            self._dispatch_group_notification(requirement, trigger="spec_submitted")
             LOGGER.info("Spec submit accepted req_id=%s summary=%s", req_id, summary)
             return 200, {"ok": True, "message": "Spec 已提交，已通知项目群发起审查"}
 
@@ -2211,9 +2253,8 @@ class CoordinatorRuntimeApp:
                 return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
             pending = requirement.pending_plan_review
             if pending:
-                if pending.get("project_context_change"):
-                    return 200, {"toast": {"type": "error", "content": "MVP 暂不支持 architecture_change 的 Plan 提交，请联系维护者。"}}
                 plan_md_content = pending.get("plan_md_content", "")
+                project_context_change = pending.get("project_context_change")
             elif requirement.plan_doc_id:
                 # pending_plan_review was cleared (e.g. after reject + doc re-edit).
                 # The syncer reads from Feishu directly anyway; read it here for the
@@ -2225,21 +2266,58 @@ class CoordinatorRuntimeApp:
                     return 200, {"toast": {"type": "error", "content": "读取 Plan 文档失败，请稍后重试。"}}
                 if not plan_md_content.strip():
                     return 200, {"toast": {"type": "error", "content": "Plan 文档内容为空，请确认 Plan Author 已完成修改。"}}
+                project_context_change = None
             else:
                 return 200, {"toast": {"type": "error", "content": "Plan 草稿不存在，请让 Plan Author 重新提交。"}}
             try:
                 self.service.plan_submit(
                     req_id,
                     plan_md_content=plan_md_content,
-                    project_context_change=None,
+                    project_context_change=project_context_change,
                 )
             except Exception as exc:
                 LOGGER.exception("approve_plan_submit failed req_id=%s", req_id)
                 return 200, {"toast": {"type": "error", "content": f"Plan 提交失败：{exc}；可再次点击重试。"}}
             requirement.pending_plan_review = None
             self._save_state()
+            if requirement.plan_status == PlanStatus.AUTH_PENDING:
+                self._dispatch_transition_notifications(requirement, trigger="plan_auth_pending")
+                return 200, {"toast": {"type": "success", "content": "Plan 已通过，项目级上下文变更等待授权。"}}
             self._dispatch_transition_notifications(requirement, trigger="plan_ready")
             return 200, {"toast": {"type": "success", "content": "Plan 已通过并提交至 GitHub。"}}
+
+        if action_name == "authorize_plan_context_change":
+            req_id = value.get("req_id", "")
+            if not req_id:
+                return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            operator_id = ""
+            if isinstance(operator, dict):
+                opid = operator.get("operator_id", {})
+                operator_id = opid.get("user_id", "") if isinstance(opid, dict) else ""
+                operator_id = operator_id or str(operator.get("open_id", ""))
+            try:
+                requirement = self.service.plan_authorize(req_id, authorized_by=operator_id)
+            except (KeyError, ValueError) as exc:
+                return 200, {"toast": {"type": "error", "content": str(exc)}}
+            except Exception as exc:
+                LOGGER.exception("authorize_plan_context_change failed req_id=%s", req_id)
+                return 200, {"toast": {"type": "error", "content": f"授权失败：{exc}"}}
+            self._save_state()
+            self._dispatch_transition_notifications(requirement, trigger="plan_ready")
+            return 200, {"toast": {"type": "success", "content": "项目级上下文变更已授权，Plan 已提交至 GitHub。"}}
+
+        if action_name == "reject_plan_context_change":
+            req_id = value.get("req_id", "")
+            reason = value.get("reason", "")
+            if not req_id:
+                return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            try:
+                requirement = self.service.plan_authorization_reject(req_id, reason=reason)
+            except (KeyError, ValueError) as exc:
+                return 200, {"toast": {"type": "error", "content": str(exc)}}
+            self._save_state()
+            self._dispatch_transition_notifications(requirement, trigger="plan_review_rejected")
+            return 200, {"toast": {"type": "success", "content": "已驳回项目级上下文变更。"}}
 
         if action_name == "reject_plan_submit":
             req_id = value.get("req_id", "")
@@ -2548,6 +2626,26 @@ class CoordinatorRuntimeApp:
         ).hexdigest()
         if not hmac.compare_digest(expected, signature):
             return 401, {"error": "unauthorized", "message": "OpenClaw 回调签名不匹配。"}
+        return None
+
+    def _validate_spec_context_token(
+        self,
+        requirement: Requirement,
+        context_token: str,
+    ) -> tuple[int, dict[str, object]] | None:
+        expected = getattr(requirement, "active_spec_context_token", "") or ""
+        if not expected:
+            return None
+        if not context_token:
+            return 409, {
+                "error": "stale_context",
+                "message": "缺少 context_token，请重新拉取 spec-context 后重试。",
+            }
+        if not hmac.compare_digest(expected, context_token):
+            return 409, {
+                "error": "stale_context",
+                "message": "context_token 已失效，请重新拉取 spec-context 后重试。",
+            }
         return None
 
     def _build_project_creation_card(self, context: MessageContext) -> dict[str, object]:
@@ -3140,6 +3238,7 @@ class CoordinatorRuntimeApp:
         "spec_submitted":               ("dm",),
         "spec_review_reject":           ("dm",),
         "plan_submitted_pending_review": ("dm",),
+        "plan_auth_pending":             ("dm", "group"),
         "plan_review_rejected":          ("dm",),
         "design_brief_ready":           ("dm",),
         "handoff_to_author":            ("dm",),
@@ -3177,6 +3276,24 @@ class CoordinatorRuntimeApp:
                     exc,
                 )
 
+    def _dispatch_group_notification(self, requirement: Requirement, *, trigger: str) -> None:
+        if not self._is_feishu_chat_id(requirement.project_group_id):
+            return
+        card = self._build_transition_notification_card(requirement, trigger=trigger)
+        text = self._build_transition_notification_text(requirement, trigger=trigger)
+        try:
+            if card is not None and hasattr(self.gateway, "send_card"):
+                self.gateway.send_card(requirement.project_group_id, card, receive_id_type="chat_id")
+            elif text and hasattr(self.gateway, "send_text"):
+                self.gateway.send_text(requirement.project_group_id, text, receive_id_type="chat_id")
+        except Exception as exc:
+            LOGGER.warning(
+                "Failed to send group transition notification req_id=%s trigger=%s: %s",
+                requirement.req_id,
+                trigger,
+                exc,
+            )
+
     def _build_transition_notification_card(self, requirement: Requirement, *, trigger: str) -> dict[str, object] | None:
         template, title, reason, result, next_action = self._transition_notification_content(requirement, trigger=trigger)
         if not title:
@@ -3210,7 +3327,7 @@ class CoordinatorRuntimeApp:
         spec_document_url = getattr(requirement, "spec_document_url", "")
         if spec_document_url and trigger in {"spec_submitted", "spec_locked", "spec_review_reject"}:
             links.append(f"[查看 Spec 文档]({spec_document_url})")
-        if trigger in {"plan_submitted_pending_review", "plan_ready", "plan_review_rejected"} and requirement.plan_doc_url:
+        if trigger in {"plan_submitted_pending_review", "plan_auth_pending", "plan_ready", "plan_review_rejected"} and requirement.plan_doc_url:
             links.append(f"[查看 Plan 文档]({requirement.plan_doc_url})")
         # Design Brief link: surface on any design-phase card so reviewer / plan-author
         # can open the source visual context in one click.
@@ -3342,6 +3459,21 @@ class CoordinatorRuntimeApp:
                     "text": {"tag": "plain_text", "content": "需要修改"},
                     "type": "default",
                     "value": {"action": "reject_plan_submit", "req_id": requirement.req_id},
+                },
+            ]
+        if trigger == "plan_auth_pending":
+            return [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "授权项目级变更"},
+                    "type": "primary",
+                    "value": {"action": "authorize_plan_context_change", "req_id": requirement.req_id},
+                },
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "驳回变更"},
+                    "type": "default",
+                    "value": {"action": "reject_plan_context_change", "req_id": requirement.req_id},
                 },
             ]
         if trigger == "plan_ready":
@@ -3498,6 +3630,14 @@ class CoordinatorRuntimeApp:
                 "Plan Author 已完成 plan.md 终稿提交。",
                 "Plan 文档已进入最终审查阶段，等待需求提出者裁决。",
                 "请 review plan.md 内容后，点击「通过」提交 PR，或「需要修改」驳回重写。",
+            )
+        if trigger == "plan_auth_pending":
+            return (
+                "orange",
+                f"{requirement.req_id} 项目级上下文变更待授权",
+                "Plan 已通过最终审查，但包含 project_context_change。",
+                "项目级 ARCHITECTURE / 约束变更需要授权后才会冻结到 GitHub。",
+                "请确认变更后点击「授权项目级变更」，或驳回给 Plan Author 修改。",
             )
         if trigger == "plan_ready":
             spec_agent_name = self.settings.openclaw_spec_agent_name

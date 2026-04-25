@@ -27,6 +27,9 @@ curl -s "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/queries/openclaw/design-
 {
   "req_id": "REQ-xxx",
   "project": "proj",
+  "requirement_name": "...",
+  "requirement_summary": "...",
+  "requirement_document_id": "docx-...",
   "requirement_document_url": "https://...",
   "needs_ui": true,
   "claude_design_project_url": "https://claude.ai/design/p/abc",
@@ -107,7 +110,7 @@ cross_req_references:
 
 ## 背景
 
-（来自 requirement_document_url 的 2-3 段自然语言摘要——你读 REQ docx 后自己提炼，不要直接贴原文）
+（来自 design-context 的 requirement_summary / requirement_name 的 2-3 段自然语言摘要；本 skill 不直接读取飞书文档）
 
 ## 本次需要交付的 pages
 

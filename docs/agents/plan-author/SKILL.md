@@ -222,12 +222,10 @@ curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/plan-ca
 ```
 
 5. 只有在**收到 200 响应后**才回复用户，报告实际 plan_status：
-   - `"plan_status": "ready"` → 回用户"✅ 已提交，plan 冻结到 GitHub `plans/<req_id>.md`"
-   - `"plan_status": "auth_pending"` → 回用户"✅ 已提交，等你在授权卡上确认项目级变更"
+   - `"plan_status": "pending_human_review"` → 回用户"✅ Plan 已提交给 Coordinator，等待飞书审查卡通过"
 
 200 响应语义：
-- `"plan_status": "ready"` → 无 project_context_change，Coordinator 已把飞书 plan 文本单向同步到 GitHub `plans/<req_id>.md`，流程推进
-- `"plan_status": "auth_pending"` → 有 project_context_change，等人通过授权卡授权；授权后 Coordinator 才会同步 plan + ARCHITECTURE 到 GitHub
+- `"plan_status": "pending_human_review"` → Coordinator 已写入飞书 Plan docx 并推送 Plan Final Approval 卡；人工点击「通过」后，若无 `project_context_change` 会进入 `PLAN_READY` 并同步 GitHub，若有 `project_context_change` 会先进入 `PLAN_AUTH_PENDING` 等待项目级变更授权。
 
 ## 异常分支
 

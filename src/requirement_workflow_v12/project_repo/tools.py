@@ -100,16 +100,6 @@ class ProjectRepoTools(Protocol):
         self, *, project_repo: str, message: str, files: dict,
     ) -> str: ...
 
-    def read_project_file(
-        self,
-        project_repo: str,
-        path: str,
-        *,
-        branch: str = "main",
-        default: str | None = None,
-    ) -> str: ...
-
-
 class GitHubProjectRepoTools:
     """Default implementation; delegates to ``GitHubGateway``."""
 

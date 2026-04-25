@@ -254,7 +254,7 @@ def test_approve_plan_submit_rejects_if_no_pending(app):
     assert r.plan_status == PlanStatus.DRAFTING
 
 
-def test_approve_plan_submit_rejects_architecture_change(app):
+def test_approve_plan_submit_with_project_context_change_enters_auth_pending(app):
     r = _seed_pending_review(app, _approved_req(app), with_acc=True)
 
     status, resp = app._handle_card_action_payload(
@@ -262,9 +262,10 @@ def test_approve_plan_submit_rejects_architecture_change(app):
     )
 
     assert status == 200
-    assert resp.get("toast", {}).get("type") == "error"
-    assert r.plan_status == PlanStatus.DRAFTING
-    assert r.pending_plan_review is not None  # retained
+    assert resp.get("toast", {}).get("type") == "success"
+    assert r.plan_status == PlanStatus.AUTH_PENDING
+    assert r.pending_plan_review is None
+    assert r.pending_plan_draft is not None
 
 
 def test_approve_plan_submit_retains_pending_on_service_error(app):

@@ -103,6 +103,7 @@ def test_build_returns_payload_with_new_fields():
 
     ctx = result.context
     assert ctx["architecture_doc_url"] == "https://feishu.example/docx/doc_arch"
+    assert ctx["architecture_doc_id"] == "doc_arch"
     assert ctx["architecture_doc_revision"] == "rev-7"
     assert ctx["template_version"] == "saas-ai-automation.v1"
     assert ctx["category"] == "saas-ai-automation"

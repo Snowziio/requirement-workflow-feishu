@@ -274,7 +274,14 @@ def _make_app_with_approved_req():
 
 def test_spec_start_callback_creates_doc_and_transitions_state():
     app, req_id, gateway = _make_app_with_approved_req()
-    body = json.dumps({"req_id": req_id, "event": "spec_start", "summary": "开始 Spec 撰写"}).encode()
+    req = app.service.get_requirement(req_id)
+    req.active_spec_context_token = "ctx-1"
+    body = json.dumps({
+        "req_id": req_id,
+        "event": "spec_start",
+        "summary": "开始 Spec 撰写",
+        "context_token": "ctx-1",
+    }).encode()
     status, payload = app.handle_openclaw_spec_turn_callback(body)
     assert status == 200
     assert payload["ok"] is True
@@ -288,6 +295,21 @@ def test_spec_start_callback_creates_doc_and_transitions_state():
     assert req.status == WorkflowStatus.APPROVED
     assert req.spec_status == SpecStatus.DRAFTING
     assert req.spec_document_id == f"spec_doc_{req_id}"
+
+
+def test_spec_start_callback_rejects_stale_context_token():
+    app, req_id, gateway = _make_app_with_approved_req()
+    req = app.service.get_requirement(req_id)
+    req.active_spec_context_token = "ctx-current"
+    body = json.dumps({
+        "req_id": req_id,
+        "event": "spec_start",
+        "summary": "开始 Spec 撰写",
+        "context_token": "ctx-old",
+    }).encode()
+    status, payload = app.handle_openclaw_spec_turn_callback(body)
+    assert status == 409
+    assert payload["error"] == "stale_context"
 
 
 def test_spec_start_blocked_if_not_approved():

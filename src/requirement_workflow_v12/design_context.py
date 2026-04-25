@@ -44,17 +44,23 @@ class DesignContextBuilder:
         if cfg is None:
             raise DesignContextMisconfigured(f"项目 {r.project} 未初始化")
 
-        current_pages = self._load_pages_registry_slice(cfg)
+        current_pages = self._load_pages_registry_slice(cfg, project=r.project)
         prior_archive = self._find_prior_archive(req_id, r.project)
 
         return {
             "req_id": r.req_id,
             "project": r.project,
+            "requirement_name": r.name,
+            "requirement_summary": r.summary,
+            "requirement_document_id": getattr(r, "document_id", "") or "",
             "requirement_document_url": r.document_url,
             "needs_ui": r.needs_ui,
             "claude_design_project_url": getattr(cfg, "claude_design_project_url", ""),
             "frontend_subpath": getattr(cfg, "frontend_subpath", ""),
-            "frontend_tech_stack": dict(getattr(cfg, "tech_stack", {})),
+            "frontend_tech_stack": dict(
+                getattr(cfg, "frontend_tech_stack", None)
+                or getattr(cfg, "tech_stack", {})
+            ),
             "category": cfg.category,
             "template_version": cfg.template_version,
             "architecture_doc_url": cfg.architecture_doc_url,
@@ -65,19 +71,40 @@ class DesignContextBuilder:
             "prior_handoff_archive_ref": prior_archive,
         }
 
-    def _load_pages_registry_slice(self, cfg) -> list[dict]:
+    def _load_pages_registry_slice(self, cfg, *, project: str) -> list[dict]:
         """Read design/PAGES.yaml from the project repo (if accessible).
 
-        In MVP we return [] when the file is unreachable (no project repo cloned
-        locally for coordinator to read). Real integration hooks this to a
-        project-repo gateway in a future task.
+        The coordinator does not clone project repos in the current runtime,
+        so use the durable Requirement.design_pages records from prior READY
+        design handoffs as the local page registry slice.
         """
-        return []
+        pages_by_name: dict[str, dict] = {}
+        for req in self._service.requirements.values():
+            if req.project != project or req.design_status is not DesignStatus.READY:
+                continue
+            for page in getattr(req, "design_pages", []) or []:
+                if not isinstance(page, dict):
+                    continue
+                name = str(page.get("display_name", "")).strip()
+                if not name:
+                    continue
+                pages_by_name[name] = dict(page)
+        return [pages_by_name[name] for name in sorted(pages_by_name)]
 
     def _find_prior_archive(self, req_id: str, project: str) -> str:
         """Return path of the most recent predecessor REQ's design archive.
 
-        v1: returns "" — the coordinator does not have filesystem access to the
-        project repo to enumerate. The skill handles empty gracefully.
+        Uses coordinator state rather than GitHub: the last READY design handoff
+        for the same project is the closest available predecessor.
         """
-        return ""
+        candidates = [
+            req for req in self._service.requirements.values()
+            if req.project == project
+            and req.req_id != req_id
+            and req.design_status is DesignStatus.READY
+            and getattr(req, "design_archive_path", "")
+        ]
+        if not candidates:
+            return ""
+        candidates.sort(key=lambda req: getattr(req, "updated_at", None), reverse=True)
+        return candidates[0].design_archive_path

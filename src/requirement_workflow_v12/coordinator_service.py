@@ -511,9 +511,11 @@ class CoordinatorService:
             "human_confirmed": requirement.human_confirmed,
             "latest_review_summary": requirement.latest_review_summary,
             "latest_question": requirement.latest_question,
+            "document_id": requirement.document_id,
             "document_url": requirement.document_url,
             "bitable_record_id": requirement.bitable_record_id,
             "project_group_id": requirement.project_group_id,
+            "project_config": self._agent_project_config_slice(requirement.project),
             "review_history": [
                 {
                     "summary": review.summary,
@@ -548,6 +550,22 @@ class CoordinatorService:
             "spec_document_id": requirement.spec_document_id,
             "spec_document_url": requirement.spec_document_url,
             "spec_review_summary": requirement.spec_review_summary,
+        }
+
+    def _agent_project_config_slice(self, project: str) -> dict[str, object]:
+        cfg = self.project_configs.get(project)
+        if cfg is None:
+            return {}
+        return {
+            "category": cfg.category,
+            "template_version": cfg.template_version,
+            "architecture_doc_id": cfg.architecture_doc_id,
+            "architecture_doc_url": cfg.architecture_doc_url,
+            "tech_stack": dict(cfg.tech_stack),
+            "design_system_doc_id": cfg.design_system_doc_id or "",
+            "github_repo_url": cfg.github_repo_url,
+            "frontend_subpath": cfg.frontend_subpath,
+            "frontend_tech_stack": dict(cfg.frontend_tech_stack),
         }
 
     def handle_human_confirmation(self, requirement: Requirement, approved: bool) -> Requirement:

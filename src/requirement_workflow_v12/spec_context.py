@@ -97,6 +97,7 @@ class SpecContextBuilder:
             "hifi_prototype_url": requirement.hifi_prototype_url,
             "design_system_snapshot": None,
             "requirement_document_url": requirement.document_url,
+            "architecture_doc_id": project_cfg.architecture_doc_id,
             "architecture_doc_url": project_cfg.architecture_doc_url,
             "architecture_doc_revision": revision,
             "template_version": project_cfg.template_version,

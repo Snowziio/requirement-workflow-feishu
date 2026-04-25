@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -44,6 +46,7 @@ class JsonStateStore:
     def __init__(self, path: str) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
 
     def save_snapshot(
         self,
@@ -59,7 +62,15 @@ class JsonStateStore:
             "active_req_by_user": active_req_by_user,
             "project_groups": project_groups,
         }
-        self.path.write_text(json.dumps(payload, ensure_ascii=False, default=str, indent=2))
+        text = json.dumps(payload, ensure_ascii=False, default=str, indent=2)
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self.path.with_name(f".{self.path.name}.tmp")
+            with tmp_path.open("w", encoding="utf-8") as fh:
+                fh.write(text)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_path, self.path)
 
     def load_snapshot(
         self,

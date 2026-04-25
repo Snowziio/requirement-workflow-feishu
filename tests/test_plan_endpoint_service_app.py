@@ -42,7 +42,7 @@ def _approved_req(app, req_id="REQ-P-1"):
     app.service.requirements[req_id] = r
     app.service.project_configs["P"] = ProjectConfig(
         category="web", template_version="v1",
-        architecture_doc_id="", architecture_doc_url="",
+        architecture_doc_id="arch-doc-1", architecture_doc_url="https://feishu/docx/arch-doc-1",
         tech_stack={"backend": "py"}, github_repo_url="o/r",
     )
     return r
@@ -55,7 +55,12 @@ def test_plan_context_endpoint_returns_200_for_approved_req(app):
 
     assert status == 200
     assert body["req_id"] == "REQ-P-1"
+    assert body["ok"] is True
+    assert body["context"]["req_id"] == "REQ-P-1"
     assert body["project_repo"] == "o/r"
+    assert body["architecture_doc_id"] == "arch-doc-1"
+    assert body["requirement_summary"] == "s"
+    assert body["plan_phase"] == "outline_pending"
 
 
 def test_plan_context_endpoint_returns_409_when_gate_fails(app):
@@ -172,6 +177,15 @@ def test_plan_callback_unknown_event_returns_400(app):
     assert status == 400
 
 
+def test_plan_callback_raw_rejects_missing_signature_when_secret_configured(app):
+    app.settings.openclaw_callback_secret = "secret"
+    status, resp = app.handle_openclaw_plan_callback_raw(
+        b'{"req_id":"REQ-P-1","event":"plan_submit","payload":{}}',
+        headers={},
+    )
+    assert status == 401
+
+
 def test_plan_callback_req_not_found_returns_404(app):
     status, resp = app.handle_openclaw_plan_callback(
         {"req_id": "NO", "event": "plan_submit", "payload": {}},
@@ -241,6 +255,8 @@ def test_plan_callback_plan_submit_buffers_draft_and_keeps_drafting(app):
     status, resp = app.handle_openclaw_plan_callback(body)
 
     assert status == 200
+    assert resp["next_human_gate"] == "plan_final_approval"
+    assert resp["plan_status"] == "pending_human_review"
     from requirement_workflow_v12.plan_state_machine import PlanStatus, PlanPhase
     assert r.plan_status == PlanStatus.DRAFTING  # NOT READY — review pending
     assert r.plan_phase == PlanPhase.FINAL_REVIEW_PENDING
