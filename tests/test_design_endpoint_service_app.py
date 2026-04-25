@@ -314,3 +314,95 @@ def test_design_final_reject_handles_service_error():
     })
     assert status == 200
     assert resp.get("toast", {}).get("type") == "error"
+
+
+# ── DM file message routing ──────────────────────────────────────────────────
+
+def _app_with_drafting_design_req(tmp_path, req_id="REQ-DM-1", creator_user_id="ou_alice"):
+    from requirement_workflow_v12.coordinator_service import CoordinatorService
+    from requirement_workflow_v12.service_app import CoordinatorRuntimeApp
+    from requirement_workflow_v12.plan_state_machine import DesignStatus
+    from requirement_workflow_v12.project_config import ProjectConfig
+
+    r = Requirement(
+        req_id=req_id, name="n", project="Y", summary="s", creator="c",
+        creator_user_id=creator_user_id,
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.DRAFTING,
+        design_doc_id="d", design_doc_url="u",
+    )
+    cfg = ProjectConfig(
+        category="public-web-site", template_version="public-web-site.v1",
+        architecture_doc_id="d", architecture_doc_url="u",
+        github_repo_url="https://github.com/org/Y",
+        feishu_chat_id="oc_group",
+    )
+    svc = CoordinatorService()
+    svc.requirements[r.req_id] = r
+    svc.project_configs[r.project] = cfg
+
+    app = CoordinatorRuntimeApp.__new__(CoordinatorRuntimeApp)
+    app.service = svc
+    app.gateway = MagicMock()
+    app.archive_root = tmp_path / "design" / "archive"
+    app.archive_root.mkdir(parents=True)
+    app._save_state = MagicMock()
+    app._dispatch_transition_notifications = MagicMock()
+    app._seen_message_ids = {}
+    app._seen_message_ids_max = 1000
+    svc.design_submit = MagicMock(return_value=r)
+    return app, r
+
+
+def _file_message_context(user_id, file_key, message_id, chat_id="oc_dm"):
+    from requirement_workflow_v12.service_app import MessageContext
+    return MessageContext(
+        chat_id=chat_id, chat_type="p2p",
+        user_id=user_id, text="",
+        message_id=message_id,
+        file_key=file_key, file_name="handoff.zip",
+    )
+
+
+def test_dm_file_routes_to_handoff_intake(tmp_path):
+    app, r = _app_with_drafting_design_req(tmp_path)
+    fixture_zip = Path(__file__).parent / "fixtures" / "design" / "handoff_sample.zip"
+    app.gateway.download_card_attachment = MagicMock(
+        side_effect=lambda *, file_key, message_id, dest_path: Path(dest_path).write_bytes(
+            fixture_zip.read_bytes()
+        )
+    )
+    ctx = _file_message_context(r.creator_user_id, "fk_001", "om_001")
+    app._handle_dm_file_message(ctx)
+
+    app.service.design_submit.assert_called_once()
+    app.gateway.send_text.assert_called()
+    reply = app.gateway.send_text.call_args[0][1]
+    assert "Handoff 已接收" in reply
+
+
+def test_dm_file_no_drafting_req_replies_with_info(tmp_path):
+    app, r = _app_with_drafting_design_req(tmp_path)
+    from requirement_workflow_v12.plan_state_machine import DesignStatus
+    r.design_status = DesignStatus.READY  # not DRAFTING
+
+    ctx = _file_message_context(r.creator_user_id, "fk_002", "om_002")
+    app._handle_dm_file_message(ctx)
+
+    app.service.design_submit.assert_not_called()
+    reply = app.gateway.send_text.call_args[0][1]
+    assert "未找到" in reply
+
+
+def test_dm_file_group_message_ignored(tmp_path):
+    app, r = _app_with_drafting_design_req(tmp_path)
+    from requirement_workflow_v12.service_app import MessageContext
+    ctx = MessageContext(
+        chat_id="oc_group", chat_type="group",
+        user_id=r.creator_user_id, text="",
+        message_id="om_003", file_key="fk_003",
+    )
+    app._handle_dm_file_message(ctx)
+
+    app.service.design_submit.assert_not_called()
+    app.gateway.send_text.assert_not_called()

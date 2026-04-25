@@ -123,6 +123,8 @@ class MessageContext:
     message_id: str = ""
     thread_id: str = ""
     sender_name: str = ""
+    file_key: str = ""
+    file_name: str = ""
 
 
 @dataclass
@@ -495,12 +497,16 @@ class CoordinatorRuntimeApp:
             )
             return
         LOGGER.info(
-            "Received message chat_id=%s chat_type=%s user_id=%s text=%r",
+            "Received message chat_id=%s chat_type=%s user_id=%s text=%r file_key=%r",
             context.chat_id,
             context.chat_type,
             context.user_id,
             context.text,
+            context.file_key,
         )
+        if context.file_key:
+            self._handle_dm_file_message(context)
+            return
         try:
             outbounds = self.handle_text_message(context)
         except Exception as exc:
@@ -1698,6 +1704,53 @@ class CoordinatorRuntimeApp:
             self._wake_spec_transform_agent(req_id, action)
 
         return 200, {"ok": True, "req_id": req_id, "next_action": action}
+
+    def _handle_dm_file_message(self, context: "MessageContext") -> None:
+        """Route a DM file message to the design handoff intake.
+
+        Called when a user sends a file in a p2p (DM) chat. Looks up a
+        requirement owned by the sender that is in DESIGN_DRAFTING state and,
+        if exactly one is found, treats the file as the handoff zip.
+        """
+        if context.chat_type != "p2p":
+            return
+
+        from .plan_state_machine import DesignStatus
+
+        drafting = [
+            r for r in self.service.requirements.values()
+            if r.creator_user_id == context.user_id
+            and r.design_status == DesignStatus.DRAFTING
+        ]
+        if not drafting:
+            self.gateway.send_text(
+                context.chat_id,
+                "收到文件，但未找到你名下处于设计阶段（DESIGN_DRAFTING）的需求，无法自动接收 Handoff。",
+                receive_id_type="chat_id",
+            )
+            return
+        if len(drafting) > 1:
+            ids = "、".join(r.req_id for r in drafting)
+            self.gateway.send_text(
+                context.chat_id,
+                f"收到文件，但你有多条需求同时处于 DESIGN_DRAFTING（{ids}），请通过管理员端点手动指定 req_id 提交。",
+                receive_id_type="chat_id",
+            )
+            return
+
+        req = drafting[0]
+        LOGGER.info(
+            "DM file message matched req=%s file_key=%s file_name=%r",
+            req.req_id, context.file_key, context.file_name,
+        )
+        result = self._handle_design_upload_bundle_action(
+            {"req_id": req.req_id, "file_key": context.file_key, "message_id": context.message_id},
+            {},
+        )
+        _, resp = result
+        toast = resp.get("toast", {})
+        reply = toast.get("content", "Handoff 处理完成。")
+        self.gateway.send_text(context.chat_id, reply, receive_id_type="chat_id")
 
     def _handle_design_upload_bundle_action(
         self, value: dict, operator: dict,
@@ -3009,22 +3062,35 @@ class CoordinatorRuntimeApp:
         if event is None or event.message is None:
             return None
         message = event.message
-        if message.message_type != "text":
-            return None
         sender = event.sender.sender_id if event.sender else None
-        content = message.content or "{}"
-        try:
-            text = json.loads(content).get("text", "")
-        except json.JSONDecodeError:
-            text = content
-        return MessageContext(
+        user_id = getattr(sender, "open_id", "") if sender else ""
+        base = dict(
             chat_id=message.chat_id or "",
             chat_type=message.chat_type or "",
-            user_id=getattr(sender, "open_id", "") if sender else "",
-            text=text,
+            user_id=user_id,
             message_id=message.message_id or "",
             thread_id=message.thread_id or "",
         )
+        if message.message_type == "text":
+            content = message.content or "{}"
+            try:
+                text = json.loads(content).get("text", "")
+            except json.JSONDecodeError:
+                text = content
+            return MessageContext(text=text, **base)
+        if message.message_type == "file":
+            content = message.content or "{}"
+            try:
+                parsed = json.loads(content)
+            except json.JSONDecodeError:
+                parsed = {}
+            return MessageContext(
+                text="",
+                file_key=parsed.get("file_key", ""),
+                file_name=parsed.get("file_name", ""),
+                **base,
+            )
+        return None
 
     def _sync_requirement_outputs(self, requirement) -> None:
         LOGGER.info(
@@ -3454,7 +3520,7 @@ class CoordinatorRuntimeApp:
                 f"{requirement.req_id} 设计 Brief 已就绪",
                 "design-brief-author 已生成首轮 Prompt，设计师可以前往 Claude Design 作业。",
                 f"飞书 Brief：{doc_url}\n提示：进 Claude Design 后先点 Sync now 拉取最新代码。",
-                "完成 Handoff 导出后，把产物 zip 交给运维（coordinator /admin 端点入库），intake 成功后会收到 D-DESIGN-2 终审卡。",
+                "完成 Handoff 导出后，直接私信本机器人发送 zip 文件即可自动入库，intake 成功后会收到 D-DESIGN-2 终审卡。",
             )
         if trigger == "design_submit_pending_review":
             archive_path = requirement.design_archive_path or "（未解析）"
