@@ -1,6 +1,6 @@
 ---
 name: spec-author
-description: Spec 撰写助手，按 9 节模板撰写技术规格文档，并演化项目级 ARCHITECTURE 飞书文档。收到「请开始 Spec 撰写 REQ-xxx」时激活。
+description: Use when 收到“请开始 Spec 撰写 REQ-xxx”，并需要基于需求与项目上下文生成技术 Spec。
 ---
 
 # Spec 撰写助手
@@ -70,6 +70,29 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
 **必须保存** `context_token`。`architecture_doc_revision` 是进入时的 revision，最终回传时必须是**写回后**的新 revision。
 
 若返回 `ok != true` 或 HTTP 非 200：立即停止。若错误码为 `concurrent_spec_in_progress`：通知用户稍后重试，不得自行循环轮询。
+
+## Context Inventory
+
+每次启动或断点续写先记录 spec-context 的真实上下文：
+
+- `req_id` / `name` / `project` / `status`
+- `context_token`
+- `requirement_document_url`
+- `architecture_doc_id` / `architecture_doc_url` / `architecture_doc_revision`
+- `spec_document_id` / `spec_document_url`
+- `latest_review_summary`
+- `needs_ui` / `design_artifact` / `design_system_snapshot`
+- `category` / `template_version`
+
+Spec 只能消费 inventory 中存在的上下文；不得从 GitHub 或缓存副本补 ARCHITECTURE。
+
+## Missing Context Policy
+
+- 缺 `context_token`：停止，重新拉 spec-context。
+- 缺 `requirement_document_url`：停止，无法生成 Spec。
+- 缺 `architecture_doc_url`：停止，项目级上下文缺失。
+- `needs_ui=true` 但缺设计上下文：Spec 可继续，但 UI 约束必须标注“待 Design/人工确认”。
+- `latest_review_summary` 非空：必须在相关章节回应上一轮问题。
 
 **Step 1b：按 status 分支**
 
@@ -142,6 +165,25 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
 **⚠️ 状态机驱动硬约束:** 9 节写完 + ARCHITECTURE 写回后,本次会话的**最终动作必须是执行下面的 `spec-submit` callback**。**禁止仅回复"Spec 已完成"/"已写入文档"等文本就结束会话**——未成功调用 callback,Coordinator 不会推进到 `SPEC_DRAFTING_SUBMITTED`,流程会卡死。
 
 callback 调用失败(非 2xx,含 400 token 失效 / 409 revision 冲突)时必须立即按错误码处理:token 失效 → 回到 Step 1 重新拉取 spec-context 再重试;revision 冲突 → 重新读当前 ARCHITECTURE 合并后再提交。禁止放弃、禁止伪装成已完成。
+
+## 生成前自检
+
+发 `spec-submit` 前必须内部检查：
+
+- 9 节全部非空。
+- 输入/输出字段名与测试用例一致。
+- 每条验收标准有 Given/When/Then 或等价可执行描述。
+- 第 8 节含项目级上下文消费声明，并引用读取到的 ARCHITECTURE。
+- ARCHITECTURE 写回后已重新拉取 post-write `architecture_doc_revision`。
+- `context_token` 与本轮 spec-context 匹配。
+
+## Callback Evidence
+
+只有 `spec-submit` callback 返回成功后才允许说“Spec 已完成”。回复必须包含：
+
+- `spec_document_url`。
+- 写后 `architecture_doc_revision`。
+- callback 成功状态。失败时按错误码重拉或合并，不得结束。
 
 **必须回传 context_token 与写后 architecture_doc_revision**：
 

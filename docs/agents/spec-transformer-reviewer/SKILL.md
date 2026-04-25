@@ -1,6 +1,6 @@
 ---
 name: spec-transformer-reviewer
-description: 评审 spec-transformer 产出的四文件，按五维度判定 verdict ∈ {converged, reject}。
+description: Use when 收到“请评审 Spec 转化 REQ-xxx”，并需要判定 transformer 输出是否收敛。
 ---
 
 # Spec Transformer Reviewer Agent

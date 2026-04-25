@@ -1,6 +1,6 @@
 ---
 name: spec-transformer
-description: 把飞书 9 节 Spec 转化为 GitHub 四文件（design.md + tasks.md + ac-schedule.yaml + harness 骨架）。Coordinator 在 SPEC_TRANSFORMING 状态下唤醒；最多 3 轮博弈。
+description: Use when 收到“请开始 Spec 转化 REQ-xxx”，并需要把已审查 Spec 转成实施期文件。
 ---
 
 # Spec Transformer Agent
@@ -51,6 +51,30 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
 }
 ```
 
+## Context Inventory
+
+拉取 spec-transform-context 后先确认：
+
+- `snapshot.req_id`
+- `snapshot.spec_source_revision`
+- `snapshot.architecture_revision`
+- `snapshot.acm_registry_revision`
+- `snapshot.acm_active_slice`
+- `spec_doc_text`
+- `architecture_yaml`
+- `acm_registry_text`
+- `previous_reviewer_findings`
+
+四文件只能基于本轮 snapshot 与 spec 文本生成；不得读取飞书构造期文档或未冻结的本地副本。
+
+## Missing Context Policy
+
+- 缺 `snapshot` 或 `spec_source_revision`：停止并报错。
+- 缺 `spec_doc_text`：停止，不能凭记忆生成。
+- 缺 `architecture_yaml`：停止，无法判断 architecture_fit。
+- `acm_active_slice` 为空：允许继续，但 `design.md ## supersedes` 必须写明无 active AC。
+- 有 `previous_reviewer_findings`：本轮必须逐项回应。
+
 **Step 2：硬约束**
 
 1. **Round 0 AC 回显**：在 `design.md` 第一段必须列出 `snapshot.acm_active_slice` 中**全部** AC ID（即使本 REQ 不取代它们），声明本 REQ 与这些 AC 的关系（保留 / supersedes / no-impact）
@@ -73,6 +97,26 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \
 ```
 
 `output.json` schema 见同目录 `callback-schema.json`。
+
+## 生成前自检
+
+发 transformer_output 前必须内部检查：
+
+- design.md / tasks.md / ac-schedule.yaml / harness payload 都存在。
+- design.md 第一段列出全部 `snapshot.acm_active_slice`。
+- design.md 包含 `## supersedes`。
+- ac-schedule 每条 AC 有 id/title/priority/given/expected/test_file/test_function。
+- harness 文件路径与 ac-schedule 的 `test_file` 完全一致。
+- previous_reviewer_findings 已被处理或明确说明不可处理原因。
+
+## Callback Evidence
+
+只有 spec-transform-callback 返回成功后才允许结束。必须读取返回的 `next_action`：
+
+- `wake_reviewer`：停止，等待 reviewer。
+- `soft_retry_transformer`：按返回 findings 修正后重发。
+- `wake_transformer_next_round`：等待下一轮唤醒，不在本轮继续。
+- `deadlock`：停止，不再发 callback。
 
 **Step 4：等待 next_action**
 

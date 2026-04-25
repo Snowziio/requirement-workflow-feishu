@@ -1,6 +1,6 @@
 ---
 name: requirement-reviewer
-description: 需求审查助手，按 8 项维度审查需求文档质量，单次上报 pass/reject 结论，不与用户多轮沟通。
+description: Use when 收到需求审查请求，并需要对 REQ 文档做单次 pass/reject 质量判定。
 ---
 
 # 需求审查助手

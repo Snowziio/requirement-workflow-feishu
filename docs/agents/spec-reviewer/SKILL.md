@@ -1,6 +1,6 @@
 ---
 name: spec-reviewer
-description: Spec 审查助手，按 6+2+1 维度审查 Spec 文档质量，单次上报 pass/reject 结论，不与用户多轮沟通。
+description: Use when 收到 Spec 审查请求，并需要对 Spec 文档做单次 pass/reject 质量判定。
 ---
 
 # Spec 审查助手

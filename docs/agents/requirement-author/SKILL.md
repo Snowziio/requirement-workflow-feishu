@@ -1,6 +1,6 @@
 ---
 name: requirement-author
-description: 需求构造助手，协助需求提出者逐字段完善需求文档，完成后上报 Coordinator。收到「开始需求构造 REQ-xxx」时激活。
+description: Use when 收到“开始需求构造 REQ-xxx”，并需要与需求提出者多轮补齐需求 8 字段。
 ---
 
 # 需求构造助手
@@ -39,6 +39,26 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py --req-id "{req_id}" 
 - `project_config`：技术栈声明（引导「技术范围声明」字段时使用）
 
 > **项目级上下文消费声明**：本 Agent 消费 `document_id`（飞书文档读写）、`pending_fields`/`completed_fields`（进度恢复）、`project_config`（技术栈约束提示）。需求文档内嵌的「历史约束参考」节由 Coordinator 注入，本 Agent 只读不修改该节。
+
+## Context Inventory
+
+每轮开始先确认 fetch-context 返回的真实上下文：
+
+- `req_id` / `name` / `project` / `status`
+- `document_id` / `document_url`
+- `pending_fields` / `completed_fields` / `current_discussion_field`
+- `latest_review_summary`
+- `field_hints`
+- `project_config` / `tech_stack` / `category`
+
+只对 inventory 中存在的文档 token 写入，不创建新文档。
+
+## Missing Context Policy
+
+- 缺 `document_id`：停止并报错，不能凭 URL 猜 token。
+- 缺 `pending_fields`：重新读取文档内容，按 8 字段完整性自行判断下一字段。
+- 缺 `project_config`：允许继续业务字段，但「技术范围声明」必须标注项目上下文缺失。
+- 有 `latest_review_summary`：优先修复上一轮 reviewer 指出的问题，不得忽略。
 
 **Step 2**：使用 `feishu_fetch_doc` 读取文档当前内容（doc_token = `{document_id}`）
 
@@ -104,6 +124,20 @@ python3 /home/admin/.openclaw/bin/send_openclaw_callback.py --req-id "{req_id}" 
 **⚠️ 状态机驱动硬约束:** 用户确认后，本次会话的最终动作**必须**是执行下面的 callback。**禁止仅回复"已提交"/"等待审查"等文本就结束会话**——未成功调用 callback,Coordinator 不会推进状态,流程会卡死。
 
 callback 调用失败(非 2xx)时必须立即重试,如仍失败则在回复中明确说明"callback 上报失败"并保留现场,禁止伪装成已完成。
+
+## 生成前自检
+
+用户确认完成前必须内部检查：
+
+- 8 个字段都非空且不是“待补充”。
+- 输入/输出含字段名、类型、约束或示例。
+- 验收标准至少 1 条，且可测试。
+- 技术范围声明消费了 `project_config` 或明确标注项目上下文缺失。
+- 若上一轮有 `latest_review_summary`，本轮文档已逐项回应。
+
+## Callback Evidence
+
+只有 `author-ready` callback 返回成功后，才允许回复“已提交审查”。失败时必须贴出 stdout/stderr 原文或脚本错误信息。
 
 ```bash
 python3 /home/admin/.openclaw/bin/send_openclaw_callback.py \

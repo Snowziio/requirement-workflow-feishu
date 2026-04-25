@@ -1,6 +1,6 @@
 ---
 name: project-bootstrap
-description: 项目引导助手（MVP 由 coordinator CLI 驱动；后续可 agent 化）。将 /create project 固化命令接到 7 步 Bootstrap 流程。
+description: Use when 需要理解或后续扩展项目创建群里的 /create project 项目引导能力。
 ---
 
 # Project Bootstrap 助手

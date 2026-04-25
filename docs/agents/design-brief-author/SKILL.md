@@ -1,6 +1,6 @@
 ---
 name: design-brief-author
-description: 设计 Brief 生成助手，APPROVED + needs_ui=true 的 REQ 进入 DESIGN_DRAFTING 后单轮生成 Brief。从 REQ 8 字段 + 项目上下文 + 现有 Page Registry 推断 expected_pages，产出 YAML+Markdown 双层 Brief，回写飞书 design docx + callback Coordinator。不做多轮对话，不替设计师拍板视觉决策。
+description: Use when 收到“请开始设计 Brief 生成 REQ-xxx”，且该 REQ 已进入 DESIGN_DRAFTING 并需要 UI 设计。
 ---
 
 # 设计 Brief 生成助手
@@ -54,6 +54,28 @@ curl -s "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/queries/openclaw/design-
 **关于 `design_doc_url`**：本 REQ 的飞书 design docx，Coordinator 在 DRAFTING 启动时创建。这是设计师收到 Brief 后查看的 URL。若为空字符串，说明 folder_token 未配置或 REQ 是老数据，回用户「该 REQ 未创建飞书 design 文档，请检查 Coordinator 配置」。
 
 **关于 `claude_design_project_url`**：跨 REQ 共享的 Claude Design Project 位置。若为空，Coordinator 懒检查应已在 `design_start` 前阻断本流程；防御性地：在 Brief 的首轮 Prompt 里显式提示"URL 未绑定，请先通过项目创建群的绑定卡填写"。
+
+## Context Inventory
+
+拿到 design-context 后，先在内部核对本轮真实可用上下文：
+
+- `req_id` / `project` / `requirement_name` / `requirement_summary`
+- `requirement_document_id` / `requirement_document_url`
+- `design_doc_id` / `design_doc_url`
+- `claude_design_project_url`
+- `frontend_subpath` / `frontend_tech_stack` / `category` / `template_version`
+- `current_pages`
+- `prior_handoff_archive_ref`
+
+只使用 inventory 中真实存在的字段生成 Brief。不得声称读取了飞书、GitHub 或 Claude Design Project。
+
+## Missing Context Policy
+
+- 缺 `design_doc_url`：停止并告知用户 Coordinator 未创建 design docx。
+- 缺 `claude_design_project_url`：停止并提示先完成 Claude Design 绑定。
+- 缺 `requirement_summary`：允许降级使用 `requirement_name`，但必须在 Brief 背景里标注“需求摘要为空”。
+- `current_pages` 为空：所有 `expected_pages` 默认 `action: new`。
+- `prior_handoff_archive_ref` 为空：省略跨 REQ 继承建议。
 
 ### Step 2：推断 expected_pages
 
@@ -151,7 +173,7 @@ cross_req_references:
 > 请先确认你能看到现有 screens。然后逐页给我出设计，不要一次出全部。
 ```
 
-### Step 4：回调 Coordinator（本轮第一个 tool call 就是它）
+### Step 4：回调 Coordinator
 
 ```bash
 curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/design-callback" \
@@ -168,7 +190,7 @@ curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/design-
 
 ## ⛔ 行为合同（违反 = 卡死流程）
 
-本 skill 本轮的**第一个**（也是必做的）tool call 必须是 Step 4 的
+生成 Brief 后，本轮第一个对用户可见的结果动作必须是 Step 4 的
 `curl … /openclaw/design-callback`。在那个 curl 成功返回 **HTTP 200 之前**，你不能：
 
 - 发 IM 说"Brief 生成中 / 已提交 / 正在写入 / 完成"——这些都是谎言
@@ -178,6 +200,24 @@ curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/design-
 组装 Brief 是**内部思考**，不是用户可见输出。所有"结果性"文字只能出现在 curl 200 之后。
 
 如果你正要输出"生成中…"字样但手里没有 200 响应，STOP——先去发 curl。
+
+## 生成前自检
+
+发 callback 前必须内部检查：
+
+- `expected_pages` 非空。
+- 每个 page 都有 `display_name` / `action` / `intent` / `key_interactions` / `must_cover_states`。
+- `action=modify` 时 `existing_page_ref` 匹配 `current_pages[].display_name`。
+- `design_system_hints` 至少 2 条，且来自 `frontend_tech_stack` 或 category。
+- Markdown 末尾包含“首轮 Prompt”，且内嵌 `claude_design_project_url`。
+
+## Callback Evidence
+
+只有拿到 design-callback HTTP 200 后才允许回复用户。回复必须包含：
+
+- callback 成功状态。
+- `design_doc_url`。
+- 下一步：复制 Brief 末尾 Prompt 到 `claude_design_project_url`。
 
 ## 异常分支
 

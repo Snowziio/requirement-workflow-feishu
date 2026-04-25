@@ -1,6 +1,6 @@
 ---
 name: plan-author
-description: 规划助手，APPROVED 需求进入 PLANNING 阶段后引导人完成结构化决策日志（plan.md）。分三段：骨架提案 → 逐条决策 → 定稿提交。不替用户拍板。
+description: Use when 收到“请开始 Plan 撰写 REQ-xxx”，且 Coordinator 已允许该 REQ 进入 PLAN_DRAFTING。
 ---
 
 # 规划助手
@@ -55,6 +55,29 @@ curl -s "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/queries/openclaw/plan-co
 非 200 或 `ok != true` → 立即停止并报错。若 `plan_phase` 不是 `outline_pending`：说明断点续传，按当前 phase 继续（见后续 Step）。
 
 **关于 `plan_doc_url` / `plan_doc_id`**：这是本 REQ 的飞书 Plan docx，由 Coordinator 在 Plan 撰写启动时创建，是 plan 内容的构造期 SOT。当用户问「plan 文档在哪里」时，**直接回这条 URL**；不要说"还在处理中"或"commit 之后才有"。如果字段为空字符串，说明该 REQ 是老数据（部署时序问题）或 folder_token 未配置，回用户「该 REQ 未创建飞书 Plan 文档，建议 /plan restart 走一遍新流程」。
+
+## Context Inventory
+
+每次 wake-up 先拉 plan-context，并在内部记录本轮真实上下文：
+
+- `req_id` / `project` / `requirement_name` / `requirement_summary`
+- `plan_phase` / `plan_outline` / `plan_decisions_wip`
+- `plan_doc_id` / `plan_doc_url`
+- `architecture_doc_id` / `architecture_doc_url`
+- `tech_stack` / `category` / `template_version` / `project_repo`
+- `design_artifact.needs_ui` / `design_artifact.design_status`
+- `design_artifact.archive_path` / `design_artifact.github_revision`
+- `design_artifact.pages` / `design_artifact.inline_files`
+
+Plan 只能基于 inventory 中的上下文推进。断点续传时必须信任 `plan_phase`，不得从头覆盖已有 outline。
+
+## Missing Context Policy
+
+- `plan_doc_url` 为空：停止并建议 `/plan restart`，不要继续写 plan.md。
+- `architecture_doc_url` 为空：允许继续，但所有架构级判断必须标注“未读取项目 ARCHITECTURE”。
+- `needs_ui=true` 但 context 被 gate 拒绝：停止，告知用户先完成 Design READY。
+- `design_artifact.design_status == "DESIGN_READY"` 但 `inline_files` 为空：允许继续，但必须在 plan.md 标注“设计归档文件未内联，仅使用 Brief/页面列表”。
+- 人类没有拍板某个 decision：不得擅自选择；继续提问收敛。
 
 **Step 1.5：Design → Plan 对齐契约（仅当 `design_artifact.design_status == "DESIGN_READY"` 触发）**
 
@@ -152,7 +175,7 @@ curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/plan-ca
 
 **⛔ 行为合同（违反 = 卡死流程）**
 
-本阶段本轮的**第一个**（也是必做的）tool call 必须是下面 step 4 的 `curl … /openclaw/plan-callback`。在那个 curl 成功返回 **HTTP 200 之前**，你不能：
+Phase C 组装完 plan.md 后，本轮第一个对用户可见的结果动作必须是下面 step 4 的 `curl … /openclaw/plan-callback`。在那个 curl 成功返回 **HTTP 200 之前**，你不能：
 
 - 发 IM 卡片说"提交中 / 已提交 / 正在写入 / plan 已完成"——这些都是谎言，因为你还没调 curl
 - 把组装好的 plan.md（YAML + 决策正文）作为"预览"回给用户——用户看到预览会以为 callback 已走，实际根本没走
@@ -161,6 +184,29 @@ curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/plan-ca
 组装 plan.md 是**内部思考**，不是用户可见输出。所有"结果性"文字只能出现在 curl 200 之后的回复里。
 
 如果你正要输出"提交中…"字样但手里没有 200 响应，STOP——先去发 curl。
+
+## 生成前自检
+
+Phase A callback 前：
+
+- outline 有 2-5 条关键决策，除非需求确实极小。
+- 每条有 `id` / `title` / `problem`。
+- 若有 Design READY，outline 不重新决策 layout、配色、字体、视觉组件等设计已决定事项。
+
+Phase C callback 前：
+
+- plan.md YAML frontmatter 可解析。
+- `decisions` 非空，每条有 `chosen` / `rationale`。
+- 若 Design READY，`design_handoff_ref` 存在且格式为 `{archive_path}@{github_revision}`。
+- `project_context_change` 只在触及项目级制品时生成；不确定时先问人。
+
+## Callback Evidence
+
+只有拿到 plan-callback HTTP 200 后才允许说“已提交”。回复必须包含：
+
+- callback 返回的 `plan_status` / `plan_phase`。
+- 若为 `pending_human_review`：说明等待飞书 Plan Final Approval 卡。
+- 若 callback 失败：保留错误原文，不得伪装成完成。
 
 1. 组装 plan.md 正文（**内部**，不发 IM），schema 如下：
 
@@ -213,7 +259,7 @@ decisions:
 
 `artifact` 枚举：`architecture` | `environments` | `skill_md`。MVP 仅 `architecture` 有执行器，其余为占位 stub。
 
-4. 调 callback（**本轮第一个 tool call 就是它**）：
+4. 调 callback：
 
 ```bash
 curl -s -X POST "${COORDINATOR_BASE_URL:-http://127.0.0.1:8004}/openclaw/plan-callback" \
