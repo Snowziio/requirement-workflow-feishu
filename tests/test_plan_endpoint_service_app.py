@@ -284,3 +284,79 @@ def test_plan_callback_plan_submit_retry_overwrites_pending(app):
     assert r.pending_plan_review["plan_md_content"] == "v2"
     # submitted_at should be re-stamped (may equal if called in same millisecond, so just assert string exists)
     assert r.pending_plan_review["submitted_at"] is not None
+
+
+def test_approve_plan_submit_fallback_reads_feishu_doc_when_pending_cleared(app):
+    """After reject clears pending_plan_review, approve should read from plan_doc_id."""
+    r = _approved_req(app, req_id="REQ-FALLBACK-1")
+    r.creator_user_id = "ou_alice"
+    app.service.plan_start(r.req_id, plan_doc_id="DOC-123", plan_doc_url="https://feishu.cn/docx/DOC-123")
+
+    # Simulate: plan was submitted then rejected (pending_plan_review cleared)
+    r.pending_plan_review = None
+    app.gateway.read_document_text = MagicMock(return_value="# plan revised\n...")
+
+    payload = {
+        "header": {"event_id": "ev-fallback-1"},
+        "operator": {"open_id": "ou_alice"},
+        "action": {"value": {"action": "approve_plan_submit", "req_id": r.req_id},
+                   "name": None, "tag": "button", "option": None,
+                   "input_value": None, "options": None, "checked": None, "form_value": None},
+        "context": {"open_message_id": "om_x1", "open_chat_id": "oc_group"},
+    }
+    status, resp = app._handle_card_action_payload(payload)
+
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "success"
+    app.gateway.read_document_text.assert_called_once_with("DOC-123")
+
+
+def test_approve_plan_submit_empty_doc_returns_error(app):
+    """If fallback doc read returns empty content, surface a clear error."""
+    r = _approved_req(app, req_id="REQ-FALLBACK-2")
+    app.service.plan_start(r.req_id, plan_doc_id="DOC-456")
+    r.pending_plan_review = None
+    app.gateway.read_document_text = MagicMock(return_value="   ")
+
+    payload = {
+        "header": {"event_id": "ev-fallback-2"},
+        "operator": {"open_id": "ou_x"},
+        "action": {"value": {"action": "approve_plan_submit", "req_id": r.req_id},
+                   "name": None, "tag": "button", "option": None,
+                   "input_value": None, "options": None, "checked": None, "form_value": None},
+        "context": {"open_message_id": "om_x2", "open_chat_id": "oc_group"},
+    }
+    status, resp = app._handle_card_action_payload(payload)
+
+    assert status == 200
+    assert resp["toast"]["type"] == "error"
+    assert "为空" in resp["toast"]["content"]
+
+
+def test_reject_plan_submit_dispatches_notification(app):
+    """Rejecting a plan draft sends a DM notification to the creator."""
+    r = _approved_req(app, req_id="REQ-REJECT-NOTIFY-1")
+    r.creator_user_id = "ou_alice"
+    r.plan_doc_url = "https://feishu.cn/docx/DOC-789"
+    app.service.plan_start(r.req_id)
+    r.pending_plan_review = {
+        "plan_md_content": "# plan",
+        "project_context_change": None,
+        "submitted_at": "2026-01-01T00:00:00+00:00",
+    }
+
+    payload = {
+        "header": {"event_id": "ev-reject-notify-1"},
+        "operator": {"open_id": "ou_reviewer"},
+        "action": {"value": {"action": "reject_plan_submit", "req_id": r.req_id},
+                   "name": None, "tag": "button", "option": None,
+                   "input_value": None, "options": None, "checked": None, "form_value": None},
+        "context": {"open_message_id": "om_x3", "open_chat_id": "oc_group"},
+    }
+    status, resp = app._handle_card_action_payload(payload)
+
+    assert status == 200
+    assert resp["toast"]["type"] == "success"
+    assert r.pending_plan_review is None
+    # Notification was dispatched (send_card or send_text called)
+    assert app.gateway.send_card.called or app.gateway.send_text.called

@@ -2157,14 +2157,27 @@ class CoordinatorRuntimeApp:
             if requirement is None:
                 return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
             pending = requirement.pending_plan_review
-            if not pending:
+            if pending:
+                if pending.get("project_context_change"):
+                    return 200, {"toast": {"type": "error", "content": "MVP 暂不支持 architecture_change 的 Plan 提交，请联系维护者。"}}
+                plan_md_content = pending.get("plan_md_content", "")
+            elif requirement.plan_doc_id:
+                # pending_plan_review was cleared (e.g. after reject + doc re-edit).
+                # The syncer reads from Feishu directly anyway; read it here for the
+                # fallback_plan_md arg and to verify the doc is non-empty.
+                try:
+                    plan_md_content = self.gateway.read_document_text(requirement.plan_doc_id)
+                except Exception as exc:
+                    LOGGER.warning("approve_plan_submit: read plan doc failed req=%s: %s", req_id, exc)
+                    return 200, {"toast": {"type": "error", "content": "读取 Plan 文档失败，请稍后重试。"}}
+                if not plan_md_content.strip():
+                    return 200, {"toast": {"type": "error", "content": "Plan 文档内容为空，请确认 Plan Author 已完成修改。"}}
+            else:
                 return 200, {"toast": {"type": "error", "content": "Plan 草稿不存在，请让 Plan Author 重新提交。"}}
-            if pending.get("project_context_change"):
-                return 200, {"toast": {"type": "error", "content": "MVP 暂不支持 architecture_change 的 Plan 提交，请联系维护者。"}}
             try:
                 self.service.plan_submit(
                     req_id,
-                    plan_md_content=pending.get("plan_md_content", ""),
+                    plan_md_content=plan_md_content,
                     project_context_change=None,
                 )
             except Exception as exc:
@@ -2187,7 +2200,11 @@ class CoordinatorRuntimeApp:
             requirement.pending_plan_review = None
             requirement.plan_phase = PlanPhase.DECISIONS_IN_PROGRESS
             self._save_state()
-            return 200, {"toast": {"type": "success", "content": "已驳回 Plan 草稿；请重新私聊 Plan Author 修改。"}}
+            try:
+                self._dispatch_transition_notifications(requirement, trigger="plan_review_rejected")
+            except Exception:
+                LOGGER.exception("plan_review_rejected notification failed req=%s", req_id)
+            return 200, {"toast": {"type": "success", "content": "已驳回 Plan 草稿，已通知 Plan Author 修改。"}}
 
         if action_name == "send_spec_author_start":
             req_id = value.get("req_id", "")
@@ -3057,6 +3074,7 @@ class CoordinatorRuntimeApp:
         "spec_submitted":               ("dm",),
         "spec_review_reject":           ("dm",),
         "plan_submitted_pending_review": ("dm",),
+        "plan_review_rejected":          ("dm",),
         "design_brief_ready":           ("dm",),
         "handoff_to_author":            ("dm",),
         # Milestone + creator has next-phase action
@@ -3126,7 +3144,7 @@ class CoordinatorRuntimeApp:
         spec_document_url = getattr(requirement, "spec_document_url", "")
         if spec_document_url and trigger in {"spec_submitted", "spec_locked", "spec_review_reject"}:
             links.append(f"[查看 Spec 文档]({spec_document_url})")
-        if trigger in {"plan_submitted_pending_review", "plan_ready"} and requirement.plan_doc_url:
+        if trigger in {"plan_submitted_pending_review", "plan_ready", "plan_review_rejected"} and requirement.plan_doc_url:
             links.append(f"[查看 Plan 文档]({requirement.plan_doc_url})")
         # Design Brief link: surface on any design-phase card so reviewer / plan-author
         # can open the source visual context in one click.
@@ -3397,6 +3415,15 @@ class CoordinatorRuntimeApp:
                 requirement.spec_review_summary or "Spec 需要修改",
                 "Spec Reviewer 判定当前文档未达到标准，已通知 Spec Agent 修改。",
                 "等待 Spec Agent 修改后重新提交。",
+            )
+        if trigger == "plan_review_rejected":
+            plan_author_name = self.settings.openclaw_plan_author_agent_name if hasattr(self.settings, "openclaw_plan_author_agent_name") else "Plan Author"
+            return (
+                "orange",
+                f"{requirement.req_id} Plan 草稿已被驳回",
+                "审阅人认为当前 plan.md 需要修改，请根据反馈更新文档后重新提交。",
+                f"Plan 文档：{requirement.plan_doc_url or '（待同步）'}",
+                f"修改完成后，请私聊 {plan_author_name} 继续完成提交流程。",
             )
         if trigger == "plan_submitted_pending_review":
             return (
