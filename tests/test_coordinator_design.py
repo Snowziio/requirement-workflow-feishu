@@ -292,6 +292,34 @@ def test_design_final_approve_clears_pending_design_brief():
     assert r.pending_design_handoff is None  # was already cleared
 
 
+def test_design_final_approve_rolls_back_when_ready_hook_fails():
+    svc = _make_svc()
+    r = Requirement(
+        req_id="REQ-X-103", name="n", project="X", summary="s", creator="c",
+        status=WorkflowStatus.APPROVED, needs_ui=True,
+        design_status=DesignStatus.SUBMIT_PENDING_REVIEW,
+        pending_design_handoff={
+            "archive_path": "design/archive/REQ-X-103_x/",
+            "pages_touched": [{"display_name": "Dashboard", "action": "new"}],
+            "submitted_at": "t",
+        },
+        pending_design_brief={"brief_yaml_frontmatter": "x"},
+    )
+    svc.requirements[r.req_id] = r
+    svc._hooks.fire_enter.side_effect = RuntimeError("sync failed")
+
+    import pytest
+    with pytest.raises(RuntimeError, match="sync failed"):
+        svc.design_final_approve(r.req_id, approved_by="u")
+
+    assert r.design_status is DesignStatus.SUBMIT_PENDING_REVIEW
+    assert r.design_precondition_met is False
+    assert r.design_archive_path == ""
+    assert r.design_pages == []
+    assert r.pending_design_handoff is not None
+    assert r.pending_design_brief is not None
+
+
 def test_design_final_reject_card_writes_rejected_md(tmp_path: Path):
     """Bug 23c: The reject card handler must write REJECTED.md to the archive dir."""
     # Arrange: set up app + filesystem archive dir containing MANIFEST.md etc.

@@ -70,15 +70,28 @@ def test_plan_context_allowed_when_drafting():
     assert ctx["req_id"] == "REQ-P-1"
 
 
-def test_plan_context_allowed_when_needs_ui_true_and_no_design():
-    """MVP (2026-04-21): plan_start no longer couples to needs_ui/design_status;
-    plan_context must stay consistent with that — it should NOT gate on design."""
+def test_plan_context_rejected_when_needs_ui_true_and_no_design():
+    """Plan context must mirror plan_start: UI requirements wait for Design READY."""
     svc = CoordinatorService()
     r = _req(svc)
     r.needs_ui = True
-    # design_status stays None
     builder = PlanContextBuilder(service=svc)
+
+    with pytest.raises(PlanContextGateError) as exc_info:
+        builder.build(r.req_id)
+
+    assert "design" in str(exc_info.value).lower()
+
+
+def test_plan_context_allowed_when_needs_ui_true_and_design_ready():
+    svc = CoordinatorService()
+    r = _req(svc)
+    r.needs_ui = True
+    r.design_precondition_met = True
+    builder = PlanContextBuilder(service=svc)
+
     ctx = builder.build(r.req_id)
+
     assert ctx["req_id"] == "REQ-P-1"
     assert ctx["needs_ui"] is True
 
@@ -130,6 +143,7 @@ def test_plan_context_includes_design_artifact():
         req_id="REQ-X-001", name="n", project="X", summary="s", creator="c",
         status=WorkflowStatus.APPROVED, needs_ui=True,
         design_status=DesignStatus.READY,
+        design_precondition_met=True,
         design_archive_path="design/archive/REQ-X-001_foo/",
     )
     svc = MagicMock()
@@ -390,6 +404,7 @@ def test_design_artifact_inline_files_reads_archive_contents(tmp_path):
         req_id="REQ-Z-001", name="n", project="P", summary="s", creator="c",
         status=WorkflowStatus.APPROVED, needs_ui=True,
         design_status=DesignStatus.READY,
+        design_precondition_met=True,
         design_archive_path="design/archive/REQ-Z-001_foo/",
     )
     svc.requirements[r.req_id] = r
@@ -430,6 +445,7 @@ def test_design_artifact_inline_files_skips_bundle_zip(tmp_path):
         req_id="REQ-Z-002", name="n", project="P", summary="s", creator="c",
         status=WorkflowStatus.APPROVED, needs_ui=True,
         design_status=DesignStatus.READY,
+        design_precondition_met=True,
         design_archive_path="design/archive/REQ-Z-002_foo/",
     )
     svc.requirements[r.req_id] = r
@@ -456,6 +472,7 @@ def test_design_artifact_inline_files_skips_binary_files(tmp_path):
         req_id="REQ-Z-003", name="n", project="P", summary="s", creator="c",
         status=WorkflowStatus.APPROVED, needs_ui=True,
         design_status=DesignStatus.READY,
+        design_precondition_met=True,
         design_archive_path="design/archive/REQ-Z-003_foo/",
     )
     svc.requirements[r.req_id] = r
@@ -483,6 +500,7 @@ def test_design_artifact_inline_files_skips_files_over_size_cap(tmp_path):
         req_id="REQ-Z-004", name="n", project="P", summary="s", creator="c",
         status=WorkflowStatus.APPROVED, needs_ui=True,
         design_status=DesignStatus.READY,
+        design_precondition_met=True,
         design_archive_path="design/archive/REQ-Z-004_foo/",
     )
     svc.requirements[r.req_id] = r
@@ -528,6 +546,7 @@ def test_design_artifact_inline_files_ordering_is_stable(tmp_path):
         req_id="REQ-Z-006", name="n", project="P", summary="s", creator="c",
         status=WorkflowStatus.APPROVED, needs_ui=True,
         design_status=DesignStatus.READY,
+        design_precondition_met=True,
         design_archive_path="design/archive/REQ-Z-006_foo/",
     )
     svc.requirements[r.req_id] = r

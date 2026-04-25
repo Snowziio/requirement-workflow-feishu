@@ -77,6 +77,16 @@ class PlanContextBuilder:
                 "不允许获取 plan-context",
                 current_status=r.status.value,
             )
+        if r.needs_ui and not r.design_precondition_met:
+            design_label = (
+                r.design_status.value if r.design_status is not None else "None"
+            )
+            raise PlanContextGateError(
+                "needs_ui=true 的需求必须先完成 Design 阶段才能获取 "
+                f"plan-context (design_status={design_label}, "
+                f"design_precondition_met={r.design_precondition_met})",
+                current_status=r.status.value,
+            )
         cfg = self._service.project_configs.get(r.project)
         if cfg is None:
             raise PlanContextMisconfigured(f"项目 {r.project} 未初始化")

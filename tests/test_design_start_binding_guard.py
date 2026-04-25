@@ -81,7 +81,7 @@ def test_design_start_guard_message_references_project_name():
 
 
 def test_dispatch_design_start_if_needed_emits_binding_card_on_guard_failure():
-    """When design_start raises 'Claude Design 未绑定', the runtime must emit a binding card."""
+    """When Claude Design is unbound, emit a binding card before creating docs."""
     from requirement_workflow_v12.service_app import (
         CoordinatorRuntimeApp, dispatch_design_start_if_needed,
     )
@@ -100,16 +100,12 @@ def test_dispatch_design_start_if_needed_emits_binding_card_on_guard_failure():
         github_repo_url="https://github.com/org/X",
     )
     app.service.project_configs = {"X": cfg}
-    app.service.design_start.side_effect = ValueError(
-        "Claude Design 未绑定（project=X）。请先在项目创建群的绑定卡中填写 claude_design_project_url。"
-    )
     app.gateway = MagicMock()
-    app.gateway.create_design_document.return_value = MagicMock(
-        document_id="d", document_url="u",
-    )
 
     dispatch_design_start_if_needed(app, r)
 
+    app.gateway.create_design_document.assert_not_called()
+    app.service.design_start.assert_not_called()
     # Binding card should have been sent via gateway.send_card
     app.gateway.send_card.assert_called_once()
     call = app.gateway.send_card.call_args
@@ -162,14 +158,10 @@ def test_dispatch_design_start_guard_with_no_chat_id_skips_card():
     app.service.requirements = {r.req_id: r}
     cfg = _cfg(claude_design_project_url="")
     app.service.project_configs = {"X": cfg}  # no feishu_chat_id
-    app.service.design_start.side_effect = ValueError(
-        "Claude Design 未绑定（project=X）。"
-    )
     app.gateway = MagicMock()
-    app.gateway.create_design_document.return_value = MagicMock(
-        document_id="d", document_url="u",
-    )
 
     # Must not raise; just log
     dispatch_design_start_if_needed(app, r)
+    app.gateway.create_design_document.assert_not_called()
+    app.service.design_start.assert_not_called()
     app.gateway.send_card.assert_not_called()

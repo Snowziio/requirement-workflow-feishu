@@ -34,6 +34,11 @@ from .protocols import (
 from .store import JsonStateStore
 
 try:
+    import yaml
+except ImportError:  # pragma: no cover - dependency is present in runtime/test env
+    yaml = None
+
+try:
     import lark_oapi as lark
     from lark_oapi.event.callback.model.p2_card_action_trigger import (
         P2CardActionTrigger,
@@ -150,6 +155,20 @@ def dispatch_design_start_if_needed(app, requirement) -> None:
     """
     if not requirement.needs_ui:
         return
+    cfg = getattr(app.service, "project_configs", {}).get(requirement.project)
+    claude_design_project_url = (
+        getattr(cfg, "claude_design_project_url", "") if cfg is not None else ""
+    )
+    if not claude_design_project_url:
+        _emit_binding_card_for_guard_failure(
+            app,
+            requirement,
+            error_context=(
+                f"Claude Design 未绑定（project={requirement.project}）。"
+                "请先在项目创建群的绑定卡中填写 claude_design_project_url。"
+            ),
+        )
+        return
     try:
         created = app.gateway.create_design_document(requirement)
     except Exception as exc:
@@ -182,6 +201,81 @@ def dispatch_design_start_if_needed(app, requirement) -> None:
         LOGGER.warning(
             "design_start failed req_id=%s: %s", requirement.req_id, exc,
         )
+
+
+def _normalize_design_page_touch(raw: object) -> dict[str, str] | None:
+    if isinstance(raw, str):
+        name = raw.strip()
+        return {"display_name": name, "action": "new"} if name else None
+    if not isinstance(raw, dict):
+        return None
+    name = str(
+        raw.get("display_name")
+        or raw.get("name")
+        or raw.get("title")
+        or raw.get("page")
+        or ""
+    ).strip()
+    if not name:
+        return None
+    action = str(raw.get("action") or raw.get("type") or "new").strip() or "new"
+    touch = {"display_name": name, "action": action}
+    for key in (
+        "source_req_id",
+        "source_archive_path",
+        "route",
+        "component",
+        "notes",
+    ):
+        value = raw.get(key)
+        if value not in (None, ""):
+            touch[key] = str(value)
+    return touch
+
+
+def _design_pages_from_brief(requirement) -> list[dict[str, str]]:
+    brief = getattr(requirement, "pending_design_brief", None) or {}
+    frontmatter = brief.get("brief_yaml_frontmatter", "")
+    if not frontmatter or yaml is None:
+        return []
+    try:
+        parsed = yaml.safe_load(frontmatter) or {}
+    except Exception:
+        LOGGER.warning(
+            "failed to parse design brief frontmatter req_id=%s",
+            getattr(requirement, "req_id", ""),
+        )
+        return []
+    if not isinstance(parsed, dict):
+        return []
+    raw_pages = (
+        parsed.get("expected_pages")
+        or parsed.get("pages_touched")
+        or parsed.get("pages")
+        or []
+    )
+    if not isinstance(raw_pages, list):
+        return []
+    pages: list[dict[str, str]] = []
+    for item in raw_pages:
+        touch = _normalize_design_page_touch(item)
+        if touch is not None:
+            pages.append(touch)
+    return pages
+
+
+def _merge_design_pages_for_handoff(
+    requirement,
+    pages_hint: list[str],
+) -> list[dict[str, str]]:
+    pages_by_name: dict[str, dict[str, str]] = {}
+    for page in pages_hint:
+        touch = _normalize_design_page_touch(page)
+        if touch is not None:
+            pages_by_name[touch["display_name"]] = touch
+    for touch in _design_pages_from_brief(requirement):
+        pages_by_name[touch["display_name"]] = touch
+    return list(pages_by_name.values())
 
 
 def _emit_binding_card_for_guard_failure(
@@ -1858,7 +1952,7 @@ class CoordinatorRuntimeApp:
             LOGGER.warning("design intake failed req=%s: %s", req_id, exc)
             return {"ok": False, "error": f"intake_failed: {exc}"}
 
-        pages_touched = [{"display_name": p, "action": "new"} for p in result.pages_hint]
+        pages_touched = _merge_design_pages_for_handoff(r, result.pages_hint)
         try:
             self.service.design_submit(
                 req_id,
@@ -3420,6 +3514,8 @@ class CoordinatorRuntimeApp:
                 },
             ]
         if trigger == "final_review_passed":
+            if requirement.needs_ui and not requirement.design_precondition_met:
+                return []
             return [
                 {
                     "tag": "button",
@@ -3559,6 +3655,19 @@ class CoordinatorRuntimeApp:
             )
         if trigger == "final_review_passed":
             plan_agent_name = self.settings.openclaw_plan_author_agent_name
+            if requirement.needs_ui and not requirement.design_precondition_met:
+                design_status = (
+                    requirement.design_status.value
+                    if requirement.design_status
+                    else "尚未进入"
+                )
+                return (
+                    "green",
+                    f"{requirement.req_id} 已批准通过",
+                    latest_review,
+                    f"正式审查已通过，需求已进入 Design 前置阶段（design_status={design_status}）。",
+                    "请先完成 Design Brief、Claude Design handoff 与设计终审；完成后会推送下一阶段入口。",
+                )
             return (
                 "green",
                 f"{requirement.req_id} 已批准通过",

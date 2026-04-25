@@ -96,6 +96,32 @@ def test_admin_upload_accepts_localhost_v4(tmp_path):
     app._dispatch_transition_notifications.assert_called_once()
 
 
+def test_admin_upload_merges_pages_from_pending_design_brief(tmp_path):
+    app, r = _app_with_drafting_req(tmp_path)
+    r.pending_design_brief = {
+        "brief_yaml_frontmatter": """
+expected_pages:
+  - display_name: Dashboard
+    action: modify
+    source_req_id: REQ-OLD-1
+  - name: Settings
+    type: new
+""",
+        "brief_markdown_body": "# Brief",
+    }
+
+    status, resp = app.handle_admin_design_handoff_upload(
+        _payload(r.req_id, FIXTURE_ZIP.read_bytes()),
+        client_ip="127.0.0.1",
+    )
+
+    assert status == 200
+    assert resp["ok"] is True
+    pages_touched = app.service.design_submit.call_args.kwargs["pages_touched"]
+    assert {"display_name": "Dashboard", "action": "modify", "source_req_id": "REQ-OLD-1"} in pages_touched
+    assert {"display_name": "Settings", "action": "new"} in pages_touched
+
+
 def test_admin_upload_accepts_localhost_v6(tmp_path):
     app, r = _app_with_drafting_req(tmp_path)
     status, _ = app.handle_admin_design_handoff_upload(

@@ -131,12 +131,35 @@ def test_final_review_passed_card_has_plan_button(app):
     assert "Plan 撰写" in actions[0]["text"]["content"]
 
 
+def test_final_review_passed_card_hides_plan_button_when_design_required(app):
+    r = _approved_req(app)
+    r.needs_ui = True
+    r.design_precondition_met = False
+
+    actions = app._build_transition_notification_actions(r, trigger="final_review_passed")
+
+    assert actions == []
+
+
 def test_final_review_passed_card_content_mentions_plan(app):
     r = _approved_req(app)
     template, title, reason, result, next_action = app._transition_notification_content(
         r, trigger="final_review_passed"
     )
     assert "Plan" in next_action
+
+
+def test_final_review_passed_card_content_mentions_design_when_ui_needed(app):
+    r = _approved_req(app)
+    r.needs_ui = True
+    r.design_precondition_met = False
+
+    template, title, reason, result, next_action = app._transition_notification_content(
+        r, trigger="final_review_passed"
+    )
+
+    assert "Design" in result
+    assert "Plan" not in next_action
 
 
 def test_plan_submitted_pending_review_content_and_actions(app):

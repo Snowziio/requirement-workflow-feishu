@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
@@ -862,6 +863,8 @@ class CoordinatorService:
         if not decision.allowed:
             raise ValueError(decision.message)
 
+        old_pending_plan_draft = copy.deepcopy(r.pending_plan_draft)
+        old_plan_status = r.plan_status
         draft = r.pending_plan_draft or {}
         pcc = draft.get("project_context_change") or {}
         pcc["authorized"] = True
@@ -873,7 +876,12 @@ class CoordinatorService:
         prev = r.plan_status
         self._hooks.fire_exit(prev, r)
         r.plan_status = decision.next_status
-        self._hooks.fire_enter(r.plan_status, r)
+        try:
+            self._hooks.fire_enter(r.plan_status, r)
+        except Exception:
+            r.pending_plan_draft = old_pending_plan_draft
+            r.plan_status = old_plan_status
+            raise
         return r
 
     def plan_authorization_reject(
@@ -919,6 +927,10 @@ class CoordinatorService:
         if not decision.allowed:
             raise ValueError(decision.message)
 
+        old_pending_plan_draft = copy.deepcopy(r.pending_plan_draft)
+        old_plan_phase = r.plan_phase
+        old_plan_status = r.plan_status
+        old_plan_pr_url = r.plan_pr_url
         r.pending_plan_draft = {
             "plan_md_content": plan_md_content,
             "project_context_change": project_context_change,
@@ -928,7 +940,14 @@ class CoordinatorService:
         prev = r.plan_status
         self._hooks.fire_exit(prev, r)
         r.plan_status = decision.next_status
-        self._hooks.fire_enter(r.plan_status, r)
+        try:
+            self._hooks.fire_enter(r.plan_status, r)
+        except Exception:
+            r.pending_plan_draft = old_pending_plan_draft
+            r.plan_phase = old_plan_phase
+            r.plan_status = old_plan_status
+            r.plan_pr_url = old_plan_pr_url
+            raise
         return r
 
     def configure_plan_hooks(self, *, tools, syncer=None) -> None:
@@ -1150,6 +1169,13 @@ class CoordinatorService:
             raise ValueError(decision.message)
 
         handoff = r.pending_design_handoff or {}
+        old_design_archive_path = r.design_archive_path
+        old_design_pages = copy.deepcopy(r.design_pages)
+        old_design_status = r.design_status
+        old_design_precondition_met = r.design_precondition_met
+        old_pending_design_handoff = copy.deepcopy(r.pending_design_handoff)
+        old_pending_design_brief = copy.deepcopy(r.pending_design_brief)
+        old_design_github_revision = r.design_github_revision
         r.design_archive_path = handoff.get("archive_path", "")
         # Persist pages_touched past this reset so plan-author can read them
         # (§6.2.8 Design → Plan alignment). pending_design_handoff is wiped
@@ -1162,7 +1188,17 @@ class CoordinatorService:
         r.design_precondition_met = True
         r.pending_design_handoff = None    # cleared; now archived
         r.pending_design_brief = None     # cleared; now archived in design/archive/<req>/BRIEF.md
-        self._hooks.fire_enter(r.design_status, r)
+        try:
+            self._hooks.fire_enter(r.design_status, r)
+        except Exception:
+            r.design_archive_path = old_design_archive_path
+            r.design_pages = old_design_pages
+            r.design_status = old_design_status
+            r.design_precondition_met = old_design_precondition_met
+            r.pending_design_handoff = old_pending_design_handoff
+            r.pending_design_brief = old_pending_design_brief
+            r.design_github_revision = old_design_github_revision
+            raise
         LOGGER.info(
             "design_final_approve req_id=%s approved_by=%s archive=%s",
             req_id, approved_by, r.design_archive_path,

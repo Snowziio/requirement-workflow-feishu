@@ -1,4 +1,5 @@
 import sys
+import copy
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -90,6 +91,30 @@ def test_plan_submit_without_project_context_change_goes_ready():
     assert r.pending_plan_draft["project_context_change"] is None
 
 
+def test_plan_submit_rolls_back_when_ready_hook_fails():
+    svc = CoordinatorService()
+    r = _approved_req(svc)
+    svc.plan_start(r.req_id)
+    before_phase = r.plan_phase
+
+    def fail_ready(_r):
+        raise RuntimeError("plan sync failed")
+
+    svc._hooks.on_enter(PlanStatus.READY, fail_ready)
+
+    with pytest.raises(RuntimeError, match="plan sync failed"):
+        svc.plan_submit(
+            r.req_id,
+            plan_md_content="---\nreq_id: REQ-P-1\n---\n",
+            project_context_change=None,
+        )
+
+    assert r.plan_status is PlanStatus.DRAFTING
+    assert r.plan_phase is before_phase
+    assert r.pending_plan_draft is None
+    assert r.plan_pr_url == ""
+
+
 def test_plan_submit_with_project_context_change_goes_auth_pending():
     svc = CoordinatorService()
     r = _approved_req(svc)
@@ -132,6 +157,29 @@ def test_plan_authorize_from_auth_pending_goes_ready_and_marks_authorized():
     assert arch["authorized"] is True
     assert arch["authorized_by"] == "ou-123"
     assert arch["authorized_at"]
+
+
+def test_plan_authorize_rolls_back_when_ready_hook_fails():
+    svc = CoordinatorService()
+    r = _approved_req(svc)
+    svc.plan_start(r.req_id)
+    svc._hooks.on_enter(PlanStatus.AUTH_PENDING, lambda _r: None)
+    svc.plan_submit(
+        r.req_id, plan_md_content="---\n---\n",
+        project_context_change={"summary": "x", "changes": [], "authorized": False},
+    )
+    before_draft = copy.deepcopy(r.pending_plan_draft)
+
+    def fail_ready(_r):
+        raise RuntimeError("plan sync failed")
+
+    svc._hooks.on_enter(PlanStatus.READY, fail_ready)
+
+    with pytest.raises(RuntimeError, match="plan sync failed"):
+        svc.plan_authorize(r.req_id, authorized_by="ou-123")
+
+    assert r.plan_status is PlanStatus.AUTH_PENDING
+    assert r.pending_plan_draft == before_draft
 
 
 def test_plan_authorization_reject_returns_to_drafting():
