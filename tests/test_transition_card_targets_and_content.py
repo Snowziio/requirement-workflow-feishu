@@ -101,6 +101,74 @@ def test_spec_submitted_card_links_spec_doc_in_footer():
     assert "spec-doc-abc" in flat_content
 
 
+def _action_names(card: dict[str, object]) -> set[str]:
+    names: set[str] = set()
+    for element in card.get("elements", []):
+        if not isinstance(element, dict):
+            continue
+        for column in element.get("columns", []):
+            if not isinstance(column, dict):
+                continue
+            for action in column.get("elements", []):
+                if isinstance(action, dict):
+                    value = action.get("value") or {}
+                    if isinstance(value, dict) and value.get("action"):
+                        names.add(str(value["action"]))
+    return names
+
+
+def test_card_uses_workflow_sections_instead_of_generic_flow_labels():
+    app = _app()
+    r = _req(spec_review_summary="summary")
+
+    card = app._build_transition_notification_card(
+        r, trigger="spec_submitted", audience="dm",
+    )
+
+    flat_content = " ".join(
+        e.get("content", "")
+        for e in card["elements"]
+        if isinstance(e, dict) and "content" in e
+    )
+    assert "本次变更" in flat_content
+    assert "产物" in flat_content
+    assert "下一步" in flat_content
+    assert "流转原因" not in flat_content
+    assert "流转结果" not in flat_content
+    assert "需要操作" not in flat_content
+
+
+def test_group_milestone_card_has_no_handoff_buttons_but_dm_does():
+    app = _app()
+    r = _req(
+        design_status=DesignStatus.READY,
+        design_precondition_met=True,
+        design_doc_url="https://feishu/d/brief-xyz",
+        plan_doc_url="https://feishu/d/plan-xyz",
+    )
+
+    group_card = app._build_transition_notification_card(
+        r, trigger="design_ready", audience="group",
+    )
+    dm_card = app._build_transition_notification_card(
+        r, trigger="design_ready", audience="dm",
+    )
+
+    assert "send_plan_author_start" not in _action_names(group_card)
+    assert "send_plan_author_start" in _action_names(dm_card)
+
+
+def test_group_review_gate_keeps_review_buttons():
+    app = _app()
+    r = _req(design_status=DesignStatus.SUBMIT_PENDING_REVIEW)
+
+    group_card = app._build_transition_notification_card(
+        r, trigger="design_submit_pending_review", audience="group",
+    )
+
+    assert {"design_final_approve", "design_final_reject"} <= _action_names(group_card)
+
+
 # ────────────────────────────────────────────────────────────────
 # P0: design_brief_ready no longer claims a fake button
 # ────────────────────────────────────────────────────────────────
@@ -189,7 +257,7 @@ def test_dispatch_dm_only_triggers_skip_group():
     group creates doubled buttons (both spots clickable) and visual noise."""
     for trigger in (
         "ai_review_pass", "ai_review_reject", "human_rejected",
-        "final_review_rejected", "spec_submitted", "spec_review_reject",
+        "final_review_rejected", "spec_review_reject",
         "plan_submitted_pending_review", "design_brief_ready", "handoff_to_author",
     ):
         app = _app()
@@ -198,6 +266,22 @@ def test_dispatch_dm_only_triggers_skip_group():
         receive_ids = [c.args[0] for c in app.gateway.send_card.call_args_list]
         assert "ou_creator" in receive_ids, f"{trigger} should DM creator"
         assert "oc_group_x" not in receive_ids, f"{trigger} should NOT go to group"
+
+
+def test_spec_submitted_goes_to_group_as_status_and_dm_as_action():
+    app = _app()
+    r = _req(spec_review_summary="x", spec_document_url="https://x")
+
+    app._dispatch_transition_notifications(r, trigger="spec_submitted")
+
+    calls = app.gateway.send_card.call_args_list
+    receive_ids = [c.args[0] for c in calls]
+    assert receive_ids.count("oc_group_x") == 1
+    assert receive_ids.count("ou_creator") == 1
+
+    by_receive_id = {c.args[0]: c.args[1] for c in calls}
+    assert "send_spec_reviewer_start" not in _action_names(by_receive_id["oc_group_x"])
+    assert "send_spec_reviewer_start" in _action_names(by_receive_id["ou_creator"])
 
 
 def test_dispatch_both_triggers_go_to_both():
@@ -236,7 +320,7 @@ def test_dispatch_respects_missing_creator_user_id():
     """DM-only trigger with empty creator_user_id: no crash, no send."""
     app = _app()
     r = _req(creator_user_id="")
-    app._dispatch_transition_notifications(r, trigger="spec_submitted")
+    app._dispatch_transition_notifications(r, trigger="ai_review_pass")
     app.gateway.send_card.assert_not_called()
 
 

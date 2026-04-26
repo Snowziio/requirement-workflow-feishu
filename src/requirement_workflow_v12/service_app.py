@@ -1781,7 +1781,6 @@ class CoordinatorRuntimeApp:
 
             self._save_state()
             self._dispatch_transition_notifications(requirement, trigger="spec_submitted")
-            self._dispatch_group_notification(requirement, trigger="spec_submitted")
             LOGGER.info("Spec submit accepted req_id=%s summary=%s", req_id, summary)
             return 200, {"ok": True, "message": "Spec 已提交，已通知项目群发起审查"}
 
@@ -3329,7 +3328,7 @@ class CoordinatorRuntimeApp:
         "ai_review_reject":             ("dm",),
         "human_rejected":               ("dm",),
         "final_review_rejected":        ("dm",),
-        "spec_submitted":               ("dm",),
+        "spec_submitted":               ("dm", "group"),
         "spec_review_reject":           ("dm",),
         "plan_submitted_pending_review": ("dm",),
         "plan_auth_pending":             ("dm", "group"),
@@ -3341,21 +3340,29 @@ class CoordinatorRuntimeApp:
         "plan_ready":                   ("dm", "group"),
         "design_ready":                 ("dm", "group"),
     }
+    _GROUP_ACTION_TRIGGERS: set[str] = {
+        "human_confirmed",
+        "design_submit_pending_review",
+        "plan_auth_pending",
+    }
 
     def _dispatch_transition_notifications(self, requirement: Requirement, *, trigger: str) -> None:
-        card = self._build_transition_notification_card(requirement, trigger=trigger)
-        text = self._build_transition_notification_text(requirement, trigger=trigger)
-        if card is None and not text:
-            return
-
         target_kinds = self._CARD_TARGETS.get(trigger, ("dm",))
-        targets: list[tuple[str, str]] = []
+        targets: list[tuple[str, str, str]] = []
         if "group" in target_kinds and self._is_feishu_chat_id(requirement.project_group_id):
-            targets.append((requirement.project_group_id, "chat_id"))
+            targets.append(("group", requirement.project_group_id, "chat_id"))
         if "dm" in target_kinds and requirement.creator_user_id:
-            targets.append((requirement.creator_user_id, self.settings.feishu_user_id_type))
+            targets.append(("dm", requirement.creator_user_id, self.settings.feishu_user_id_type))
 
-        for receive_id, receive_id_type in targets:
+        for audience, receive_id, receive_id_type in targets:
+            card = self._build_transition_notification_card(
+                requirement,
+                trigger=trigger,
+                audience=audience,
+            )
+            text = self._build_transition_notification_text(requirement, trigger=trigger)
+            if card is None and not text:
+                continue
             try:
                 if card is not None and hasattr(self.gateway, "send_card"):
                     self.gateway.send_card(receive_id, card, receive_id_type=receive_id_type)
@@ -3373,7 +3380,7 @@ class CoordinatorRuntimeApp:
     def _dispatch_group_notification(self, requirement: Requirement, *, trigger: str) -> None:
         if not self._is_feishu_chat_id(requirement.project_group_id):
             return
-        card = self._build_transition_notification_card(requirement, trigger=trigger)
+        card = self._build_transition_notification_card(requirement, trigger=trigger, audience="group")
         text = self._build_transition_notification_text(requirement, trigger=trigger)
         try:
             if card is not None and hasattr(self.gateway, "send_card"):
@@ -3388,25 +3395,32 @@ class CoordinatorRuntimeApp:
                 exc,
             )
 
-    def _build_transition_notification_card(self, requirement: Requirement, *, trigger: str) -> dict[str, object] | None:
+    def _build_transition_notification_card(
+        self,
+        requirement: Requirement,
+        *,
+        trigger: str,
+        audience: str = "dm",
+    ) -> dict[str, object] | None:
         template, title, reason, result, next_action = self._transition_notification_content(requirement, trigger=trigger)
         if not title:
             return None
+
+        audience_label = "项目群公告" if audience == "group" else "个人待办"
 
         elements: list[dict[str, object]] = [
             {
                 "tag": "markdown",
                 "content": (
-                    f"**需求ID**：{requirement.req_id}\n"
-                    f"**当前状态**：{requirement.status.value}\n"
-                    f"**当前阶段**：{requirement.current_phase}\n"
-                    f"**当前接手角色**：{requirement.current_role_label}"
+                    f"**卡片类型**：{audience_label}\n"
+                    f"**需求**：{requirement.req_id}\n"
+                    f"**状态**：{requirement.status.value}\n"
+                    f"**阶段**：{requirement.current_phase}\n"
+                    f"**接手角色**：{requirement.current_role_label}"
                 ),
             },
             {"tag": "hr"},
-            {"tag": "markdown", "content": f"**流转原因**\n{reason}"},
-            {"tag": "markdown", "content": f"**流转结果**\n{result}"},
-            {"tag": "markdown", "content": f"**需要操作**\n{next_action}"},
+            {"tag": "markdown", "content": f"**本次变更**\n{reason}\n\n{result}"},
         ]
 
         links: list[str] = []
@@ -3432,10 +3446,19 @@ class CoordinatorRuntimeApp:
             "design_ready",
         }:
             links.append(f"[查看设计 Brief]({design_doc_url})")
-        if links:
-            elements.append({"tag": "markdown", "content": " | ".join(links)})
+        elements.append(
+            {
+                "tag": "markdown",
+                "content": f"**产物**\n{' | '.join(links) if links else '暂无可用链接'}",
+            }
+        )
+        elements.append({"tag": "markdown", "content": f"**下一步**\n{next_action}"})
 
-        actions = self._build_transition_notification_actions(requirement, trigger=trigger)
+        actions = self._build_transition_notification_actions(
+            requirement,
+            trigger=trigger,
+            audience=audience,
+        )
         if actions:
             elements.append(self._build_button_columns(actions))
 
@@ -3454,11 +3477,10 @@ class CoordinatorRuntimeApp:
             return ""
         return (
             f"{title}\n"
-            f"需求ID：{requirement.req_id}\n"
-            f"当前状态：{requirement.status.value}\n"
-            f"流转原因：{reason}\n"
-            f"流转结果：{result}\n"
-            f"需要操作：{next_action}\n"
+            f"需求：{requirement.req_id}\n"
+            f"状态：{requirement.status.value}\n"
+            f"本次变更：{reason} {result}\n"
+            f"下一步：{next_action}\n"
             f"需求文档：{requirement.document_url or '待同步'}"
         )
 
@@ -3482,7 +3504,10 @@ class CoordinatorRuntimeApp:
         requirement: Requirement,
         *,
         trigger: str,
+        audience: str = "dm",
     ) -> list[dict[str, object]]:
+        if audience == "group" and trigger not in self._GROUP_ACTION_TRIGGERS:
+            return []
         if trigger == "ai_review_pass":
             return [
                 {
