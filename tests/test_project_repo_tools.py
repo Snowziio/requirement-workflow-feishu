@@ -128,7 +128,87 @@ def test_cleanup_failed_branch_swallows_gateway_error(caplog):
     assert "spec/REQ-P-1" in caplog.text
 
 
-def test_fetch_project_context_wraps_gateway_error():
+def test_fetch_project_context_wraps_non_404_gateway_error():
+    """Non-404 gateway errors (5xx, auth, etc.) still bubble up as ProjectRepoError.
+
+    Only the 404 case has graceful fallback (see fallback tests below); other
+    HTTP failures must surface so transform halts and operators investigate.
+    """
+    gw = MagicMock()
+    gw.fetch_file_sha = MagicMock(
+        side_effect=GitHubGatewayError(500, "server error"),
+    )
+    tools = GitHubProjectRepoTools(gw)
+
+    with pytest.raises(ProjectRepoError) as exc_info:
+        tools.fetch_project_context("acme/repo")
+    assert "fetch_project_context" in str(exc_info.value)
+    assert exc_info.value.__cause__ is not None
+    assert exc_info.value.recoverable is False
+
+
+def _mock_gateway_with_md_fallback(*, has_registry: bool):
+    """Bootstrap-style repo: only docs/ARCHITECTURE.md exists; root yamls 404.
+
+    If ``has_registry`` is False, acm-registry.yaml is also missing — the
+    common state for a freshly bootstrapped project that has no ACs yet.
+    """
+    files: dict[str, tuple[str, str]] = {
+        "docs/ARCHITECTURE.md": ("md-sha", "# Architecture\n\nProject overview.\n"),
+    }
+    if has_registry:
+        files["acm-registry.yaml"] = ("reg-sha", "version: 3\nentries: []\n")
+
+    def _side_effect(repo, ref, path):
+        if path in files:
+            return files[path]
+        raise GitHubGatewayError(404, f"{path} not found")
+
+    gw = MagicMock()
+    gw.fetch_file_sha = MagicMock(side_effect=_side_effect)
+    return gw
+
+
+def test_fetch_project_context_falls_back_to_architecture_md_on_yaml_404():
+    """Bug 3 option A: when ARCHITECTURE.yaml is missing, read docs/ARCHITECTURE.md.
+
+    Bootstrap produces docs/ARCHITECTURE.md (the v3.0 SOT) and never writes
+    ARCHITECTURE.yaml. Spec-transformer was hard-failing on this drift.
+    """
+    gw = _mock_gateway_with_md_fallback(has_registry=True)
+    tools = GitHubProjectRepoTools(gw)
+
+    ctx = tools.fetch_project_context("acme/repo")
+
+    assert ctx.arch_sha == "md-sha"
+    assert ctx.arch_text == "# Architecture\n\nProject overview.\n"
+    assert ctx.registry_sha == "reg-sha"
+    assert ctx.registry_text == "version: 3\nentries: []\n"
+
+
+def test_fetch_project_context_empty_registry_when_acm_registry_404():
+    """Bug 3 option A: when acm-registry.yaml is missing, return empty registry.
+
+    Fresh-bootstrapped projects have no ACs yet — no registry file is
+    expected. ``parse_active_slice`` and ``parse`` already handle empty
+    text gracefully, so empty strings are a safe sentinel.
+    """
+    gw = _mock_gateway_with_md_fallback(has_registry=False)
+    tools = GitHubProjectRepoTools(gw)
+
+    ctx = tools.fetch_project_context("acme/repo")
+
+    assert ctx.arch_sha == "md-sha"
+    assert ctx.registry_sha == ""
+    assert ctx.registry_text == ""
+
+
+def test_fetch_project_context_raises_when_both_architecture_paths_missing():
+    """If neither ARCHITECTURE.yaml nor docs/ARCHITECTURE.md exists, fail loud.
+
+    A repo with no architecture artifact at all is not a valid project —
+    Bootstrap was never completed. Callers (spec-transformer) should halt.
+    """
     gw = MagicMock()
     gw.fetch_file_sha = MagicMock(
         side_effect=GitHubGatewayError(404, "not found"),
@@ -138,7 +218,6 @@ def test_fetch_project_context_wraps_gateway_error():
     with pytest.raises(ProjectRepoError) as exc_info:
         tools.fetch_project_context("acme/repo")
     assert "fetch_project_context" in str(exc_info.value)
-    assert exc_info.value.__cause__ is not None
     assert exc_info.value.recoverable is False
 
 

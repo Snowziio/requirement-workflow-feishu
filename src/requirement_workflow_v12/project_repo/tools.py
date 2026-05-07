@@ -110,12 +110,29 @@ class GitHubProjectRepoTools:
         owner, name = _parse_repo(project_repo)
         short = f"{owner}/{name}"
         try:
-            arch_sha, arch_text = self._gw.fetch_file_sha(
-                short, "main", "ARCHITECTURE.yaml",
-            )
-            registry_sha, registry_text = self._gw.fetch_file_sha(
-                short, "main", "acm-registry.yaml",
-            )
+            try:
+                arch_sha, arch_text = self._gw.fetch_file_sha(
+                    short, "main", "ARCHITECTURE.yaml",
+                )
+            except GitHubGatewayError as exc:
+                if exc.status != 404:
+                    raise
+                # Bootstrap (methodology v3.0) writes docs/ARCHITECTURE.md, not the
+                # legacy root yaml. Fall back so spec-transformer can still run.
+                arch_sha, arch_text = self._gw.fetch_file_sha(
+                    short, "main", "docs/ARCHITECTURE.md",
+                )
+
+            try:
+                registry_sha, registry_text = self._gw.fetch_file_sha(
+                    short, "main", "acm-registry.yaml",
+                )
+            except GitHubGatewayError as exc:
+                if exc.status != 404:
+                    raise
+                # Fresh project with no ACs yet — empty registry is the
+                # documented sentinel; AcmRegistry parsers handle "" safely.
+                registry_sha, registry_text = "", ""
         except GitHubGatewayError as exc:
             raise ProjectRepoError(
                 f"fetch_project_context failed for {project_repo}: {exc}",
