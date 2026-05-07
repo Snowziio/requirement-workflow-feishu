@@ -2078,6 +2078,12 @@ class CoordinatorRuntimeApp:
             if not req_id:
                 return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
             user_id = operator.get("operator_id", {}).get("user_id", "") if isinstance(operator, dict) else ""
+            requirement = self.service.requirements.get(req_id)
+            locked = self._locked_transition_card(
+                requirement,
+                original_trigger="design_submit_pending_review",
+                decision_label="✅ 已通过设计终审",
+            ) if requirement is not None else None
             try:
                 self.service.design_final_approve(req_id, approved_by=user_id)
             except ValueError as exc:
@@ -2092,13 +2098,22 @@ class CoordinatorRuntimeApp:
                     self._dispatch_transition_notifications(r, trigger="design_ready")
             except Exception:
                 LOGGER.exception("design ready card dispatch failed req=%s", req_id)
-            return 200, {"toast": {"type": "success", "content": "设计通过，Plan 阶段已解锁。"}}
+            return 200, {
+                "toast": {"type": "success", "content": "设计通过，Plan 阶段已解锁。"},
+                "card": self._lock_envelope(locked),
+            }
 
         if action_name == "design_final_reject":
             req_id = value.get("req_id", "")
             reason = value.get("reason", "")
             if not req_id:
                 return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            requirement = self.service.requirements.get(req_id)
+            locked = self._locked_transition_card(
+                requirement,
+                original_trigger="design_submit_pending_review",
+                decision_label="❌ 已退回设计",
+            ) if requirement is not None else None
             try:
                 self.service.design_final_reject(req_id, reason=reason)
             except ValueError as exc:
@@ -2112,7 +2127,10 @@ class CoordinatorRuntimeApp:
             except Exception:
                 LOGGER.exception("write REJECTED.md failed req=%s", req_id)
             self._save_state()
-            return 200, {"toast": {"type": "success", "content": "已打回设计。"}}
+            return 200, {
+                "toast": {"type": "success", "content": "已打回设计。"},
+                "card": self._lock_envelope(locked),
+            }
 
         if action_name == "bind_claude_design_project":
             project = value.get("project", "")
@@ -2171,7 +2189,26 @@ class CoordinatorRuntimeApp:
             toast_content = "已保存。本项目现在可以接收 needs_ui=true 的需求。"
             if resumed:
                 toast_content += f" 已为 {len(resumed)} 个卡住的需求恢复 design 派发。"
-            return 200, {"toast": {"type": "success", "content": toast_content}}
+            locked_form_card = {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "template": "green",
+                    "title": {"tag": "plain_text", "content": f"完成 Claude Design 绑定：{project}"},
+                },
+                "elements": [
+                    {
+                        "tag": "markdown",
+                        "content": (
+                            f"**操作结果**：✅ 已绑定 Claude Design Project\n"
+                            f"**URL**：{url}"
+                        ),
+                    },
+                ],
+            }
+            return 200, {
+                "toast": {"type": "success", "content": toast_content},
+                "card": self._lock_envelope(locked_form_card),
+            }
 
         if action_name == "submit_create_project":
             form = self._extract_project_form_payload(
@@ -2344,6 +2381,11 @@ class CoordinatorRuntimeApp:
             requirement = self.service.get_requirement(req_id)
             if requirement is None:
                 return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
+            locked = self._locked_transition_card(
+                requirement,
+                original_trigger="plan_submitted_pending_review",
+                decision_label="✅ 已通过 Plan",
+            )
             pending = requirement.pending_plan_review
             if pending:
                 plan_md_content = pending.get("plan_md_content", "")
@@ -2375,9 +2417,15 @@ class CoordinatorRuntimeApp:
             self._save_state()
             if requirement.plan_status == PlanStatus.AUTH_PENDING:
                 self._dispatch_transition_notifications(requirement, trigger="plan_auth_pending")
-                return 200, {"toast": {"type": "success", "content": "Plan 已通过，项目级上下文变更等待授权。"}}
+                return 200, {
+                    "toast": {"type": "success", "content": "Plan 已通过，项目级上下文变更等待授权。"},
+                    "card": self._lock_envelope(locked),
+                }
             self._dispatch_transition_notifications(requirement, trigger="plan_ready")
-            return 200, {"toast": {"type": "success", "content": "Plan 已通过并提交至 GitHub。"}}
+            return 200, {
+                "toast": {"type": "success", "content": "Plan 已通过并提交至 GitHub。"},
+                "card": self._lock_envelope(locked),
+            }
 
         if action_name == "authorize_plan_context_change":
             req_id = value.get("req_id", "")
@@ -2421,6 +2469,11 @@ class CoordinatorRuntimeApp:
                 return 200, {"toast": {"type": "error", "content": f"未知需求：{req_id}。"}}
             if not requirement.pending_plan_review:
                 return 200, {"toast": {"type": "error", "content": "无可驳回的 Plan 草稿。"}}
+            locked = self._locked_transition_card(
+                requirement,
+                original_trigger="plan_submitted_pending_review",
+                decision_label="❌ 已驳回 Plan 草稿",
+            )
             requirement.pending_plan_review = None
             requirement.plan_phase = PlanPhase.DECISIONS_IN_PROGRESS
             self._save_state()
@@ -2428,7 +2481,10 @@ class CoordinatorRuntimeApp:
                 self._dispatch_transition_notifications(requirement, trigger="plan_review_rejected")
             except Exception:
                 LOGGER.exception("plan_review_rejected notification failed req=%s", req_id)
-            return 200, {"toast": {"type": "success", "content": "已驳回 Plan 草稿，已通知 Plan Author 修改。"}}
+            return 200, {
+                "toast": {"type": "success", "content": "已驳回 Plan 草稿，已通知 Plan Author 修改。"},
+                "card": self._lock_envelope(locked),
+            }
 
         if action_name == "send_spec_author_start":
             req_id = value.get("req_id", "")
@@ -2496,6 +2552,13 @@ class CoordinatorRuntimeApp:
                 return 200, {"toast": {"type": "error", "content": "当前需求不处于人工确认阶段。"}}
 
             approved = action_name == "human_confirm_yes"
+            locked = self._locked_transition_card(
+                requirement,
+                original_trigger="ai_review_pass",
+                decision_label="✅ 已确认需求，进入正式审查"
+                if approved
+                else "❌ 已退回需求构造",
+            )
             requirement = self.service.handle_human_confirmation(requirement, approved=approved)
             self._sync_requirement_outputs(requirement)
             self._save_state()
@@ -2509,7 +2572,8 @@ class CoordinatorRuntimeApp:
                     "content": "人工确认已更新。"
                     if approved
                     else "已退回需求构造，可继续修改。",
-                }
+                },
+                "card": self._lock_envelope(locked),
             }
 
         if action_name in {"final_review_pass", "final_review_reject"}:
@@ -2525,6 +2589,13 @@ class CoordinatorRuntimeApp:
                 return 200, {"toast": {"type": "error", "content": "当前需求不处于正式审查阶段。"}}
 
             approved = action_name == "final_review_pass"
+            locked = self._locked_transition_card(
+                requirement,
+                original_trigger="human_confirmed",
+                decision_label="✅ 已通过正式审查"
+                if approved
+                else "❌ 已退回需求构造",
+            )
             if approved:
                 requirement = self.service.approve_requirement(requirement)
             else:
@@ -2543,7 +2614,8 @@ class CoordinatorRuntimeApp:
                     "content": "正式审查结论已更新。"
                     if approved
                     else "正式审查已退回，需求已回到构造阶段。",
-                }
+                },
+                "card": self._lock_envelope(locked),
             }
 
         return 200, {"toast": {"type": "info", "content": "未识别的卡片动作，已忽略。"}}
@@ -3480,6 +3552,62 @@ class CoordinatorRuntimeApp:
         "final_review_rejected",
         "spec_review_reject",
     }
+
+    # Audience to render when locking a card after click. Must match the trigger's
+    # original audience (per _CARD_TARGETS) so the "卡片类型" label stays correct
+    # in the locked card.
+    _LOCK_AUDIENCE_BY_TRIGGER: dict[str, str] = {
+        "ai_review_pass": "dm",
+        "human_confirmed": "group",
+        "plan_submitted_pending_review": "dm",
+        "plan_auth_pending": "dm",
+        "design_submit_pending_review": "group",
+    }
+
+    def _locked_transition_card(
+        self, requirement: Requirement, *,
+        original_trigger: str, decision_label: str,
+    ) -> dict[str, object] | None:
+        """Rebuild the original transition card with action buttons replaced by a decision note.
+
+        Called BEFORE the service mutation so the captured card text reflects
+        the pre-decision state (status / phase / iteration_round). Returned to
+        Feishu via P2CardActionTriggerResponse.card to lock the card in place.
+
+        Best-effort: if rebuilding the original card fails for any reason
+        (missing settings on a partially-mocked test app, missing fields,
+        gateway probe error), we return None so the caller silently skips
+        the lock — the action itself still completes.
+        """
+        audience = self._LOCK_AUDIENCE_BY_TRIGGER.get(original_trigger, "dm")
+        try:
+            base = self._build_transition_notification_card(
+                requirement, trigger=original_trigger, audience=audience,
+            )
+        except Exception:
+            LOGGER.debug(
+                "_locked_transition_card: card rebuild failed req=%s trigger=%s",
+                getattr(requirement, "req_id", "?"), original_trigger,
+                exc_info=True,
+            )
+            return None
+        if base is None:
+            return None
+        elements = list(base.get("elements", []) or [])
+        if elements and isinstance(elements[-1], dict) and elements[-1].get("tag") == "column_set":
+            elements = elements[:-1]
+        elements.append({
+            "tag": "markdown",
+            "content": f"**操作结果**：{decision_label}",
+        })
+        return {**base, "elements": elements}
+
+    @staticmethod
+    def _lock_envelope(card: dict[str, object] | None) -> dict[str, object] | None:
+        """Wrap a card dict in the SDK's CallBackCard `{type, data}` envelope."""
+        if card is None:
+            return None
+        return {"type": "raw", "data": card}
 
     def _build_change_block(
         self, *, trigger: str, reason: str, result: str,
