@@ -330,3 +330,132 @@ def test_dispatch_respects_missing_project_group_id():
     r = _req(project_group_id="")
     app._dispatch_transition_notifications(r, trigger="spec_locked")
     app.gateway.send_card.assert_not_called()
+
+
+# ────────────────────────────────────────────────────────────────
+# P3: button phrasing unification, iteration_round, collapsible reason
+# ────────────────────────────────────────────────────────────────
+
+
+def _button_labels(buttons: list[dict[str, object]]) -> list[str]:
+    out: list[str] = []
+    for b in buttons:
+        text = b.get("text") or {}
+        if isinstance(text, dict):
+            content = text.get("content")
+            if isinstance(content, str):
+                out.append(content)
+    return out
+
+
+def test_plan_submit_pending_review_uses_unified_button_phrasing():
+    """通过 -> 确认通过, to match human_confirmed checkpoint phrasing."""
+    app = _app()
+    r = _req(plan_doc_url="u")
+    buttons = app._build_transition_notification_actions(
+        r, trigger="plan_submitted_pending_review",
+    )
+    labels = _button_labels(buttons)
+    assert "确认通过" in labels
+    assert "需要修改" in labels
+    assert "通过" not in labels  # bare "通过" gone in favor of "确认通过"
+
+
+def test_design_submit_pending_review_uses_unified_button_phrasing():
+    """通过（D-DESIGN-2） / 打回 -> 确认通过 / 需要修改.
+
+    Drops the debug-style (D-DESIGN-2) suffix and aligns the reject label
+    with the rest of the system.
+    """
+    app = _app()
+    r = _req(design_status=DesignStatus.SUBMIT_PENDING_REVIEW)
+    buttons = app._build_transition_notification_actions(
+        r, trigger="design_submit_pending_review",
+    )
+    labels = _button_labels(buttons)
+    assert "确认通过" in labels
+    assert "需要修改" in labels
+    assert all("D-DESIGN-2" not in lab for lab in labels)
+    assert "打回" not in labels
+
+
+def test_card_header_block_includes_iteration_round_when_positive():
+    """current_round > 0 should surface as a 轮次 row in the header info markdown."""
+    app = _app()
+    r = _req(current_round=3, spec_review_summary="x", spec_document_url="u")
+    card = app._build_transition_notification_card(r, trigger="spec_submitted")
+    assert card is not None
+    header_md = card["elements"][0]
+    assert isinstance(header_md, dict)
+    assert header_md.get("tag") == "markdown"
+    assert "轮次" in header_md.get("content", "")
+    assert "3" in header_md.get("content", "")
+
+
+def test_card_header_block_omits_iteration_round_when_zero():
+    """current_round=0 means the req hasn't entered any review round yet —
+    the row is meaningless and should be hidden."""
+    app = _app()
+    r = _req(current_round=0, spec_review_summary="x", spec_document_url="u")
+    card = app._build_transition_notification_card(r, trigger="spec_submitted")
+    assert card is not None
+    header_md = card["elements"][0]
+    assert isinstance(header_md, dict)
+    assert "轮次" not in header_md.get("content", "")
+
+
+def _find_collapsible_panel(card: dict[str, object]) -> dict[str, object] | None:
+    for element in card.get("elements", []) or []:
+        if isinstance(element, dict) and element.get("tag") == "collapsible_panel":
+            return element
+    return None
+
+
+def _flatten_text(node: object) -> str:
+    """Recursively concatenate any 'content' strings nested under a card node."""
+    out: list[str] = []
+    if isinstance(node, dict):
+        c = node.get("content")
+        if isinstance(c, str):
+            out.append(c)
+        for v in node.values():
+            out.append(_flatten_text(v))
+    elif isinstance(node, list):
+        for v in node:
+            out.append(_flatten_text(v))
+    return " ".join(s for s in out if s)
+
+
+def test_ai_review_reject_card_folds_review_summary_in_collapsible_panel():
+    """Long latest_review_summary becomes a collapsible_panel so the card is
+    glanceable but the full feedback is still one click away."""
+    app = _app()
+    long_review = (
+        "## 6+2+1 审查\n"
+        "- O1 输入: 字段类型不明确，需补 type/required\n"
+        "- O3 输出: 缺成功 schema\n"
+        "- O6 非功能: 性能 SLA 缺失\n" * 3
+    )
+    r = _req(latest_review_summary=long_review)
+    card = app._build_transition_notification_card(r, trigger="ai_review_reject")
+    assert card is not None
+    panel = _find_collapsible_panel(card)
+    assert panel is not None, "ai_review_reject card must include a collapsible_panel"
+    # Panel's nested content carries the full review text
+    assert "O1 输入" in _flatten_text(panel)
+    assert "O6 非功能" in _flatten_text(panel)
+
+
+def test_non_reject_card_does_not_fold_reason_in_collapsible_panel():
+    """Non-reject triggers (e.g. final_review_passed) don't have long reject
+    feedback to fold; their reason stays inline as plain markdown."""
+    app = _app()
+    r = _req(
+        latest_review_summary="passed",
+        plan_doc_url="u",
+        design_status=DesignStatus.READY,
+        design_precondition_met=True,
+    )
+    card = app._build_transition_notification_card(r, trigger="final_review_passed")
+    assert card is not None
+    assert _find_collapsible_panel(card) is None

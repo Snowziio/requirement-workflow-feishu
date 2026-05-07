@@ -3408,20 +3408,23 @@ class CoordinatorRuntimeApp:
 
         audience_label = "项目群公告" if audience == "group" else "个人待办"
 
-        elements: list[dict[str, object]] = [
-            {
-                "tag": "markdown",
-                "content": (
-                    f"**卡片类型**：{audience_label}\n"
-                    f"**需求**：{requirement.req_id}\n"
-                    f"**状态**：{requirement.status.value}\n"
-                    f"**阶段**：{requirement.current_phase}\n"
-                    f"**接手角色**：{requirement.current_role_label}"
-                ),
-            },
-            {"tag": "hr"},
-            {"tag": "markdown", "content": f"**本次变更**\n{reason}\n\n{result}"},
+        header_lines = [
+            f"**卡片类型**：{audience_label}",
+            f"**需求**：{requirement.req_id}",
+            f"**状态**：{requirement.status.value}",
         ]
+        if requirement.current_round and requirement.current_round > 0:
+            header_lines.append(f"**轮次**：{requirement.current_round}")
+        header_lines.extend([
+            f"**阶段**：{requirement.current_phase}",
+            f"**接手角色**：{requirement.current_role_label}",
+        ])
+
+        elements: list[dict[str, object]] = [
+            {"tag": "markdown", "content": "\n".join(header_lines)},
+            {"tag": "hr"},
+        ]
+        elements.extend(self._build_change_block(trigger=trigger, reason=reason, result=result))
 
         links: list[str] = []
         if requirement.document_url:
@@ -3470,6 +3473,37 @@ class CoordinatorRuntimeApp:
             },
             "elements": elements,
         }
+
+    _REJECT_TRIGGERS_WITH_REVIEW_DETAIL: set[str] = {
+        "ai_review_reject",
+        "human_rejected",
+        "final_review_rejected",
+        "spec_review_reject",
+    }
+
+    def _build_change_block(
+        self, *, trigger: str, reason: str, result: str,
+    ) -> list[dict[str, object]]:
+        """Render the '本次变更' section.
+
+        For reject triggers the reason text is the full review summary, which
+        can be long. Fold it inside a collapsible_panel so the card stays
+        glanceable while the full feedback is one click away. Non-reject
+        triggers render reason+result inline as before.
+        """
+        if trigger in self._REJECT_TRIGGERS_WITH_REVIEW_DETAIL and reason and reason != "暂无":
+            return [
+                {"tag": "markdown", "content": f"**本次变更**\n{result}"},
+                {
+                    "tag": "collapsible_panel",
+                    "expanded": False,
+                    "header": {
+                        "title": {"tag": "markdown", "content": "查看完整审查意见"},
+                    },
+                    "elements": [{"tag": "markdown", "content": reason}],
+                },
+            ]
+        return [{"tag": "markdown", "content": f"**本次变更**\n{reason}\n\n{result}"}]
 
     def _build_transition_notification_text(self, requirement: Requirement, *, trigger: str) -> str:
         _, title, reason, result, next_action = self._transition_notification_content(requirement, trigger=trigger)
@@ -3571,7 +3605,7 @@ class CoordinatorRuntimeApp:
             return [
                 {
                     "tag": "button",
-                    "text": {"tag": "plain_text", "content": "通过"},
+                    "text": {"tag": "plain_text", "content": "确认通过"},
                     "type": "primary",
                     "value": {"action": "approve_plan_submit", "req_id": requirement.req_id},
                 },
@@ -3610,13 +3644,13 @@ class CoordinatorRuntimeApp:
             return [
                 {
                     "tag": "button",
-                    "text": {"tag": "plain_text", "content": "通过（D-DESIGN-2）"},
+                    "text": {"tag": "plain_text", "content": "确认通过"},
                     "type": "primary",
                     "value": {"action": "design_final_approve", "req_id": requirement.req_id},
                 },
                 {
                     "tag": "button",
-                    "text": {"tag": "plain_text", "content": "打回"},
+                    "text": {"tag": "plain_text", "content": "需要修改"},
                     "type": "default",
                     "value": {"action": "design_final_reject", "req_id": requirement.req_id},
                 },
