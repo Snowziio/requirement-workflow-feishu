@@ -289,7 +289,8 @@ def test_design_final_reject_response_includes_locked_card(app):
 def test_submit_create_requirement_response_includes_locked_card(app):
     """新建需求 form's 提交 button locks the card on success — without this,
     users see no visual change after submit and may double-click, producing
-    duplicate requirements."""
+    duplicate requirements. The lock card must echo every submitted field so
+    the user keeps a receipt of what they sent."""
     _seed_requirement(app)
     cfg = app.service.project_configs["P"]
     from dataclasses import replace
@@ -308,7 +309,10 @@ def test_submit_create_requirement_response_includes_locked_card(app):
                 "project": "P",
                 "name": "测试需求",
                 "summary": "做个东西",
-                "needs_ui": "no",
+                "background_links": "https://wiki/x",
+                "priority": "P1",
+                "expected_due_date": "2026-06-01",
+                "needs_ui": "yes",
             },
         },
     }
@@ -323,14 +327,20 @@ def test_submit_create_requirement_response_includes_locked_card(app):
     assert locked.get("schema") == "2.0", "lock card must match v2 schema of original"
     assert not _has_action_buttons(locked)
     text = _flat_text(locked)
-    assert "已受理" in text or "已提交" in text
-    # Surface what was submitted so the user sees it landed
+    # Every submitted field must round-trip onto the lock card
+    assert "已受理" in text
     assert "测试需求" in text
+    assert "做个东西" in text
+    assert "https://wiki/x" in text
+    assert "P1" in text
+    assert "2026-06-01" in text
+    # needs_ui rendered as 是/否, not the raw "yes"/"no"
+    assert "是" in text
 
 
 def test_submit_create_project_response_includes_locked_card(app):
-    """新建项目 form's 提交 button locks the card on success and shows the
-    project being bootstrapped."""
+    """新建项目 form's 提交 button locks the card on success. The lock card
+    must echo every submitted optional field so the user has a receipt."""
     # Wire a stub bootstrap service so the handler doesn't NoOp.
     app._project_bootstrap_service = MagicMock()
     app._run_project_bootstrap_async = MagicMock()
@@ -344,6 +354,9 @@ def test_submit_create_project_response_includes_locked_card(app):
                 "project": "newproj",
                 "category": "enterprise-app",
                 "display_name": "New Project",
+                "brief": "做个 demo",
+                "github_username": "alice",
+                "tech_stack": "FastAPI + SQLite",
             },
         },
     }
@@ -355,8 +368,15 @@ def test_submit_create_project_response_includes_locked_card(app):
     assert locked.get("schema") == "2.0", "lock card must match v2 schema of original"
     assert not _has_action_buttons(locked)
     text = _flat_text(locked)
+    # Required fields
     assert "newproj" in text
+    assert "enterprise-app" in text
     assert "Bootstrap" in text or "创建中" in text or "受理" in text
+    # Optional fields must round-trip too
+    assert "New Project" in text
+    assert "做个 demo" in text
+    assert "alice" in text
+    assert "FastAPI + SQLite" in text
 
 
 def _seed_plan_auth_pending(app, r: Requirement) -> Requirement:

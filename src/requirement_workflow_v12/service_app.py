@@ -2262,6 +2262,22 @@ class CoordinatorRuntimeApp:
             verb = "续跑" if resume else "创建"
             # Original creation card is v2 (schema 2.0 + body.elements); the
             # locked replacement MUST match schema or Feishu rejects the update.
+            # Surface every submitted field so the user has a receipt of what
+            # was sent — without this they had to remember it.
+            lock_lines = [
+                f"**操作结果**：⏳ Bootstrap {verb}中（约 30s）",
+                f"**项目代号**：{req.project}",
+                f"**类目**：{req.category}",
+            ]
+            if form.display_name:
+                lock_lines.append(f"**显示名**：{form.display_name}")
+            if form.brief:
+                lock_lines.append(f"**简述**：{form.brief}")
+            if form.github_username:
+                lock_lines.append(f"**GitHub 用户名**：{form.github_username}")
+            if form.tech_stack:
+                lock_lines.append(f"**技术栈备注**：{form.tech_stack}")
+            lock_lines.append("完成后会在创建群发消息通知。")
             locked_form_card = {
                 "schema": "2.0",
                 "config": {"wide_screen_mode": True},
@@ -2271,15 +2287,7 @@ class CoordinatorRuntimeApp:
                 },
                 "body": {
                     "elements": [
-                        {
-                            "tag": "markdown",
-                            "content": (
-                                f"**操作结果**：⏳ Bootstrap {verb}中（约 30s）\n"
-                                f"**项目代号**：{req.project}\n"
-                                f"**类目**：{req.category}\n"
-                                f"完成后会在创建群发消息通知。"
-                            ),
-                        },
+                        {"tag": "markdown", "content": "\n".join(lock_lines)},
                     ],
                 },
             }
@@ -2304,6 +2312,27 @@ class CoordinatorRuntimeApp:
             ).start()
             # Original creation card is v2 (schema 2.0 + body.elements); the
             # locked replacement MUST match schema or Feishu rejects the update.
+            # Surface every submitted field so the user has a receipt of what
+            # was sent — optional fields (priority/due_date/etc.) only render
+            # when non-empty so the card stays compact when the form was
+            # filled minimally.
+            lock_lines = [
+                f"**操作结果**：✅ 已受理",
+                f"**需求 ID**：{req_id}",
+                f"**项目**：{form_payload.project}",
+                f"**需求名**：{form_payload.name}",
+                f"**简述**：{form_payload.summary}",
+            ]
+            if form_payload.background_links:
+                lock_lines.append(f"**背景材料**：{form_payload.background_links}")
+            if form_payload.priority:
+                lock_lines.append(f"**优先级**：{form_payload.priority}")
+            if form_payload.expected_due_date:
+                lock_lines.append(f"**期望完成时间**：{form_payload.expected_due_date}")
+            lock_lines.append(
+                f"**需要 UI 设计**：{'是' if form_payload.needs_ui else '否'}"
+            )
+            lock_lines.append("正在同步文档、表格和项目群，稍后会推送启动卡。")
             locked_form_card = {
                 "schema": "2.0",
                 "config": {"wide_screen_mode": True},
@@ -2313,16 +2342,7 @@ class CoordinatorRuntimeApp:
                 },
                 "body": {
                     "elements": [
-                        {
-                            "tag": "markdown",
-                            "content": (
-                                f"**操作结果**：✅ 已受理\n"
-                                f"**需求 ID**：{req_id}\n"
-                                f"**项目**：{form_payload.project}\n"
-                                f"**需求名**：{form_payload.name}\n"
-                                f"正在同步文档、表格和项目群，稍后会推送启动卡。"
-                            ),
-                        },
+                        {"tag": "markdown", "content": "\n".join(lock_lines)},
                     ],
                 },
             }
