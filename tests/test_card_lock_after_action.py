@@ -346,6 +346,73 @@ def test_submit_create_project_response_includes_locked_card(app):
     assert "Bootstrap" in text or "创建中" in text or "受理" in text
 
 
+def _seed_plan_auth_pending(app, r: Requirement) -> Requirement:
+    """Lift `r` into plan_status=AUTH_PENDING with a pending_plan_draft."""
+    app.service.plan_start(r.req_id)
+    r.plan_status = PlanStatus.AUTH_PENDING
+    r.pending_plan_draft = {
+        "plan_md_content": "# plan\n",
+        "project_context_change": {"summary": "add x", "changes": []},
+        "summary": "s",
+    }
+    return r
+
+
+def test_authorize_plan_context_change_response_includes_locked_card(app):
+    """plan_auth_pending card's "授权项目级变更" decision must lock after click."""
+    r = _seed_plan_auth_pending(app, _seed_requirement(app))
+
+    # Stub the hook's tool to prevent real GitHub commit
+    class _StubTools:
+        def commit_plan_artifacts(self, artifacts):
+            from requirement_workflow_v12.project_repo import PlanCommitResult
+            return PlanCommitResult(
+                commit_sha="https://github.com/o/r/pull/2",
+                branch="main",
+                plan_md_path="docs/specs/REQ-LOCK-1/plan.md",
+                architecture_updated=True,
+            )
+    app.service.configure_plan_hooks(tools=_StubTools())
+
+    payload = {
+        "operator": {"open_id": "ou_alice", "user_id": "ou_alice"},
+        "context": {"open_chat_id": "oc_dm", "open_message_id": "om_auth"},
+        "action": {
+            "value": {"action": "authorize_plan_context_change", "req_id": r.req_id},
+            "form_value": {},
+        },
+    }
+
+    status, resp = app._handle_card_action_payload(payload)
+
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "success"
+    locked = (resp.get("card") or {}).get("data") or {}
+    assert not _has_action_buttons(locked)
+    assert "操作结果" in _flat_text(locked)
+
+
+def test_reject_plan_context_change_response_includes_locked_card(app):
+    """plan_auth_pending card's "驳回变更" must also lock."""
+    r = _seed_plan_auth_pending(app, _seed_requirement(app))
+
+    payload = {
+        "operator": {"open_id": "ou_alice", "user_id": "ou_alice"},
+        "context": {"open_chat_id": "oc_dm", "open_message_id": "om_rej"},
+        "action": {
+            "value": {"action": "reject_plan_context_change", "req_id": r.req_id, "reason": "太宽"},
+            "form_value": {},
+        },
+    }
+
+    status, resp = app._handle_card_action_payload(payload)
+
+    assert status == 200
+    locked = (resp.get("card") or {}).get("data") or {}
+    assert not _has_action_buttons(locked)
+    assert "操作结果" in _flat_text(locked)
+
+
 def test_bind_claude_design_project_response_includes_locked_card(app):
     r = _seed_requirement(app)
     payload = {

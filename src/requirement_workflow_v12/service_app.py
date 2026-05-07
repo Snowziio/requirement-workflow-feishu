@@ -2479,6 +2479,12 @@ class CoordinatorRuntimeApp:
                 opid = operator.get("operator_id", {})
                 operator_id = opid.get("user_id", "") if isinstance(opid, dict) else ""
                 operator_id = operator_id or str(operator.get("open_id", ""))
+            pre_req = self.service.requirements.get(req_id)
+            locked = self._locked_transition_card(
+                pre_req,
+                original_trigger="plan_auth_pending",
+                decision_label="✅ 已授权项目级上下文变更",
+            ) if pre_req is not None else None
             try:
                 requirement = self.service.plan_authorize(req_id, authorized_by=operator_id)
             except (KeyError, ValueError) as exc:
@@ -2488,20 +2494,32 @@ class CoordinatorRuntimeApp:
                 return 200, {"toast": {"type": "error", "content": f"授权失败：{exc}"}}
             self._save_state()
             self._dispatch_transition_notifications(requirement, trigger="plan_ready")
-            return 200, {"toast": {"type": "success", "content": "项目级上下文变更已授权，Plan 已提交至 GitHub。"}}
+            return 200, {
+                "toast": {"type": "success", "content": "项目级上下文变更已授权，Plan 已提交至 GitHub。"},
+                "card": self._lock_envelope(locked),
+            }
 
         if action_name == "reject_plan_context_change":
             req_id = value.get("req_id", "")
             reason = value.get("reason", "")
             if not req_id:
                 return 200, {"toast": {"type": "error", "content": "缺少需求ID。"}}
+            pre_req = self.service.requirements.get(req_id)
+            locked = self._locked_transition_card(
+                pre_req,
+                original_trigger="plan_auth_pending",
+                decision_label="❌ 已驳回项目级上下文变更",
+            ) if pre_req is not None else None
             try:
                 requirement = self.service.plan_authorization_reject(req_id, reason=reason)
             except (KeyError, ValueError) as exc:
                 return 200, {"toast": {"type": "error", "content": str(exc)}}
             self._save_state()
             self._dispatch_transition_notifications(requirement, trigger="plan_review_rejected")
-            return 200, {"toast": {"type": "success", "content": "已驳回项目级上下文变更。"}}
+            return 200, {
+                "toast": {"type": "success", "content": "已驳回项目级上下文变更。"},
+                "card": self._lock_envelope(locked),
+            }
 
         if action_name == "reject_plan_submit":
             req_id = value.get("req_id", "")
