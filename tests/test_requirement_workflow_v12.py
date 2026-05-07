@@ -396,9 +396,12 @@ class RequirementWorkflowV12Test(unittest.TestCase):
             self.assertIn("card", payload)
             self.assertEqual(payload["card"]["type"], "raw")
             locked_data = payload["card"]["data"]
-            self.assertIn("elements", locked_data)
+            # Original creation card is schema 2.0; replacement must match,
+            # so elements live under body.elements (not top-level elements).
+            self.assertEqual(locked_data.get("schema"), "2.0")
+            elements = locked_data["body"]["elements"]
             flat = " ".join(
-                el.get("content", "") for el in locked_data["elements"]
+                el.get("content", "") for el in elements
                 if isinstance(el, dict)
             )
             self.assertIn("创建卡刷新测试", flat)

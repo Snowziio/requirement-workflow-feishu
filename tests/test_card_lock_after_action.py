@@ -79,9 +79,18 @@ def _payload(action: str, req_id: str, **extra) -> dict:
     }
 
 
+def _all_elements(card: dict) -> list:
+    """Return the flat element list, accommodating v1 (`elements`) and v2 (`body.elements`)."""
+    elements = card.get("elements")
+    if elements is None:
+        body = card.get("body") or {}
+        elements = body.get("elements")
+    return elements or []
+
+
 def _has_action_buttons(card: dict) -> bool:
     """True iff the card contains any callback button (column_set with button)."""
-    for el in card.get("elements", []) or []:
+    for el in _all_elements(card):
         if not isinstance(el, dict):
             continue
         if el.get("tag") == "column_set":
@@ -309,6 +318,9 @@ def test_submit_create_requirement_response_includes_locked_card(app):
     assert status == 200
     assert resp.get("toast", {}).get("type") == "success"
     locked = (resp.get("card") or {}).get("data") or {}
+    # Original card is schema 2.0 — replacement MUST match or Feishu rejects
+    # the update with a parse-error toast.
+    assert locked.get("schema") == "2.0", "lock card must match v2 schema of original"
     assert not _has_action_buttons(locked)
     text = _flat_text(locked)
     assert "已受理" in text or "已提交" in text
@@ -340,6 +352,7 @@ def test_submit_create_project_response_includes_locked_card(app):
 
     assert status == 200
     locked = (resp.get("card") or {}).get("data") or {}
+    assert locked.get("schema") == "2.0", "lock card must match v2 schema of original"
     assert not _has_action_buttons(locked)
     text = _flat_text(locked)
     assert "newproj" in text

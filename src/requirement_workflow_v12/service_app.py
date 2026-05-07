@@ -2260,23 +2260,28 @@ class CoordinatorRuntimeApp:
                 daemon=True,
             ).start()
             verb = "续跑" if resume else "创建"
+            # Original creation card is v2 (schema 2.0 + body.elements); the
+            # locked replacement MUST match schema or Feishu rejects the update.
             locked_form_card = {
+                "schema": "2.0",
                 "config": {"wide_screen_mode": True},
                 "header": {
                     "template": "blue",
                     "title": {"tag": "plain_text", "content": f"新建项目：{req.project}"},
                 },
-                "elements": [
-                    {
-                        "tag": "markdown",
-                        "content": (
-                            f"**操作结果**：⏳ Bootstrap {verb}中（约 30s）\n"
-                            f"**项目代号**：{req.project}\n"
-                            f"**类目**：{req.category}\n"
-                            f"完成后会在创建群发消息通知。"
-                        ),
-                    },
-                ],
+                "body": {
+                    "elements": [
+                        {
+                            "tag": "markdown",
+                            "content": (
+                                f"**操作结果**：⏳ Bootstrap {verb}中（约 30s）\n"
+                                f"**项目代号**：{req.project}\n"
+                                f"**类目**：{req.category}\n"
+                                f"完成后会在创建群发消息通知。"
+                            ),
+                        },
+                    ],
+                },
             }
             return 200, {
                 "toast": {"type": "info", "content": f"{verb}中：{req.project}（Bootstrap 约需 30s，完成后会发群消息）"},
@@ -2297,24 +2302,29 @@ class CoordinatorRuntimeApp:
                 args=(request, req_id),
                 daemon=True,
             ).start()
+            # Original creation card is v2 (schema 2.0 + body.elements); the
+            # locked replacement MUST match schema or Feishu rejects the update.
             locked_form_card = {
+                "schema": "2.0",
                 "config": {"wide_screen_mode": True},
                 "header": {
                     "template": "green",
                     "title": {"tag": "plain_text", "content": f"新建需求：{form_payload.name}"},
                 },
-                "elements": [
-                    {
-                        "tag": "markdown",
-                        "content": (
-                            f"**操作结果**：✅ 已受理\n"
-                            f"**需求 ID**：{req_id}\n"
-                            f"**项目**：{form_payload.project}\n"
-                            f"**需求名**：{form_payload.name}\n"
-                            f"正在同步文档、表格和项目群，稍后会推送启动卡。"
-                        ),
-                    },
-                ],
+                "body": {
+                    "elements": [
+                        {
+                            "tag": "markdown",
+                            "content": (
+                                f"**操作结果**：✅ 已受理\n"
+                                f"**需求 ID**：{req_id}\n"
+                                f"**项目**：{form_payload.project}\n"
+                                f"**需求名**：{form_payload.name}\n"
+                                f"正在同步文档、表格和项目群，稍后会推送启动卡。"
+                            ),
+                        },
+                    ],
+                },
             }
             return 200, {
                 "toast": {"type": "success", "content": "需求已受理，正在同步文档、表格和项目群。"},
