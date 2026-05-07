@@ -277,6 +277,75 @@ def test_design_final_reject_response_includes_locked_card(app):
 # ── 5. bind_claude_design_project (form save) ──────────────────
 
 
+def test_submit_create_requirement_response_includes_locked_card(app):
+    """新建需求 form's 提交 button locks the card on success — without this,
+    users see no visual change after submit and may double-click, producing
+    duplicate requirements."""
+    _seed_requirement(app)
+    cfg = app.service.project_configs["P"]
+    from dataclasses import replace
+    app.service.project_configs["P"] = replace(cfg, bootstrap_status="PROVISIONED")
+
+    # Stub the threaded provisioning + creation so the test doesn't actually
+    # mutate state or sleep. We only care about the response shape.
+    app._provision_requirement_after_creation = MagicMock()
+
+    payload = {
+        "operator": {"open_id": "ou_alice", "name": "Alice"},
+        "context": {"open_chat_id": "oc_creation_group", "open_message_id": "om_form"},
+        "action": {
+            "value": {"action": "submit_create_requirement"},
+            "form_value": {
+                "project": "P",
+                "name": "测试需求",
+                "summary": "做个东西",
+                "needs_ui": "no",
+            },
+        },
+    }
+
+    status, resp = app._handle_card_action_payload(payload)
+
+    assert status == 200
+    assert resp.get("toast", {}).get("type") == "success"
+    locked = (resp.get("card") or {}).get("data") or {}
+    assert not _has_action_buttons(locked)
+    text = _flat_text(locked)
+    assert "已受理" in text or "已提交" in text
+    # Surface what was submitted so the user sees it landed
+    assert "测试需求" in text
+
+
+def test_submit_create_project_response_includes_locked_card(app):
+    """新建项目 form's 提交 button locks the card on success and shows the
+    project being bootstrapped."""
+    # Wire a stub bootstrap service so the handler doesn't NoOp.
+    app._project_bootstrap_service = MagicMock()
+    app._run_project_bootstrap_async = MagicMock()
+
+    payload = {
+        "operator": {"open_id": "ou_alice", "name": "Alice"},
+        "context": {"open_chat_id": "oc_creation_group", "open_message_id": "om_proj"},
+        "action": {
+            "value": {"action": "submit_create_project"},
+            "form_value": {
+                "project": "newproj",
+                "category": "enterprise-app",
+                "display_name": "New Project",
+            },
+        },
+    }
+
+    status, resp = app._handle_card_action_payload(payload)
+
+    assert status == 200
+    locked = (resp.get("card") or {}).get("data") or {}
+    assert not _has_action_buttons(locked)
+    text = _flat_text(locked)
+    assert "newproj" in text
+    assert "Bootstrap" in text or "创建中" in text or "受理" in text
+
+
 def test_bind_claude_design_project_response_includes_locked_card(app):
     r = _seed_requirement(app)
     payload = {

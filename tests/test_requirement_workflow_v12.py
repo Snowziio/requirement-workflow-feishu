@@ -390,7 +390,18 @@ class RequirementWorkflowV12Test(unittest.TestCase):
 
             self.assertEqual(status, 200)
             self.assertEqual(payload["toast"]["type"], "success")
-            self.assertNotIn("card", payload)
+            # P2: callback now also returns a locked card so the form replaces
+            # itself with a "已受理" panel, preventing double-submits. The card
+            # is built synchronously from form data — no I/O, still fast.
+            self.assertIn("card", payload)
+            self.assertEqual(payload["card"]["type"], "raw")
+            locked_data = payload["card"]["data"]
+            self.assertIn("elements", locked_data)
+            flat = " ".join(
+                el.get("content", "") for el in locked_data["elements"]
+                if isinstance(el, dict)
+            )
+            self.assertIn("创建卡刷新测试", flat)
 
     def test_openclaw_author_turn_callback_rejects_missing_signature(self) -> None:
         class FakeGateway:
